@@ -1,0 +1,14 @@
+{
+  "name": "pi-bifrost",
+  "version": "0.1.0",
+  "description": "Pi extension: Bifrost AI gateway provider",
+  "keywords": ["pi-package"],
+  "license": "MIT",
+  "pi": {
+    "extensions": ["./index.ts"]
+  },
+  "peerDependencies": {
+    "@earendil-works/pi-coding-agent": "*",
+    "@earendil-works/pi-ai": "*"
+  }
+}
