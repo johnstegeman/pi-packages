@@ -1,0 +1,18 @@
+{
+  "name": "pi-ayu",
+  "version": "0.1.0",
+  "description": "Ayu color scheme for Pi (Day, Dusk, and Dark variants)",
+  "license": "MIT",
+  "keywords": [
+    "pi-package",
+    "theme"
+  ],
+  "peerDependencies": {
+    "@earendil-works/pi-coding-agent": "*"
+  },
+  "pi": {
+    "themes": [
+      "./themes"
+    ]
+  }
+}

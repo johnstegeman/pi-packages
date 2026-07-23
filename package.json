@@ -1,0 +1,15 @@
+{
+  "name": "pi-packages",
+  "version": "0.1.0",
+  "description": "Personal collection of pi extensions and themes",
+  "keywords": ["pi-package"],
+  "license": "MIT",
+  "peerDependencies": {
+    "@earendil-works/pi-coding-agent": "*",
+    "@earendil-works/pi-ai": "*"
+  },
+  "pi": {
+    "extensions": ["./packages/bifrost/index.ts"],
+    "themes": ["./packages/ayu/themes"]
+  }
+}
