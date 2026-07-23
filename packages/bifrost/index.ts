@@ -134,6 +134,17 @@ function detectReasoning(m: BifrostModel): boolean {
 
 type PiModelInput = ("text" | "image")[];
 
+/**
+ * Bifrost exposes Anthropic models under the `anthropic/<model>` id
+ * namespace (e.g. `anthropic/claude-opus-4-6`). For these, request Anthropic-
+ * style `cache_control` markers on the system prompt, last tool definition,
+ * and last user/assistant/tool-result content — mirroring the automatic
+ * prompt-caching behavior of pi's native Anthropic provider.
+ */
+function isBifrostAnthropicModel(id: string): boolean {
+  return id.startsWith("anthropic/");
+}
+
 function toProviderModel(m: BifrostModel) {
   const inputModalities = m.architecture?.input_modalities ?? [];
   const input: PiModelInput = inputModalities.includes("image")
@@ -153,6 +164,9 @@ function toProviderModel(m: BifrostModel) {
     },
     contextWindow: m.context_length ?? 128_000,
     maxTokens: m.max_output_tokens ?? m.top_provider?.max_completion_tokens ?? 4_096,
+    ...(isBifrostAnthropicModel(m.id)
+      ? { compat: { cacheControlFormat: "anthropic" as const } }
+      : {}),
   };
 }
 
