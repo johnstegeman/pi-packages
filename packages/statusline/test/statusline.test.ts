@@ -11,7 +11,7 @@ import {
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import test from "node:test";
+import test, { after, before } from "node:test";
 import { visibleWidth } from "@earendil-works/pi-tui";
 import { ayuExtensionSeparator, renderAyuSegments, renderAyuStatusline } from "../presets/ayu.js";
 import type { RenderSegment } from "../presets/types.js";
@@ -42,6 +42,27 @@ import { createMockContext, createMockPi } from "./support.js";
 
 const EMPTY_STATUS_ALIASES: ExtensionStatusIconAliasMap = new Map();
 void EMPTY_STATUS_ALIASES;
+
+// Isolate every test in this file from the developer's real
+// ~/.pi/agent/pi-statusline.json (or legacy pi-statusline-settings.json).
+// Without this, statusline(mock.pi) reads getAgentDir() unmodified and picks
+// up whatever segment visibility / extension icon settings happen to be
+// configured on the machine running the tests, causing environment-dependent
+// failures (and, if an assertion throws before footer.dispose(), a leaked
+// setInterval that hangs the test process).
+const previousSuiteAgentDir = process.env.PI_CODING_AGENT_DIR;
+let suiteAgentDir: string;
+
+before(() => {
+	suiteAgentDir = mkdtempSync(join(tmpdir(), "pi-statusline-test-suite-agent-"));
+	process.env.PI_CODING_AGENT_DIR = suiteAgentDir;
+});
+
+after(() => {
+	if (previousSuiteAgentDir === undefined) delete process.env.PI_CODING_AGENT_DIR;
+	else process.env.PI_CODING_AGENT_DIR = previousSuiteAgentDir;
+	rmSync(suiteAgentDir, { recursive: true, force: true });
+});
 
 async function emit(
 	events: ReadonlyMap<string, Array<(...args: unknown[]) => unknown>>,

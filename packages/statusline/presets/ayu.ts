@@ -51,7 +51,7 @@ function joinAyuSegments(segments: RenderSegment[]): string {
 		const colors = getAyuBlockColors(block.name);
 		const previous =
 			index === 0 ? undefined : getAyuBlockColors(blocks[index - 1]?.name ?? "header");
-		if (previous) line += ansiStyle("", { fg: previous.bg, bg: colors.bg });
+		if (previous) line += ansiStyle("\ue0b4", { fg: previous.bg, bg: colors.bg });
 		line += ansiStyle(formatAyuBlockText(block), colors);
 	}
 
