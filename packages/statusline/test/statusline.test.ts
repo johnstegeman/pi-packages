@@ -13,6 +13,8 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
 import { visibleWidth } from "@earendil-works/pi-tui";
+import { ayuExtensionSeparator, renderAyuSegments, renderAyuStatusline } from "../presets/ayu.js";
+import type { RenderSegment } from "../presets/types.js";
 import { consumeStatuslineSettingsNotice } from "../src/settings.js";
 import type { ExtensionStatusIconAliasMap } from "../src/statusline.js";
 import statusline, {
@@ -927,4 +929,127 @@ test("statusline compact formatting helpers", () => {
 	assert.equal(shortenModel("gpt-5.3-codex-latest"), "gpt 5.3-codex");
 	assert.equal(npmPackageName("npm:@narumitw/pi-goal@0.4.1"), "@narumitw/pi-goal");
 	assert.equal(npmPackageName("npm:typescript@latest"), "typescript");
+});
+
+test("ayu preset renders the ░▒▓ lead,  powerline joins, and block text in Ayu Dark colors", () => {
+	const segments: RenderSegment[] = [
+		{ name: "brand", text: "π", color: "accent", block: "header", emphasis: true },
+		{ name: "model", text: "🤖 sonnet", color: "accent", block: "header" },
+		{ name: "cwd", text: "📁 repo", color: "accent", block: "directory" },
+		{ name: "branch", text: "🌿 main", color: "accent", block: "git" },
+		{ name: "tools", text: "⚙ read", color: "accent", block: "runtime" },
+		{ name: "cost", text: "💸 $0.001", color: "accent", block: "meter" },
+	];
+
+	const rendered = renderAyuSegments(segments);
+
+	// Lead glyph in Ayu accent (#ffb454).
+	assert.match(rendered, /░▒▓/u);
+	assert.ok(rendered.includes("\u001b[38;2;255;180;84m"), "lead uses Ayu accent #ffb454");
+
+	//  powerline separator between blocks.
+	assert.ok(rendered.includes(""), "powerline  glyph present between blocks");
+
+	// Header block text and directory block text appear.
+	assert.ok(rendered.includes("π"));
+	assert.ok(rendered.includes("🤖 sonnet"));
+	assert.ok(rendered.includes("📁 repo"));
+
+	// Directory block bg is Ayu blue (#39bae6). ansiStyle combines fg+bg into a single
+	// escape ("\u001b[38;2;R;G;B;48;2;R;G;Bm"), so the bg code is embedded after a `;`
+	// rather than immediately following `\u001b[`.
+	assert.ok(
+		rendered.includes(";48;2;57;186;230m"),
+		"directory block bg uses Ayu blue #39bae6",
+	);
+});
+
+test("ayu render truncates to the requested width", () => {
+	const segments: RenderSegment[] = [
+		{ name: "brand", text: "π", color: "accent", block: "header", emphasis: true },
+		{ name: "model", text: "🤖 a-very-long-model-name-that-exceeds-width", color: "accent", block: "header" },
+	];
+
+	const rendered = renderAyuStatusline(20, segments);
+	assert.ok(visibleWidth(rendered) <= 20, `width ${visibleWidth(rendered)} <= 20`);
+});
+
+test("ayuExtensionSeparator returns • colored with the Ayu border hex", () => {
+	const theme = { fg: (_c: string, t: string) => t } as never;
+	const sep = ayuExtensionSeparator(theme);
+
+	assert.ok(sep.includes(" • "), "separator text is • surrounded by spaces");
+	// #212b3d -> RGB 33,43,61 -> ANSI truecolor fg code 38;2;33;43;61
+	assert.ok(
+		sep.includes("\u001b[38;2;33;43;61m"),
+		"separator color is Ayu border #212b3d",
+	);
+});
+
+test("preset selection honors PI_STATUSLINE_PRESET and defaults to ayu", async () => {
+	const previousPreset = process.env.PI_STATUSLINE_PRESET;
+	const mock = createMockPi();
+	(mock.rawPi as typeof mock.rawPi & { exec: () => Promise<ExecResult> }).exec = async () => ({
+		stdout: "## main\n",
+		stderr: "",
+		code: 0,
+		killed: false,
+	});
+
+	const renderForPreset = async (preset: string | undefined) => {
+		if (preset === undefined) delete process.env.PI_STATUSLINE_PRESET;
+		else process.env.PI_STATUSLINE_PRESET = preset;
+
+		statusline(mock.pi);
+		const context = createMockContext({ mode: "tui" });
+		await emit(mock.events, "session_start", {}, context.ctx);
+
+		const footerFactory = context.footer as (
+			tui: { requestRender(): void },
+			theme: { fg(_color: string, text: string): string; bold(text: string): string },
+			footerData: {
+				getGitBranch(): string | null;
+				getExtensionStatuses(): ReadonlyMap<string, string>;
+				onBranchChange(callback: () => void): () => void;
+			},
+		) => { render(width: number): string[]; dispose(): void };
+		const footer = footerFactory(
+			{ requestRender() {} },
+			{ fg: (_color, text) => text, bold: (text) => text },
+			{
+				getGitBranch: () => "main",
+				getExtensionStatuses: () => new Map(),
+				onBranchChange: () => () => undefined,
+			},
+		);
+		const out = footer.render(200).join("\n");
+		footer.dispose();
+		return out;
+	};
+
+	try {
+		// Unset env -> ayu (default) -> powerline lead present.
+		const ayuDefault = await renderForPreset(undefined);
+		assert.match(ayuDefault, /░▒▓/u);
+
+		// Explicit ayu -> same.
+		const ayuExplicit = await renderForPreset("ayu");
+		assert.match(ayuExplicit, /░▒▓/u);
+
+		// Explicit tokyo-night -> powerline lead present (tokyo-night also uses ░▒▓).
+		const tokyo = await renderForPreset("tokyo-night");
+		assert.match(tokyo, /░▒▓/u);
+
+		// classic -> no powerline lead; uses • separators.
+		const classic = await renderForPreset("classic");
+		assert.equal(classic.includes("░▒▓"), false);
+		assert.ok(classic.includes("•"));
+
+		// Invalid value -> falls back to ayu default.
+		const garbage = await renderForPreset("garbage");
+		assert.match(garbage, /░▒▓/u);
+	} finally {
+		if (previousPreset === undefined) delete process.env.PI_STATUSLINE_PRESET;
+		else process.env.PI_STATUSLINE_PRESET = previousPreset;
+	}
 });
