@@ -962,6 +962,12 @@ test("ayu preset renders the ░▒▓ lead,  powerline joins, and block text in
 		rendered.includes(";48;2;57;186;230m"),
 		"directory block bg uses Ayu blue #39bae6",
 	);
+
+	// Line finishes with the rounded powerline cap (mirrors tokyo-night's finish).
+	assert.ok(
+		rendered.endsWith("\ue0b4\u001b[0m"),
+		"line ends with the rounded powerline cap glyph",
+	);
 });
 
 test("ayu render truncates to the requested width", () => {

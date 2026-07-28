@@ -56,7 +56,7 @@ function joinAyuSegments(segments: RenderSegment[]): string {
 	}
 
 	const lastBlock = blocks.at(-1);
-	if (lastBlock) line += ansiFg(getAyuBlockColors(lastBlock.name).bg, "");
+	if (lastBlock) line += ansiFg(getAyuBlockColors(lastBlock.name).bg, "\ue0b4");
 
 	return line;
 }
