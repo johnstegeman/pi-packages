@@ -71,16 +71,18 @@ After editing the local source, run `/reload` inside Pi to apply the changes.
 `pi-inline-statusline` supports presets through the `PI_STATUSLINE_PRESET` environment variable:
 
 ```bash
+PI_STATUSLINE_PRESET=ayu pi
 PI_STATUSLINE_PRESET=tokyo-night pi
 PI_STATUSLINE_PRESET=classic pi
 ```
 
 Supported presets:
 
-- `tokyo-night` — the default, inspired by the [Starship Tokyo Night preset](https://starship.rs/presets/tokyo-night), using `░▒▓` / `` powerline blocks and the Tokyo Night color ramp.
-- `classic` — a compact Pi-themed statusline with left-aligned `•` separators.
+- `ayu` — the default, an Ayu Dark color scheme using `░▒▓` / `` powerline blocks. Colors are drawn from this monorepo's `ayu` theme (Ayu Dark variant). Self-contained: it does not read the active pi theme.
+- `tokyo-night` — inspired by the [Starship Tokyo Night preset](https://starship.rs/presets/tokyo-night), using `░▒▓` / `` powerline blocks and the Tokyo Night color ramp.
+- `classic` — a compact Pi-themed statusline with left-aligned `•` separators. This is the only preset that reads the active pi theme's semantic colors.
 
-Unset or invalid values fall back to `tokyo-night`. Both presets keep the same emoji-labeled information.
+Unset or invalid values fall back to `ayu`. All presets keep the same emoji-labeled information.
 
 ## Extension Status Icons
 
