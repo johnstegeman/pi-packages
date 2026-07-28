@@ -6,8 +6,9 @@ Personal monorepo of [pi](https://pi.dev) extensions and themes.
 
 ```
 packages/
-├── ayu/       – Ayu color scheme for Pi (Day, Dusk, Dark)
-└── bifrost/   – Custom provider for Bifrost AI gateway
+├── ayu/         – Ayu color scheme for Pi (Day, Dusk, Dark)
+├── bifrost/     – Custom provider for Bifrost AI gateway
+└── statusline/  – Single-line statusline footer with ayu/tokyo-night/classic presets
 ```
 
 ## Install from GitHub
