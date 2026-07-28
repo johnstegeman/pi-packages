@@ -16,7 +16,7 @@ import type { SegmentName, StatuslineConfig, StatuslinePresetName } from "../pre
 
 const SETTINGS_FILE = "pi-statusline.json";
 const LEGACY_SETTINGS_FILE = "pi-statusline-settings.json";
-const DEFAULT_PRESET: StatuslinePresetName = "tokyo-night";
+const DEFAULT_PRESET: StatuslinePresetName = "ayu";
 // Canonical segment list: display order and the full set of names /statusline accepts.
 const ALL_SEGMENTS: SegmentName[] = [
 	"brand",
@@ -245,7 +245,7 @@ function canonicalSegments(segments: SegmentName[]): SegmentName[] {
 
 function readStatuslinePreset(): StatuslinePresetName {
 	const value = process.env.PI_STATUSLINE_PRESET?.trim().toLowerCase();
-	return value === "classic" || value === "tokyo-night" ? value : DEFAULT_PRESET;
+	return value === "classic" || value === "tokyo-night" || value === "ayu" ? value : DEFAULT_PRESET;
 }
 
 function formatError(error: unknown) {
