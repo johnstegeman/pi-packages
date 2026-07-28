@@ -3,6 +3,7 @@ import { dirname, isAbsolute, join, resolve } from "node:path";
 import process from "node:process";
 import type { Theme, ThemeColor } from "@earendil-works/pi-coding-agent";
 import { wrapTextWithAnsi } from "@earendil-works/pi-tui";
+import { ayuExtensionSeparator } from "../presets/ayu.js";
 import { classicExtensionSeparator } from "../presets/classic.js";
 import { tokyoNightExtensionSeparator } from "../presets/tokyo-night.js";
 import type { StatuslineConfig, StatuslinePresetName } from "../presets/types.js";
@@ -31,9 +32,14 @@ const DEFAULT_EXTENSION_STATUS_ICONS: Record<string, string> = {
 };
 
 function extensionStatusSeparator(presetName: StatuslinePresetName, theme: Theme): string {
-	return presetName === "classic"
-		? classicExtensionSeparator(theme)
-		: tokyoNightExtensionSeparator(theme);
+	switch (presetName) {
+		case "classic":
+			return classicExtensionSeparator(theme);
+		case "tokyo-night":
+			return tokyoNightExtensionSeparator(theme);
+		case "ayu":
+			return ayuExtensionSeparator(theme);
+	}
 }
 
 export function formatExtensionStatuses(

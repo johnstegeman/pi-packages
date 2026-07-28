@@ -15,7 +15,7 @@ export type SegmentName =
 	| "ttft"
 	| "speed";
 
-export type StatuslinePresetName = "classic" | "tokyo-night";
+export type StatuslinePresetName = "classic" | "tokyo-night" | "ayu";
 export type BlockName = "header" | "directory" | "git" | "runtime" | "meter";
 export type PaletteName = "ocean" | "sunset" | "forest" | "candy" | "neon" | "mono";
 export type Density = "compact" | "cozy";

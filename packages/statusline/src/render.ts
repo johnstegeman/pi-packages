@@ -7,6 +7,7 @@ import type {
 	ThemeColor,
 } from "@earendil-works/pi-coding-agent";
 import { truncateToWidth, visibleWidth } from "@earendil-works/pi-tui";
+import { renderAyuSegments } from "../presets/ayu.js";
 import { renderClassicSegments } from "../presets/classic.js";
 import { renderTokyoNightSegments } from "../presets/tokyo-night.js";
 import type {
@@ -140,6 +141,8 @@ function renderSegments(segments: RenderSegment[], theme: Theme, config: Statusl
 			return renderClassicSegments(segments, theme, config);
 		case "tokyo-night":
 			return renderTokyoNightSegments(segments);
+		case "ayu":
+			return renderAyuSegments(segments);
 	}
 }
 
