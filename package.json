@@ -9,7 +9,10 @@
     "@earendil-works/pi-ai": "*"
   },
   "pi": {
-    "extensions": ["./packages/bifrost/index.ts"],
+    "extensions": [
+      "./packages/bifrost/index.ts",
+      "./packages/statusline/src/statusline.ts"
+    ],
     "themes": ["./packages/ayu/themes"]
   }
 }
