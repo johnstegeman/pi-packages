@@ -14,7 +14,7 @@ import type {
 	RenderSegment,
 	SegmentName,
 	StatuslineConfig,
-	TokyoNightBlockName,
+	BlockName,
 } from "../presets/types.js";
 import {
 	type ExtensionStatusRuntime,
@@ -216,7 +216,7 @@ function segment(
 	name: SegmentName,
 	text: string,
 	color: ThemeColor,
-	block: TokyoNightBlockName,
+	block: BlockName,
 	emphasis = false,
 ): RenderSegment {
 	return { name, text, color, block, emphasis };

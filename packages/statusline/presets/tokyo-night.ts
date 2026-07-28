@@ -1,10 +1,10 @@
 import type { Theme } from "@earendil-works/pi-coding-agent";
 import { truncateToWidth } from "@earendil-works/pi-tui";
 import { ansiFg, ansiStyle } from "./ansi.js";
-import type { RenderSegment, TokyoNightBlockName } from "./types.js";
+import type { BlockName, RenderSegment } from "./types.js";
 
-interface TokyoNightBlock {
-	name: TokyoNightBlockName;
+interface Block {
+	name: BlockName;
 	segments: RenderSegment[];
 }
 
@@ -23,7 +23,7 @@ const TOKYO_NIGHT_COLORS = {
 	extensionSeparator: "#394260",
 } as const satisfies Record<string, string | BlockColors>;
 
-const TOKYO_NIGHT_BLOCK_ORDER: TokyoNightBlockName[] = [
+const TOKYO_NIGHT_BLOCK_ORDER: BlockName[] = [
 	"header",
 	"directory",
 	"git",
@@ -61,8 +61,8 @@ function joinTokyoNightSegments(segments: RenderSegment[]): string {
 	return line;
 }
 
-function groupTokyoNightBlocks(segments: RenderSegment[]): TokyoNightBlock[] {
-	const blocksByName = new Map<TokyoNightBlockName, RenderSegment[]>();
+function groupTokyoNightBlocks(segments: RenderSegment[]): Block[] {
+	const blocksByName = new Map<BlockName, RenderSegment[]>();
 	for (const segment of segments) {
 		const blockSegments = blocksByName.get(segment.block) ?? [];
 		blockSegments.push(segment);
@@ -75,7 +75,7 @@ function groupTokyoNightBlocks(segments: RenderSegment[]): TokyoNightBlock[] {
 	});
 }
 
-function formatTokyoNightBlockText(block: TokyoNightBlock): string {
+function formatTokyoNightBlockText(block: Block): string {
 	return ` ${block.segments.map(formatTokyoNightSegmentText).join(" ")}`;
 }
 
@@ -83,6 +83,6 @@ function formatTokyoNightSegmentText(segment: RenderSegment): string {
 	return segment.emphasis ? `\u001b[1m${segment.text}\u001b[22m` : segment.text;
 }
 
-function getTokyoNightBlockColors(block: TokyoNightBlockName): BlockColors {
+function getTokyoNightBlockColors(block: BlockName): BlockColors {
 	return TOKYO_NIGHT_COLORS[block];
 }
