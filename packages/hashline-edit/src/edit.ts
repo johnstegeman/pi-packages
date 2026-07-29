@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { readFile, realpath, rename, rm, stat, writeFile } from "node:fs/promises";
+import { chmod, readFile, realpath, rename, rm, stat, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { type ToolDefinition, withFileMutationQueue } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
@@ -97,6 +97,15 @@ function resolveEntry(
 	hashes: string[],
 	config: HashlineConfig,
 ): ResolvedOp {
+	const opCount = [entry.replace, entry.append, entry.prepend, entry.replace_text].filter(
+		(op) => op != null,
+	).length;
+	if (opCount > 1) {
+		throw badRefError(
+			"(entry)",
+			"edit entry must specify exactly one of replace, append, prepend, replace_text; multiple were provided",
+		);
+	}
 	if (entry.replace) {
 		const startIndex = resolveAnchorToIndex(entry.replace.pos, lines, hashes);
 		const endIndex = entry.replace.end
@@ -176,6 +185,9 @@ async function writeAtomic(absolutePath: string, content: string): Promise<void>
 	const dir = dirname(realPath);
 	const tempPath = join(dir, `.hashline-edit-${randomUUID()}.tmp`);
 	await writeFile(tempPath, content, "utf-8");
+	if (stats) {
+		await chmod(tempPath, stats.mode).catch(() => undefined);
+	}
 	try {
 		await rename(tempPath, realPath);
 	} catch (error) {

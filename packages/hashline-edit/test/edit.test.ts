@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import {
+	chmodSync,
 	linkSync,
 	lstatSync,
 	mkdtempSync,
@@ -451,4 +452,49 @@ test("a multi-op batch with a line-count shift returns anchors matching the fina
 		text.includes(expectedAnchorText),
 		`expected anchor block:\n${expectedAnchorText}\n\nactual response:\n${text}`,
 	);
+});
+
+test("an edit entry with multiple op fields set is rejected with no partial write", async () => {
+	const filePath = join(dir, "t.ts");
+	const original = "one\ntwo\nthree";
+	writeFileSync(filePath, original);
+	const anchor = anchorFor(original, 1);
+	const tool = createHashlineEditTool(defaultConfig);
+	await assert.rejects(
+		() =>
+			tool.execute(
+				"call-1",
+				{
+					path: filePath,
+					edits: [
+						{
+							replace: { pos: anchor, lines: ["ONE"] },
+							append: { pos: anchor, lines: ["INSERTED"] },
+						},
+					],
+				},
+				undefined,
+				undefined,
+				{ cwd: dir } as never,
+			),
+		/exactly one/i,
+	);
+	assert.equal(readFileSync(filePath, "utf-8"), original);
+});
+
+test("an edit through the temp+rename path preserves the original file's permissions", async () => {
+	const filePath = join(dir, "u.ts");
+	const original = "one\ntwo\nthree";
+	writeFileSync(filePath, original);
+	chmodSync(filePath, 0o600);
+	const anchor = anchorFor(original, 1);
+	const tool = createHashlineEditTool(defaultConfig);
+	await tool.execute(
+		"call-1",
+		{ path: filePath, edits: [{ replace: { pos: anchor, lines: ["ONE"] } }] },
+		undefined,
+		undefined,
+		{ cwd: dir } as never,
+	);
+	assert.equal(statSync(filePath).mode & 0o777, 0o600);
 });
