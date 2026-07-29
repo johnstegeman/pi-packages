@@ -22,7 +22,7 @@
 - No persistent state, no caching, no stale-anchor recovery. Every `read`/`edit`/`grep` call reads the file fresh and recomputes hashes fresh.
 - Config file: `~/.pi/agent/hashline.json` (resolved via `getAgentDir()` from `@earendil-works/pi-coding-agent`), shape `{ "grep"?: boolean, "replaceText"?: boolean }`, defaults `{ grep: false, replaceText: true }`.
 - Package name: `pi-hashline-edit`, directory `packages/hashline-edit/`.
-- All imports of `@earendil-works/pi-coding-agent` and `@earendil-works/pi-ai` are peer dependencies (`"*"` range), never bundled.
+- All imports of `@earendil-works/pi-coding-agent`, `@earendil-works/pi-ai`, and `typebox` (used by Tasks 5-7 for tool parameter schemas via `Type.Object(...)`) are peer dependencies (`"*"` range) with a devDependency pin for local development, never bundled — matches pi's own package docs guidance that `typebox` is one of the core packages pi bundles for extensions.
 - `@earendil-works/pi-coding-agent`'s package `exports` map only exposes its top-level entry point — internal modules (`utils/mime.ts`, `core/tools/path-utils.ts`) are not importable. Path resolution and image-format sniffing must be self-implemented in this package (Tasks 3 and 6 respectively).
 - ESM relative imports use explicit `.js` extensions in source `.ts` files (NodeNext module resolution requires this), matching `packages/statusline`'s style.
 - Indent with tabs, double quotes, semicolons always — match `packages/statusline/biome.json` exactly.
@@ -73,13 +73,15 @@
 		"typecheck": "tsc --noEmit"
 	},
 	"peerDependencies": {
-		"@earendil-works/pi-coding-agent": "*"
+		"@earendil-works/pi-coding-agent": "*",
+		"typebox": "*"
 	},
 	"devDependencies": {
 		"@biomejs/biome": "2.5.3",
 		"@earendil-works/pi-coding-agent": "0.80.3",
 		"@types/node": "26.1.1",
 		"tsx": "4.20.6",
+		"typebox": "1.1.38",
 		"typescript": "6.0.3"
 	},
 	"repository": {
