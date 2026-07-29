@@ -1,10 +1,19 @@
 import assert from "node:assert/strict";
-import { lstatSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import {
+	linkSync,
+	lstatSync,
+	mkdtempSync,
+	readFileSync,
+	rmSync,
+	statSync,
+	symlinkSync,
+	writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test, { after, before } from "node:test";
 import { createHashlineEditTool } from "../src/edit.js";
-import { computeLineHashes } from "../src/hashline.js";
+import { computeLineHashes, formatAnchor } from "../src/hashline.js";
 
 let dir: string;
 
@@ -367,4 +376,79 @@ test("edit preserves a symlink, writing through to the real target", async () =>
 	);
 	assert.equal(readFileSync(realPath, "utf-8"), "ONE\ntwo");
 	assert.ok(lstatSync(linkPath).isSymbolicLink());
+});
+
+test("edit preserves a hard link, updating the shared inode visible from both paths", async () => {
+	const originalPath = join(dir, "real-r.ts");
+	const hardLinkPath = join(dir, "link-r.ts");
+	const original = "one\ntwo";
+	writeFileSync(originalPath, original);
+	linkSync(originalPath, hardLinkPath);
+	const inoBefore = statSync(originalPath).ino;
+	assert.equal(statSync(hardLinkPath).ino, inoBefore);
+
+	const anchor = anchorFor(original, 1);
+	const tool = createHashlineEditTool(defaultConfig);
+	await tool.execute(
+		"call-1",
+		{ path: originalPath, edits: [{ replace: { pos: anchor, lines: ["ONE"] } }] },
+		undefined,
+		undefined,
+		{ cwd: dir } as never,
+	);
+
+	// Edited via originalPath; the change must be visible through the other hard-linked path too.
+	assert.equal(readFileSync(originalPath, "utf-8"), "ONE\ntwo");
+	assert.equal(readFileSync(hardLinkPath, "utf-8"), "ONE\ntwo");
+
+	// The shared inode must be preserved, not replaced by a new file via rename.
+	const inoAfter = statSync(originalPath).ino;
+	assert.equal(statSync(hardLinkPath).ino, inoAfter);
+	assert.equal(inoAfter, inoBefore);
+});
+
+test("a multi-op batch with a line-count shift returns anchors matching the final file content", async () => {
+	const filePath = join(dir, "s.ts");
+	const original = "one\ntwo\nthree\nfour\nfive";
+	writeFileSync(filePath, original);
+	const anchor2 = anchorFor(original, 2);
+	const anchor5 = anchorFor(original, 5);
+	const tool = createHashlineEditTool(defaultConfig);
+	const result = await tool.execute(
+		"call-1",
+		{
+			path: filePath,
+			edits: [
+				// Turns 1 line into 2, shifting every subsequent line down by one.
+				{ replace: { pos: anchor2, lines: ["TWO-A", "TWO-B"] } },
+				{ replace: { pos: anchor5, lines: ["FIVE"] } },
+			],
+		},
+		undefined,
+		undefined,
+		{ cwd: dir } as never,
+	);
+
+	const finalContent = readFileSync(filePath, "utf-8");
+	assert.equal(finalContent, "one\nTWO-A\nTWO-B\nthree\nfour\nFIVE");
+
+	const finalLines = finalContent.split("\n");
+	const finalHashes = computeLineHashes(finalContent);
+	// Changed region: from the first edited line ( "TWO-A", now line 2) through the last edited
+	// line ("FIVE", shifted from line 5 to line 6 by the one-line insertion above it).
+	const expectedStart = 2;
+	const expectedEnd = 6;
+	const expectedAnchorText = finalLines
+		.slice(expectedStart - 1, expectedEnd)
+		.map(
+			(line, i) => `${formatAnchor(expectedStart + i, finalHashes[expectedStart - 1 + i])}:${line}`,
+		)
+		.join("\n");
+
+	const text = textOf(result);
+	assert.match(text, new RegExp(`--- Anchors ${expectedStart}-${expectedEnd} ---`));
+	assert.ok(
+		text.includes(expectedAnchorText),
+		`expected anchor block:\n${expectedAnchorText}\n\nactual response:\n${text}`,
+	);
 });
