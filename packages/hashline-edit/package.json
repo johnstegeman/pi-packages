@@ -1,0 +1,50 @@
+{
+	"name": "pi-hashline-edit",
+	"version": "0.1.0",
+	"description": "Hash-anchored read/edit tool override for the Pi coding agent.",
+	"type": "module",
+	"license": "MIT",
+	"private": false,
+	"keywords": [
+		"pi-package",
+		"pi-extension",
+		"hashline",
+		"edit",
+		"read"
+	],
+	"files": [
+		"src",
+		"README.md",
+		"LICENSE"
+	],
+	"pi": {
+		"extensions": [
+			"./src/index.ts"
+		]
+	},
+	"scripts": {
+		"check": "biome check . && npm run typecheck && npm test",
+		"format": "biome check --write .",
+		"test": "node --import tsx --test test/*.test.ts",
+		"typecheck": "tsc --noEmit"
+	},
+	"peerDependencies": {
+		"@earendil-works/pi-coding-agent": "*",
+		"typebox": "*"
+	},
+	"devDependencies": {
+		"@biomejs/biome": "2.5.3",
+		"@earendil-works/pi-coding-agent": "0.80.3",
+		"@types/node": "26.1.1",
+		"tsx": "4.20.6",
+		"typebox": "1.1.38",
+		"typescript": "6.0.3"
+	},
+	"repository": {
+		"type": "git",
+		"url": "git+https://github.com/johnstegeman/pi-packages.git"
+	},
+	"publishConfig": {
+		"access": "public"
+	}
+}

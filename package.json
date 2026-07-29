@@ -11,7 +11,8 @@
   "pi": {
     "extensions": [
       "./packages/bifrost/index.ts",
-      "./packages/statusline/src/statusline.ts"
+      "./packages/statusline/src/statusline.ts",
+      "./packages/hashline-edit/src/index.ts"
     ],
     "themes": ["./packages/ayu/themes"]
   }
