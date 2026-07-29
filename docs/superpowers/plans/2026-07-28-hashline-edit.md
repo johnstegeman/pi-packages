@@ -101,11 +101,14 @@
 		"moduleResolution": "NodeNext",
 		"strict": true,
 		"noEmit": true,
-		"skipLibCheck": true
+		"skipLibCheck": true,
+		"types": ["node"]
 	},
 	"include": ["src/**/*.ts", "test/**/*.ts"]
 }
 ```
+
+Note the explicit `"types": ["node"]` (absent from `packages/statusline`'s tsconfig): with only `src/hashline.ts` in this task's compiled set — a file with zero external imports — TypeScript 6.0.3's automatic `@types/node` discovery does not activate, and `test/hashline.test.ts`'s `node:assert/strict`/`node:test` imports fail to resolve. `statusline` doesn't need this because its `src/settings.ts` imports `@earendil-works/pi-coding-agent`, which is enough to trigger automatic type acquisition. Once this package's later tasks add `@earendil-works/pi-coding-agent` imports (Task 4 `config.ts`, Task 6 `edit.ts`), the explicit `types` array remains harmless and correct either way.
 
 `packages/hashline-edit/biome.json`:
 ```json
