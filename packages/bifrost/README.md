@@ -69,7 +69,7 @@ The following fields are mapped from the Bifrost `/v1/models` response:
 | `cost.output` | `pricing.completion` × 1 000 000 |
 | `cost.cacheRead` | `pricing.input_cache_read` × 1 000 000 |
 | `cost.cacheWrite` | `pricing.input_cache_write` × 1 000 000 |
-| `reasoning` | non-zero `pricing.internal_reasoning`, or name patterns (`o1`, `o3`, `r1`, `thinking`, `reasoner`) |
+| `reasoning` | non-zero `pricing.internal_reasoning`, or model-family name patterns (OpenAI o1/o3/o4/gpt-5, Claude 4.x+/3.7, Gemini 2.5+/3.x, GLM, Kimi K2.5+, DeepSeek V3+/R1, MiniMax M2+, Grok 3+, Qwen3.5+, Magistral, etc. — excluding audio/image/embedding/moderation/frozen-chat-latest variants) |
 
 Bifrost pricing values are per-token USD strings; pi expects per-million-token
 USD numbers, so each value is multiplied by 1 000 000.
