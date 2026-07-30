@@ -114,22 +114,75 @@ function parsePrice(raw?: string): number {
 
 /**
  * Heuristically decide if a model supports extended thinking / reasoning.
- * Bifrost doesn't expose a dedicated flag, so we use two proxies:
- *   1. Non-zero internal_reasoning pricing
- *   2. Known naming patterns (o1, o3, r1, thinking, reasoner)
+ * Bifrost's /v1/models doesn't expose a dedicated flag or supported_parameters
+ * list, so we rely on two proxies:
+ *   1. Non-zero internal_reasoning pricing (strong, provider-reported signal)
+ *   2. Known model-family naming patterns (covers OpenAI o1/o3/o4/gpt-5,
+ *      Claude 4.x+/3.7, Gemini 2.5+/3.x, GLM, Kimi K2.5+, DeepSeek V3+/R1,
+ *      MiniMax M2+, Grok 3+, Qwen3.5+, Magistral, etc.)
+ *
+ * A small set of non-chat modalities (audio, image, embeddings, moderation,
+ * frozen "-chat-latest" snapshots, ...) are excluded up front since name
+ * patterns like "gpt-5" would otherwise false-positive on them.
  */
+const REASONING_EXCLUDE_PATTERNS = [
+  "embed",
+  "embedding",
+  "whisper",
+  "tts",
+  "transcribe",
+  "audio",
+  "image",
+  "imagen",
+  "moderation",
+  "davinci",
+  "babbage",
+  "aqa",
+  "veo",
+  "lyria",
+  "sora",
+  "chat-latest",
+  "instruct",
+];
+
+const REASONING_INCLUDE_PATTERNS: RegExp[] = [
+  /(^|[^a-z])o[1-9](-|$)/, // OpenAI o1/o3/o4 series
+  /gpt-5/, // GPT-5 family (reasoning by default; chat-latest excluded above)
+  /claude-(opus|sonnet|haiku|fable)-[4-9]/, // Claude 4.x+ (extended thinking)
+  /claude-3-7/, // Claude 3.7 (extended thinking)
+  /gemini-(2\.5|3(\.\d+)?)/, // Gemini 2.5+/3.x (thinking by default)
+  /gemini-(flash|pro)(-lite)?-latest/,
+  /deep-research/,
+  /computer-use/,
+  /robotics-er/,
+  /gemma-[3-9]/,
+  /\bglm-/, // Zhipu GLM (native reasoning)
+  /kimi-k(2\.[5-9]|[3-9])/, // Kimi K2.5+ / K3+
+  /kimi.*thinking/,
+  /deepseek-v[3-9]/, // DeepSeek V3.1+
+  /deepseek-r[1-9]/,
+  /\breasoner\b/,
+  /minimax-m[2-9]/, // MiniMax M2+
+  /grok-[3-9]/, // Grok 3+
+  /qwen3[p.]([5-9]|[1-9][0-9])/, // Qwen3.5+ thinking-capable
+  /magistral/, // Mistral reasoning line
+  /mistral-(medium|small)-3\.[2-9]/,
+  /\bthinking\b/,
+  /\breasoning\b/,
+];
+
 function detectReasoning(m: BifrostModel): boolean {
   if (m.pricing?.internal_reasoning && parseFloat(m.pricing.internal_reasoning) > 0) {
     return true;
   }
+
   const id = m.id.toLowerCase();
-  return (
-    id.includes("thinking") ||
-    id.includes("-o1") ||
-    id.includes("-o3") ||
-    id.includes("r1") ||
-    id.includes("reasoner")
-  );
+  const modelId = id.includes("/") ? id.slice(id.indexOf("/") + 1) : id;
+
+  if (REASONING_EXCLUDE_PATTERNS.some((p) => modelId.includes(p))) {
+    return false;
+  }
+  return REASONING_INCLUDE_PATTERNS.some((re) => re.test(modelId));
 }
 
 type PiModelInput = ("text" | "image")[];
