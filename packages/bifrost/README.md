@@ -73,3 +73,12 @@ The following fields are mapped from the Bifrost `/v1/models` response:
 
 Bifrost pricing values are per-token USD strings; pi expects per-million-token
 USD numbers, so each value is multiplied by 1 000 000.
+
+
+## Cost attribution
+
+Every request to the Bifrost gateway includes an `x-module-name` header set to
+`pi: <session-name>` (e.g. `pi: feature-add-x-module-name-header-for-bifrost`).
+This allows Bifrost to attribute token usage and cost to a specific pi session.
+The session name is read from pi's session metadata and updated automatically if
+it changes during a session.
