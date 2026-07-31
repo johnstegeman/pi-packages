@@ -386,3 +386,4 @@ export default async function (pi: ExtensionAPI) {
   pi.on("session_info_changed", (event) => {
     refreshSessionName(event.name);
   });
+}
