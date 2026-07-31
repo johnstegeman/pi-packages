@@ -226,15 +226,11 @@ function toProviderModel(m: BifrostModel) {
 async function fetchModels(
   gatewayUrl: string,
   virtualKey?: string,
-  sessionName?: string,
 ): Promise<ReturnType<typeof toProviderModel>[]> {
   const base = gatewayUrl.replace(/\/$/, "");
   const headers: Record<string, string> = {};
   if (virtualKey) {
     headers["Authorization"] = `Bearer ${virtualKey}`;
-  }
-  if (sessionName) {
-    headers["x-module-name"] = `pi: ${sessionName}`;
   }
 
   const res = await fetch(`${base}/v1/models`, { headers });
@@ -257,13 +253,10 @@ export default async function (pi: ExtensionAPI) {
 
   let currentUrl = config.gatewayUrl ?? "";
   let currentModels: ReturnType<typeof toProviderModel>[] = [];
-  // Not available until after extension loading completes (pi.getSessionName()
-  // is an action method), so start empty and pick it up in session_start.
-  let currentSessionName = "";
 
   if (currentUrl) {
     try {
-      currentModels = await fetchModels(currentUrl, config.virtualKey, currentSessionName);
+      currentModels = await fetchModels(currentUrl, config.virtualKey);
     } catch (err) {
       console.warn(
         `[pi-bifrost] Model discovery failed (${currentUrl}): ${
@@ -290,8 +283,6 @@ export default async function (pi: ExtensionAPI) {
       apiKey: "$BIFROST_VIRTUAL_KEY",
       // Sends: Authorization: Bearer <key>  (one of Bifrost's accepted headers)
       authHeader: true,
-      // Tag requests so Bifrost can attribute cost to this pi session.
-      headers: { "x-module-name": `pi: ${currentSessionName}` },
       api: "openai-completions",
       models: currentModels,
 
@@ -316,7 +307,7 @@ export default async function (pi: ExtensionAPI) {
           // pi has finished processing the login flow and stored the credentials.
           setImmediate(async () => {
             try {
-              currentModels = await fetchModels(url, key, currentSessionName);
+              currentModels = await fetchModels(url, key);
             } catch (err) {
               console.warn(
                 `[pi-bifrost] Model refresh after login failed: ${
@@ -357,35 +348,30 @@ export default async function (pi: ExtensionAPI) {
 
   register();
 
-  // ---- Session name tracking & re-registration ---------------------------
+  // ---- Per-session cost attribution ---------------------------------------
   //
-  // The session name (e.g. "feature-add-x-module-name-header-for-bifrost")
-  // is sent as `x-module-name: pi: <name>` on every bifrost request so that
-  // Bifrost can attribute cost to a specific pi session. Because the name may
-  // not be available when the factory runs (or may change mid-session), we
-  // re-register the provider whenever it changes.
+  // Every Bifrost request carries an `x-pi-session` header set to the
+  // current session's display name, so Bifrost can attribute cost to a
+  // specific pi session. The name is looked up live at request time (rather
+  // than cached), since it may only become available or change after the
+  // provider is registered.
 
-  function refreshSessionName(name: string | undefined): void {
-    const next = name ?? "";
-    if (next === currentSessionName) return;
-    currentSessionName = next;
-    pi.unregisterProvider("bifrost");
-    register();
-  }
+  pi.on("before_provider_headers", (event, ctx) => {
+    if (ctx.model?.provider !== "bifrost") return;
+    const name = pi.getSessionName();
+    if (name) {
+      event.headers["x-pi-session"] = name;
+    } else {
+      event.headers["x-pi-session"] = null;
+    }
+  });
 
   pi.on("session_start", async (_event, ctx) => {
-    // The session name may only become available after session start.
-    refreshSessionName(pi.getSessionName());
-
     if (!currentUrl) {
       ctx.ui.notify(
         "Bifrost: not configured. Run /login bifrost to set your gateway URL and virtual key.",
         "warning",
       );
     }
-  });
-
-  pi.on("session_info_changed", (event) => {
-    refreshSessionName(event.name);
   });
 }
