@@ -498,3 +498,76 @@ test("an edit through the temp+rename path preserves the original file's permiss
 	);
 	assert.equal(statSync(filePath).mode & 0o777, 0o600);
 });
+
+test("edits passed as a JSON string is coerced and applied", async () => {
+	const filePath = join(dir, "v.ts");
+	const original = "one\ntwo\nthree";
+	writeFileSync(filePath, original);
+	const anchor = anchorFor(original, 2);
+	const tool = createHashlineEditTool(defaultConfig);
+	// Simulate an agent passing edits as a JSON string instead of an array.
+	const editsString = JSON.stringify([{ replace: { pos: anchor, lines: ["TWO"] } }]);
+	await tool.execute(
+		"call-1",
+		{ path: filePath, edits: editsString as never },
+		undefined,
+		undefined,
+		{ cwd: dir } as never,
+	);
+	assert.equal(readFileSync(filePath, "utf-8"), "one\nTWO\nthree");
+});
+
+test("edits passed as a JSON string with literal newlines inside string values is coerced", async () => {
+	const filePath = join(dir, "w.ts");
+	const original = "one\ntwo\nthree";
+	writeFileSync(filePath, original);
+	const anchor = anchorFor(original, 2);
+	const tool = createHashlineEditTool(defaultConfig);
+	// Simulate an agent that emits raw newlines inside JSON string values —
+	// the exact artifact seen in real validation failures.
+	const editsString = `[{"replace": {"pos": "${anchor}", "lines": ["line-a\nline-b"]}}]`;
+	await tool.execute(
+		"call-1",
+		{ path: filePath, edits: editsString as never },
+		undefined,
+		undefined,
+		{ cwd: dir } as never,
+	);
+	assert.equal(readFileSync(filePath, "utf-8"), "one\nline-a\nline-b\nthree");
+});
+
+test("edits passed as an unparseable JSON string throws E_INVALID_ARGUMENT", async () => {
+	const filePath = join(dir, "x.ts");
+	writeFileSync(filePath, "one\ntwo");
+	const tool = createHashlineEditTool(defaultConfig);
+	await assert.rejects(
+		() =>
+			tool.execute(
+				"call-1",
+				{ path: filePath, edits: "not valid json {{{" as never },
+				undefined,
+				undefined,
+				{ cwd: dir } as never,
+			),
+		/E_INVALID_ARGUMENT/,
+	);
+	// File should be untouched.
+	assert.equal(readFileSync(filePath, "utf-8"), "one\ntwo");
+});
+
+test("edits passed as a JSON string that parses to a non-array throws E_INVALID_ARGUMENT", async () => {
+	const filePath = join(dir, "y.ts");
+	writeFileSync(filePath, "one\ntwo");
+	const tool = createHashlineEditTool(defaultConfig);
+	await assert.rejects(
+		() =>
+			tool.execute(
+				"call-1",
+				{ path: filePath, edits: JSON.stringify({ not: "an array" }) as never },
+				undefined,
+				undefined,
+				{ cwd: dir } as never,
+			),
+		/E_INVALID_ARGUMENT/,
+	);
+});

@@ -3,6 +3,7 @@ import test from "node:test";
 import {
 	badRefError,
 	HashlineError,
+	invalidArgumentError,
 	invalidPatchError,
 	multipleMatchesError,
 	noMatchError,
@@ -50,4 +51,12 @@ test("multipleMatchesError carries E_MULTIPLE_MATCHES code and count", () => {
 	assert.equal(err.code, "E_MULTIPLE_MATCHES");
 	assert.match(err.message, /^\[E_MULTIPLE_MATCHES\]/);
 	assert.match(err.message, /3/);
+});
+
+test("invalidArgumentError carries E_INVALID_ARGUMENT code", () => {
+	const err = invalidArgumentError("edits was passed as a JSON string");
+	assert.ok(err instanceof HashlineError);
+	assert.equal(err.code, "E_INVALID_ARGUMENT");
+	assert.match(err.message, /^\[E_INVALID_ARGUMENT\]/);
+	assert.match(err.message, /JSON string/);
 });

@@ -62,6 +62,13 @@ since the last `read`), the entire call fails with `[E_STALE_ANCHOR]` and no wri
 call `read` again for fresh anchors. A successful edit returns fresh anchors for the
 changed region so you can make a follow-up edit without a full re-read.
 
+> **Pass `edits` as an array of objects, not a JSON string.** Some models occasionally
+> stringify the `edits` parameter instead of passing a structured array. The tool will
+> attempt to parse a stringified `edits` transparently (including handling literal newlines
+> inside string values), but this is a fallback — always prefer passing a real array. If
+> parsing fails, the error `[E_INVALID_ARGUMENT]` is returned with guidance to resend
+> the array directly.
+
 ### `grep` (opt-in)
 
 Off by default. Enable in `~/.pi/agent/hashline.json`:
