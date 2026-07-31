@@ -148,12 +148,72 @@ function parseStringEdits(editsString: string): EditEntry[] {
 }
 
 /**
+ * Normalizes a single edit entry to repair common structural mistakes that some
+ * models make before schema validation runs. The key deformations handled:
+ *
+ * 1. **Op as bare array**: The model sends `append`/`prepend`/`replace` as an
+ *    array of lines instead of an object, e.g.
+ *    `{ pos: "3#Abc", append: ["line1", "line2"] }` instead of
+ *    `{ append: { pos: "3#Abc", lines: ["line1", "line2"] } }`.
+ *
+ * 2. **Anchor keys promoted to entry level**: The model puts `pos`/`anchor`/`end`
+ *    at the entry root instead of inside the op object, e.g.
+ *    `{ pos: "3#Abc", append: { lines: [...] } }` instead of
+ *    `{ append: { pos: "3#Abc", lines: [...] } }`.
+ *
+ * Both deformations can occur simultaneously. This function is idempotent:
+ * already-well-formed entries are returned unchanged.
+ */
+function normalizeEditEntry(entry: Record<string, unknown>): Record<string, unknown> {
+	const entryPos = typeof entry.pos === "string" ? entry.pos : undefined;
+	const entryAnchor = typeof entry.anchor === "string" ? entry.anchor : undefined;
+	const entryEnd = typeof entry.end === "string" ? entry.end : undefined;
+	const resolvedPos = entryPos ?? entryAnchor;
+
+	// If no anchor keys were promoted and no ops are bare arrays, nothing to do.
+	const hasPromotedAnchors = resolvedPos !== undefined || entryEnd !== undefined;
+	const hasFlatOp = ["replace", "append", "prepend"].some((k) => Array.isArray(entry[k]));
+	if (!hasPromotedAnchors && !hasFlatOp) return entry;
+
+	const result: Record<string, unknown> = {};
+	for (const key of Object.keys(entry)) {
+		if (key === "pos" || key === "anchor" || key === "end") continue;
+		result[key] = entry[key];
+	}
+
+	for (const opKey of ["replace", "append", "prepend"] as const) {
+		const op = result[opKey];
+		if (op == null) continue;
+
+		if (Array.isArray(op)) {
+			// Case 1: op is a bare array of lines — wrap it into an object.
+			const normalized: Record<string, unknown> = { lines: op };
+			if (resolvedPos !== undefined) normalized.pos = resolvedPos;
+			if (opKey === "replace" && entryEnd !== undefined) normalized.end = entryEnd;
+			result[opKey] = normalized;
+		} else if (typeof op === "object" && op !== null) {
+			// Case 2: op is already an object — inject missing anchor keys from the entry level.
+			const opObj = op as Record<string, unknown>;
+			if (opObj.pos == null && resolvedPos !== undefined) opObj.pos = resolvedPos;
+			if (opKey === "replace" && opObj.end == null && entryEnd !== undefined) {
+				opObj.end = entryEnd;
+			}
+		}
+	}
+
+	return result;
+}
+
+/**
  * Compatibility shim invoked by the framework before schema validation. Some
  * models (e.g. Opus 4.6, GLM-5.1) pass `edits` as a JSON string instead of an
  * array. This function detects that case and parses the string back into an
  * array so validation passes. If the string cannot be parsed, a clear error is
  * thrown so the agent gets actionable feedback instead of a generic
  * "edits.0: must be object" validation failure.
+ *
+ * Additionally, individual edit entries are normalized to repair flattened
+ * structures (e.g. `append` sent as a bare array with `pos` at the entry level).
  */
 function prepareEditArguments(args: unknown): { path: string; edits: EditEntry[] } {
 	if (!args || typeof args !== "object") {
@@ -161,9 +221,22 @@ function prepareEditArguments(args: unknown): { path: string; edits: EditEntry[]
 	}
 	const obj = args as Record<string, unknown>;
 	if (typeof obj.edits !== "string") {
+		if (Array.isArray(obj.edits)) {
+			obj.edits = (obj.edits as unknown[]).map((entry) =>
+				entry && typeof entry === "object"
+					? normalizeEditEntry(entry as Record<string, unknown>)
+					: entry,
+			);
+		}
 		return args as { path: string; edits: EditEntry[] };
 	}
-	return { ...obj, edits: parseStringEdits(obj.edits) } as { path: string; edits: EditEntry[] };
+	const parsed = parseStringEdits(obj.edits);
+	const normalized = parsed.map((entry) =>
+		entry && typeof entry === "object"
+			? normalizeEditEntry(entry as Record<string, unknown>)
+			: entry,
+	);
+	return { ...obj, edits: normalized } as { path: string; edits: EditEntry[] };
 }
 
 const HASHLINE_ANCHOR_PATTERN = /(?:^|\n)\s*\d+#[A-Za-z0-9_-]{3}:/;
@@ -317,7 +390,13 @@ export function createHashlineEditTool(
 		async execute(_toolCallId, { path, edits: rawEdits }, _signal, _onUpdate, ctx) {
 			// Defensive fallback: if edits arrived as a string (e.g. a direct call
 			// that bypassed prepareArguments), coerce it now.
-			const edits = typeof rawEdits === "string" ? parseStringEdits(rawEdits) : rawEdits;
+			let edits = typeof rawEdits === "string" ? parseStringEdits(rawEdits) : rawEdits;
+			// Defensive fallback: normalize flattened entries even if prepareArguments was bypassed.
+			edits = edits.map((entry) =>
+				entry && typeof entry === "object"
+					? (normalizeEditEntry(entry as Record<string, unknown>) as EditEntry)
+					: entry,
+			);
 			const absolutePath = resolvePathArg(path, ctx.cwd);
 			return withFileMutationQueue(absolutePath, async () => {
 				let buffer: Buffer;

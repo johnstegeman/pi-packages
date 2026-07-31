@@ -571,3 +571,136 @@ test("edits passed as a JSON string that parses to a non-array throws E_INVALID_
 		/E_INVALID_ARGUMENT/,
 	);
 });
+
+test("append sent as bare array with entry-level pos is normalized and applied", async () => {
+	const filePath = join(dir, "aa.ts");
+	const original = "one\ntwo\nthree";
+	writeFileSync(filePath, original);
+	const anchor = anchorFor(original, 1);
+	const tool = createHashlineEditTool(defaultConfig);
+	// Simulate a model that flattens: append is a bare array, pos is at entry level.
+	await tool.execute(
+		"call-1",
+		{
+			path: filePath,
+			edits: [{ pos: anchor, append: ["inserted"] } as never],
+		},
+		undefined,
+		undefined,
+		{ cwd: dir } as never,
+	);
+	assert.equal(readFileSync(filePath, "utf-8"), "one\ninserted\ntwo\nthree");
+});
+
+test("append sent as bare array with entry-level anchor alias is normalized and applied", async () => {
+	const filePath = join(dir, "ab.ts");
+	const original = "one\ntwo\nthree";
+	writeFileSync(filePath, original);
+	const anchor = anchorFor(original, 1);
+	const tool = createHashlineEditTool(defaultConfig);
+	// Some models use 'anchor' instead of 'pos' at the entry level.
+	await tool.execute(
+		"call-1",
+		{
+			path: filePath,
+			edits: [{ anchor, append: ["inserted"] } as never],
+		},
+		undefined,
+		undefined,
+		{ cwd: dir } as never,
+	);
+	assert.equal(readFileSync(filePath, "utf-8"), "one\ninserted\ntwo\nthree");
+});
+
+test("append sent as bare array with no pos is normalized to EOF append", async () => {
+	const filePath = join(dir, "ac.ts");
+	const original = "one\ntwo";
+	writeFileSync(filePath, original);
+	const tool = createHashlineEditTool(defaultConfig);
+	await tool.execute(
+		"call-1",
+		{
+			path: filePath,
+			edits: [{ append: ["three"] } as never],
+		},
+		undefined,
+		undefined,
+		{ cwd: dir } as never,
+	);
+	assert.equal(readFileSync(filePath, "utf-8"), "one\ntwo\nthree");
+});
+
+test("prepend sent as bare array with entry-level pos is normalized and applied", async () => {
+	const filePath = join(dir, "ad.ts");
+	const original = "one\ntwo\nthree";
+	writeFileSync(filePath, original);
+	const anchor = anchorFor(original, 2);
+	const tool = createHashlineEditTool(defaultConfig);
+	await tool.execute(
+		"call-1",
+		{
+			path: filePath,
+			edits: [{ pos: anchor, prepend: ["inserted"] } as never],
+		},
+		undefined,
+		undefined,
+		{ cwd: dir } as never,
+	);
+	assert.equal(readFileSync(filePath, "utf-8"), "one\ninserted\ntwo\nthree");
+});
+
+test("replace sent as bare array with entry-level pos and end is normalized and applied", async () => {
+	const filePath = join(dir, "ae.ts");
+	const original = "one\ntwo\nthree\nfour";
+	writeFileSync(filePath, original);
+	const startAnchor = anchorFor(original, 2);
+	const endAnchor = anchorFor(original, 3);
+	const tool = createHashlineEditTool(defaultConfig);
+	await tool.execute(
+		"call-1",
+		{
+			path: filePath,
+			edits: [{ pos: startAnchor, end: endAnchor, replace: ["TWO", "THREE"] } as never],
+		},
+		undefined,
+		undefined,
+		{ cwd: dir } as never,
+	);
+	assert.equal(readFileSync(filePath, "utf-8"), "one\nTWO\nTHREE\nfour");
+});
+
+test("pos at entry level with object op is injected into the op", async () => {
+	const filePath = join(dir, "af.ts");
+	const original = "one\ntwo\nthree";
+	writeFileSync(filePath, original);
+	const anchor = anchorFor(original, 1);
+	const tool = createHashlineEditTool(defaultConfig);
+	// The op object exists but is missing pos; pos is at the entry level instead.
+	await tool.execute(
+		"call-1",
+		{
+			path: filePath,
+			edits: [{ pos: anchor, append: { lines: ["inserted"] } } as never],
+		},
+		undefined,
+		undefined,
+		{ cwd: dir } as never,
+	);
+	assert.equal(readFileSync(filePath, "utf-8"), "one\ninserted\ntwo\nthree");
+});
+
+test("well-formed entries are not modified by normalization", async () => {
+	const filePath = join(dir, "ag.ts");
+	const original = "one\ntwo\nthree";
+	writeFileSync(filePath, original);
+	const anchor = anchorFor(original, 2);
+	const tool = createHashlineEditTool(defaultConfig);
+	await tool.execute(
+		"call-1",
+		{ path: filePath, edits: [{ replace: { pos: anchor, lines: ["TWO"] } }] },
+		undefined,
+		undefined,
+		{ cwd: dir } as never,
+	);
+	assert.equal(readFileSync(filePath, "utf-8"), "one\nTWO\nthree");
+});
