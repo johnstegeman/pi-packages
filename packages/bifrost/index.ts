@@ -358,12 +358,7 @@ export default async function (pi: ExtensionAPI) {
 
   pi.on("before_provider_headers", (event, ctx) => {
     if (ctx.model?.provider !== "bifrost") return;
-    const name = pi.getSessionName();
-    if (name) {
-      event.headers["x-pi-session"] = name;
-    } else {
-      event.headers["x-pi-session"] = null;
-    }
+    event.headers["x-pi-session"] = "TEST-STATIC-VALUE";
   });
 
   pi.on("session_start", async (_event, ctx) => {
