@@ -358,7 +358,9 @@ export default async function (pi: ExtensionAPI) {
 
   pi.on("before_provider_headers", (event, ctx) => {
     if (ctx.model?.provider !== "bifrost") return;
-    event.headers["x-pi-session"] = "TEST-STATIC-VALUE";
+    // Use the workspace directory basename (e.g. the worktree name) as a
+    // human-readable session identifier for Bifrost cost attribution.
+    event.headers["x-pi-session"] = path.basename(ctx.cwd);
   });
 
   pi.on("session_start", async (_event, ctx) => {
