@@ -6,6 +6,7 @@ import { Type } from "typebox";
 import type { HashlineConfig } from "./config.js";
 import {
 	badRefError,
+	invalidArgumentError,
 	invalidPatchError,
 	multipleMatchesError,
 	noMatchError,
@@ -61,6 +62,109 @@ type EditEntry = {
 	prepend?: { pos?: string; lines: string[] };
 	replace_text?: { oldText: string; newText: string };
 };
+
+/**
+ * Escapes literal control characters (newline, carriage return, tab) that appear
+ * inside double-quoted JSON string values. Some LLMs emit raw newlines within
+ * string values when stringifying the `edits` parameter, which makes JSON.parse
+ * fail with "Bad control character in string literal". This scanner only touches
+ * characters inside quotes, leaving inter-token whitespace (including newlines
+ * between array elements) intact.
+ */
+function escapeControlCharsInStrings(text: string): string {
+	let result = "";
+	let inString = false;
+	let escaped = false;
+	for (let i = 0; i < text.length; i++) {
+		const ch = text[i];
+		if (inString) {
+			if (escaped) {
+				result += ch;
+				escaped = false;
+				continue;
+			}
+			if (ch === "\\") {
+				result += ch;
+				escaped = true;
+				continue;
+			}
+			if (ch === '"') {
+				result += ch;
+				inString = false;
+				continue;
+			}
+			if (ch === "\n") {
+				result += "\\n";
+				continue;
+			}
+			if (ch === "\r") {
+				result += "\\r";
+				continue;
+			}
+			if (ch === "\t") {
+				result += "\\t";
+				continue;
+			}
+			result += ch;
+		} else {
+			if (ch === '"') {
+				inString = true;
+			}
+			result += ch;
+		}
+	}
+	return result;
+}
+
+/**
+ * Parses a stringified `edits` value back into an array of EditEntry objects.
+ * Tries strict JSON.parse first, then retries after escaping literal control
+ * characters (raw newlines, tabs, carriage returns) that some models emit inside
+ * string values. Throws a clear E_INVALID_ARGUMENT error if parsing fails so the
+ * agent gets actionable feedback instead of a generic validation failure.
+ */
+function parseStringEdits(editsString: string): EditEntry[] {
+	let parsed: unknown;
+	try {
+		parsed = JSON.parse(editsString);
+	} catch {
+		try {
+			// Retry after escaping literal control characters inside string values,
+			// which some models emit as raw newlines in multi-line array elements.
+			const sanitized = escapeControlCharsInStrings(editsString);
+			parsed = JSON.parse(sanitized);
+		} catch (e) {
+			throw invalidArgumentError(
+				`edits was passed as a JSON string but could not be parsed. Pass edits as an array of objects directly — do not stringify it. (Parse error: ${e instanceof Error ? e.message : String(e)})`,
+			);
+		}
+	}
+	if (!Array.isArray(parsed)) {
+		throw invalidArgumentError(
+			`edits was passed as a JSON string that parsed to ${typeof parsed}, not an array. Pass edits as an array of objects directly.`,
+		);
+	}
+	return parsed as EditEntry[];
+}
+
+/**
+ * Compatibility shim invoked by the framework before schema validation. Some
+ * models (e.g. Opus 4.6, GLM-5.1) pass `edits` as a JSON string instead of an
+ * array. This function detects that case and parses the string back into an
+ * array so validation passes. If the string cannot be parsed, a clear error is
+ * thrown so the agent gets actionable feedback instead of a generic
+ * "edits.0: must be object" validation failure.
+ */
+function prepareEditArguments(args: unknown): { path: string; edits: EditEntry[] } {
+	if (!args || typeof args !== "object") {
+		return args as { path: string; edits: EditEntry[] };
+	}
+	const obj = args as Record<string, unknown>;
+	if (typeof obj.edits !== "string") {
+		return args as { path: string; edits: EditEntry[] };
+	}
+	return { ...obj, edits: parseStringEdits(obj.edits) } as { path: string; edits: EditEntry[] };
+}
 
 const HASHLINE_ANCHOR_PATTERN = /(?:^|\n)\s*\d+#[A-Za-z0-9_-]{3}:/;
 
@@ -204,8 +308,16 @@ export function createHashlineEditTool(
 		label: "edit (hashline)",
 		description:
 			"Edit a file using hash-anchored line references (from a prior read/grep). Ops: replace, append, prepend, replace_text. All anchors are validated against the current file content before any write occurs. replace_text must be the only entry in edits[] when used; it cannot be combined with other ops in the same call.",
+		promptGuidelines: [
+			"Pass the edits parameter as an array of objects, not as a JSON string. Do not stringify or escape the array.",
+			'Example: edits=[{"replace":{"pos":"2#TmR","lines":["  console.log(\'hi\');"]}}]',
+		],
 		parameters: editSchema,
-		async execute(_toolCallId, { path, edits }, _signal, _onUpdate, ctx) {
+		prepareArguments: prepareEditArguments,
+		async execute(_toolCallId, { path, edits: rawEdits }, _signal, _onUpdate, ctx) {
+			// Defensive fallback: if edits arrived as a string (e.g. a direct call
+			// that bypassed prepareArguments), coerce it now.
+			const edits = typeof rawEdits === "string" ? parseStringEdits(rawEdits) : rawEdits;
 			const absolutePath = resolvePathArg(path, ctx.cwd);
 			return withFileMutationQueue(absolutePath, async () => {
 				let buffer: Buffer;

@@ -2,9 +2,14 @@ export type HashlineErrorCode =
 	| "E_STALE_ANCHOR"
 	| "E_BAD_REF"
 	| "E_INVALID_PATCH"
+	| "E_INVALID_ARGUMENT"
 	| "E_NOT_FOUND"
 	| "E_NO_MATCH"
 	| "E_MULTIPLE_MATCHES";
+
+export function invalidArgumentError(detail: string): HashlineError {
+	return new HashlineError("E_INVALID_ARGUMENT", detail);
+}
 
 export class HashlineError extends Error {
 	readonly code: HashlineErrorCode;
