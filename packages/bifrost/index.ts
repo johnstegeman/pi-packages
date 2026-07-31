@@ -257,7 +257,9 @@ export default async function (pi: ExtensionAPI) {
 
   let currentUrl = config.gatewayUrl ?? "";
   let currentModels: ReturnType<typeof toProviderModel>[] = [];
-  let currentSessionName = pi.getSessionName() ?? "";
+  // Not available until after extension loading completes (pi.getSessionName()
+  // is an action method), so start empty and pick it up in session_start.
+  let currentSessionName = "";
 
   if (currentUrl) {
     try {
