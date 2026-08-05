@@ -286,7 +286,7 @@ export default async function (pi: ExtensionAPI) {
       apiKey: "$BIFROST_VIRTUAL_KEY",
       // Sends: Authorization: Bearer <key>  (one of Bifrost's accepted headers)
       authHeader: true,
-      api: "openai-completions",
+      api: "openai-responses",
       models: currentModels,
 
       oauth: {
