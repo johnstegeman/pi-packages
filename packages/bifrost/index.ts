@@ -242,7 +242,7 @@ async function fetchModels(
   }
 
   const body = (await res.json()) as BifrostModelsResponse;
-  return (body.data ?? []).map(toProviderModel);
+  return (body.data ?? []).map((m) => toProviderModel(m, base));
 }
 
 // ---------------------------------------------------------------------------
