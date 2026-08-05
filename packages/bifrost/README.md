@@ -74,6 +74,19 @@ The following fields are mapped from the Bifrost `/v1/models` response:
 Bifrost pricing values are per-token USD strings; pi expects per-million-token
 USD numbers, so each value is multiplied by 1 000 000.
 
+## API routing
+
+Bifrost supports two request protocols, and the extension routes each model
+to the most appropriate one:
+
+- **Anthropic models** (`anthropic/*`) use the native Anthropic Messages API
+  (`/anthropic/v1/messages`) with full prompt caching via `cache_control`
+  markers — the same caching behavior as pi's built-in Anthropic provider.
+- **All other models** use the OpenAI Responses API (`/v1/responses`) with
+  `prompt_cache_key`-based caching.
+
+This routing is automatic and based on the model ID prefix. No configuration
+is needed.
 
 ## Cost attribution
 
