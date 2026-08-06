@@ -246,6 +246,25 @@ async function fetchModels(
 }
 
 // ---------------------------------------------------------------------------
+// Superpowers phase tracking
+// ---------------------------------------------------------------------------
+
+/**
+ * Reduce a `superpowers:phase` event payload into the retained phase value.
+ *
+ * Returns the incoming value verbatim when it is a non-empty string (trimmed
+ * only to test emptiness, so the exact payload value is preserved), and
+ * `null` when the incoming value is null/undefined/empty — which clears any
+ * previously retained phase.
+ */
+export function applyPhaseUpdate(
+  _current: string | null,
+  incoming: string | null | undefined,
+): string | null {
+  return incoming && incoming.trim() !== "" ? incoming : null;
+}
+
+// ---------------------------------------------------------------------------
 // Extension entry point
 // ---------------------------------------------------------------------------
 
