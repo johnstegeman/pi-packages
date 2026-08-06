@@ -95,3 +95,9 @@ Every request to the Bifrost gateway includes an `x-module-name` header set to
 This allows Bifrost to attribute token usage and cost to a specific pi session.
 The session name is read from pi's session metadata and updated automatically if
 it changes during a session.
+
+When a Superpowers workflow phase is active (emitted on the `superpowers:phase`
+event bus), Bifrost requests also carry an `x-superpowers-phase` header set to the
+current phase (e.g. `brainstorming`, `development`) for phase-based cost
+attribution. The header is omitted when no phase is active or the phase has been
+cleared (empty/null).

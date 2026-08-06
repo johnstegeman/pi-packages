@@ -380,7 +380,14 @@ export default async function (pi: ExtensionAPI) {
   let superpowersPhase: string | null = null;
 
   pi.events.on("superpowers:phase", (data) => {
-    superpowersPhase = applyPhaseUpdate(superpowersPhase, data?.phase);
+    const phase =
+      typeof data === "object" && data !== null && "phase" in data
+        ? (data as { phase: unknown }).phase
+        : undefined;
+    superpowersPhase = applyPhaseUpdate(
+      superpowersPhase,
+      typeof phase === "string" ? phase : null,
+    );
   });
 
   // ---- Per-session cost attribution ---------------------------------------
