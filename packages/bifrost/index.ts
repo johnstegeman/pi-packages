@@ -246,6 +246,25 @@ async function fetchModels(
 }
 
 // ---------------------------------------------------------------------------
+// Superpowers phase tracking
+// ---------------------------------------------------------------------------
+
+/**
+ * Reduce a `superpowers:phase` event payload into the retained phase value.
+ *
+ * Returns the incoming value verbatim when it is a non-empty string (trimmed
+ * only to test emptiness, so the exact payload value is preserved), and
+ * `null` when the incoming value is null/undefined/empty — which clears any
+ * previously retained phase.
+ */
+export function applyPhaseUpdate(
+  _current: string | null,
+  incoming: string | null | undefined,
+): string | null {
+  return incoming && incoming.trim() !== "" ? incoming : null;
+}
+
+// ---------------------------------------------------------------------------
 // Extension entry point
 // ---------------------------------------------------------------------------
 
@@ -351,6 +370,26 @@ export default async function (pi: ExtensionAPI) {
 
   register();
 
+  // ---- Superpowers phase header -------------------------------------------
+  //
+  // The Superpowers skills emit `{ phase }` on the superpowers:phase event
+  // bus. Retain the latest non-empty phase in memory and carry it on every
+  // Bifrost request as `x-superpowers-phase`, so the gateway can attribute
+  // usage to a workflow phase (brainstorming, development, ...).
+
+  let superpowersPhase: string | null = null;
+
+  pi.events.on("superpowers:phase", (data) => {
+    const phase =
+      typeof data === "object" && data !== null && "phase" in data
+        ? (data as { phase: unknown }).phase
+        : undefined;
+    superpowersPhase = applyPhaseUpdate(
+      superpowersPhase,
+      typeof phase === "string" ? phase : null,
+    );
+  });
+
   // ---- Per-session cost attribution ---------------------------------------
   //
   // Every Bifrost request carries an `x-pi-session` header set to the
@@ -364,6 +403,10 @@ export default async function (pi: ExtensionAPI) {
     // Use the workspace directory basename (e.g. the worktree name) as a
     // human-readable session identifier for Bifrost cost attribution.
     event.headers["x-pi-session"] = path.basename(ctx.cwd);
+    // Tag the request with the current Superpowers workflow phase, when known.
+    if (superpowersPhase) {
+      event.headers["x-superpowers-phase"] = superpowersPhase;
+    }
   });
 
   pi.on("session_start", async (_event, ctx) => {
