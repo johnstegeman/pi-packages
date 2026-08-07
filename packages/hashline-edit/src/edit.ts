@@ -6,6 +6,7 @@ import { Type } from "typebox";
 import type { HashlineConfig } from "./config.js";
 import {
 	badRefError,
+	editConflictError,
 	invalidArgumentError,
 	invalidPatchError,
 	multipleMatchesError,
@@ -268,6 +269,42 @@ interface ResolvedOp {
 	lines: string[];
 }
 
+function isInsertion(op: ResolvedOp): boolean {
+	return op.endIndex < op.startIndex;
+}
+
+function validateResolvedOps(resolvedOps: ResolvedOp[]): void {
+	for (let i = 0; i < resolvedOps.length; i++) {
+		const first = resolvedOps[i];
+		const firstIsInsertion = isInsertion(first);
+		for (let j = i + 1; j < resolvedOps.length; j++) {
+			const second = resolvedOps[j];
+			const secondIsInsertion = isInsertion(second);
+			let conflicts: boolean;
+
+			if (firstIsInsertion && secondIsInsertion) {
+				conflicts = first.startIndex === second.startIndex;
+			} else if (firstIsInsertion || secondIsInsertion) {
+				const insertion = firstIsInsertion ? first : second;
+				const replacement = firstIsInsertion ? second : first;
+				conflicts =
+					insertion.startIndex >= replacement.startIndex &&
+					insertion.startIndex <= replacement.endIndex;
+			} else {
+				conflicts = first.startIndex <= second.endIndex && second.startIndex <= first.endIndex;
+			}
+
+			if (conflicts) {
+				const describe = (op: ResolvedOp, index: number): string =>
+					isInsertion(op)
+						? `edit ${index + 1} insertion point ${op.startIndex}`
+						: `edit ${index + 1} replacement lines ${op.startIndex + 1}-${op.endIndex + 1}`;
+				throw editConflictError(`${describe(first, i)} overlaps ${describe(second, j)}`);
+			}
+		}
+	}
+}
+
 function resolveEntry(
 	entry: EditEntry,
 	lines: string[],
@@ -326,24 +363,27 @@ function resolveEntry(
 		const fullText = lines.join("\n");
 		const firstIndex = fullText.indexOf(oldText);
 		if (firstIndex === -1) throw noMatchError(oldText);
-		const secondIndex = fullText.indexOf(oldText, firstIndex + oldText.length);
-		if (secondIndex !== -1) {
-			let count = 0;
-			let cursor = 0;
-			while (true) {
-				const found = fullText.indexOf(oldText, cursor);
-				if (found === -1) break;
-				count++;
-				cursor = found + oldText.length;
-			}
-			throw multipleMatchesError(oldText, count);
+
+		let matchCount = 0;
+		let searchIndex = 0;
+		while (true) {
+			const foundIndex = fullText.indexOf(oldText, searchIndex);
+			if (foundIndex === -1) break;
+			matchCount++;
+			searchIndex = foundIndex + Math.max(1, oldText.length);
 		}
-		const before = fullText.slice(0, firstIndex);
-		const after = fullText.slice(firstIndex + oldText.length);
-		const newFullText = before + newText + after;
-		const newLines = newFullText.split("\n");
-		// Represent as a whole-file replace so the generic apply step below handles it uniformly.
-		return { kind: "replace", startIndex: 0, endIndex: lines.length - 1, lines: newLines };
+		if (matchCount !== 1) throw multipleMatchesError(oldText, matchCount);
+
+		const matchEnd = firstIndex + oldText.length;
+		const lineStart = fullText.lastIndexOf("\n", firstIndex - 1) + 1;
+		const afterMatch = fullText.slice(matchEnd);
+		const nextNewline = afterMatch.indexOf("\n");
+		const suffix = nextNewline === -1 ? afterMatch : afterMatch.slice(0, nextNewline);
+		const prefix = fullText.slice(lineStart, firstIndex);
+		const replacementLines = (prefix + newText + suffix).split("\n");
+		const startIndex = fullText.slice(0, firstIndex).split("\n").length - 1;
+		const endIndex = fullText.slice(0, matchEnd).split("\n").length - 1;
+		return { kind: "replace", startIndex, endIndex, lines: replacementLines };
 	}
 	throw badRefError(
 		"(missing)",
@@ -380,7 +420,7 @@ export function createHashlineEditTool(
 		name: "edit",
 		label: "edit (hashline)",
 		description:
-			"Edit a file using hash-anchored line references (from a prior read/grep). Ops: replace, append, prepend, replace_text. All anchors are validated against the current file content before any write occurs. replace_text must be the only entry in edits[] when used; it cannot be combined with other ops in the same call.",
+			"Edit a file using hash-anchored line references (from a prior read/grep). Ops: replace, append, prepend, replace_text. All anchors and replacement ranges are resolved against the original file content before any write occurs.",
 		promptGuidelines: [
 			"Pass the edits parameter as an array of objects, not as a JSON string. Do not stringify or escape the array.",
 			'Example: edits=[{"replace":{"pos":"2#TmR","lines":["  console.log(\'hi\');"]}}]',
@@ -410,20 +450,12 @@ export function createHashlineEditTool(
 				const hashes = computeLineHashes(originalText);
 				const config = getConfig();
 
-				// replace_text is modeled as a whole-file replace computed from the original content;
-				// combining it with other ops in the same batch (or more than one replace_text) would
-				// apply against stale line indices once the bottom-up loop starts mutating newLines.
 				const entries = edits as EditEntry[];
-				const replaceTextCount = entries.filter((entry) => entry.replace_text).length;
-				if (replaceTextCount > 0 && entries.length > 1) {
-					throw badRefError(
-						"(batch)",
-						"replace_text cannot be combined with other edits in the same call; send it alone",
-					);
-				}
 
-				// Resolve and validate every entry against the same pre-edit snapshot before any write.
+				// Resolve every entry against the same pre-edit snapshot, then validate all ranges
+				// before applying any operation or writing the file.
 				const resolvedOps = entries.map((entry) => resolveEntry(entry, lines, hashes, config));
+				validateResolvedOps(resolvedOps);
 
 				// Apply bottom-up (highest startIndex first) so earlier edits are unaffected by later ones.
 				const sortedOps = [...resolvedOps].sort((a, b) => b.startIndex - a.startIndex);
