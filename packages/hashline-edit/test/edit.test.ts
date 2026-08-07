@@ -342,14 +342,14 @@ test("mixed replace_text preserves partial-line context across a multi-line repl
 	const filePath = join(dir, "o3.ts");
 	const original = "prefix old\nmiddle old suffix\nlast";
 	writeFileSync(filePath, original);
-	const anchor = anchorFor(original, 2);
+	const anchor = anchorFor(original, 3);
 	const tool = createHashlineEditTool(defaultConfig);
 	await tool.execute(
 		"call-1",
 		{
 			path: filePath,
 			edits: [
-				{ replace: { pos: anchor, lines: ["LAST"] } },
+				{ replace: { pos: anchor, lines: ["FINAL"] } },
 				{ replace_text: { oldText: "old\nmiddle old", newText: "new\ninserted\ntext" } },
 			],
 		},
@@ -357,7 +357,7 @@ test("mixed replace_text preserves partial-line context across a multi-line repl
 		undefined,
 		{ cwd: dir } as never,
 	);
-	assert.equal(readFileSync(filePath, "utf-8"), "prefix new\ninserted\ntext suffix\nLAST");
+	assert.equal(readFileSync(filePath, "utf-8"), "prefix new\ninserted\ntext suffix\nFINAL");
 });
 
 test("multiple non-overlapping replace_text operations apply in one batch", async () => {

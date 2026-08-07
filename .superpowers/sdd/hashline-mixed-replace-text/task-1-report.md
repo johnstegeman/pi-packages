@@ -16,6 +16,13 @@ DONE_WITH_CONCERNS
 - The focused test now exercises behavior unavailable before implementation rather than passing as a standalone `replace_text` operation.
 - No production code was modified.
 
+## Fix round 2 changes
+
+- Changed the anchored operation in `mixed replace_text preserves partial-line context across a multi-line replacement` from line 2 to the final line, outside the two-line `replace_text` match.
+- Updated the anchored replacement and final expected content to use `FINAL`.
+- Preserved the partial-line prefix/suffix assertions and the line-count increase assertion.
+- No production code was modified.
+
 ## Tests run
 
 Command:
@@ -24,7 +31,7 @@ Command:
 cd packages/hashline-edit && node --import tsx --test test/edit.test.ts
 ```
 
-Output summary: 36 tests total; 32 passed and 4 failed. The four expected red tests are mixed anchored + `replace_text`, mixed multi-line/line-count-changing partial-line replacement, multiple non-overlapping `replace_text` operations, and overlapping mixed edits requiring `E_EDIT_CONFLICT`. The first three fail with the current `E_BAD_REF` batch restriction (`replace_text cannot be combined with other edits in the same call`); the overlap test receives that same current restriction before conflict detection. The test runner also emits Node's existing `module.register()` deprecation warning.
+Output summary after the fix: 36 tests total; 32 passed and 4 failed. The mixed multi-line/line-count-changing test still fails with the current `E_BAD_REF` batch restriction (`replace_text cannot be combined with other edits in the same call`), confirming it remains a meaningful red test while using a genuinely non-overlapping anchor. The other three expected red tests are mixed anchored + `replace_text`, multiple non-overlapping `replace_text` operations, and overlapping mixed edits requiring `E_EDIT_CONFLICT`; the overlap test receives the same current batch restriction before conflict detection. The test runner also emits Node's existing `module.register()` deprecation warning.
 
 `git diff --check` passed.
 
