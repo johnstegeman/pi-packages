@@ -355,6 +355,11 @@ function resolveEntry(
 			throw invalidPatchError("replace_text is disabled by config (replaceText: false)");
 		}
 		const { oldText, newText } = entry.replace_text;
+		if (oldText.length === 0) {
+			throw invalidArgumentError(
+				"replace_text.oldText must be non-empty; empty oldText insertion semantics are not supported",
+			);
+		}
 		if (looksLikePastedAnchorOutput(newText) || looksLikePastedAnchorOutput(oldText)) {
 			throw invalidPatchError(
 				"input looks like pasted LINE#HASH: tool output; send literal file content instead",

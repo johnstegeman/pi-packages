@@ -160,6 +160,81 @@ test("replace_text replaces a unique exact substring", async () => {
 	assert.equal(readFileSync(filePath, "utf-8"), "const x = 100;\nconst y = 2;");
 });
 
+test("replace_text rejects empty oldText with E_INVALID_ARGUMENT and no write", async () => {
+	const filePath = join(dir, "g2.ts");
+	const original = "unchanged";
+	writeFileSync(filePath, original);
+	const tool = createHashlineEditTool(defaultConfig);
+	await assert.rejects(
+		() =>
+			tool.execute(
+				"call-1",
+				{ path: filePath, edits: [{ replace_text: { oldText: "", newText: "insert" } }] },
+				undefined,
+				undefined,
+				{ cwd: dir } as never,
+			),
+		(error: unknown) => {
+			assert.match(String(error), /E_INVALID_ARGUMENT/);
+			assert.match(String(error), /replace_text\.oldText.*non-empty/i);
+			return true;
+		},
+	);
+	assert.equal(readFileSync(filePath, "utf-8"), original);
+});
+
+test("replace_text permits an empty newText for a unique match", async () => {
+	const filePath = join(dir, "g3.ts");
+	writeFileSync(filePath, "before remove after");
+	const tool = createHashlineEditTool(defaultConfig);
+	await tool.execute(
+		"call-1",
+		{ path: filePath, edits: [{ replace_text: { oldText: "remove", newText: "" } }] },
+		undefined,
+		undefined,
+		{ cwd: dir } as never,
+	);
+	assert.equal(readFileSync(filePath, "utf-8"), "before  after");
+});
+
+test("replace_text handles unique matches at the beginning and end of a file", async () => {
+	const filePath = join(dir, "g4.ts");
+	writeFileSync(filePath, "start middle end");
+	const tool = createHashlineEditTool(defaultConfig);
+	await tool.execute(
+		"call-1",
+		{ path: filePath, edits: [{ replace_text: { oldText: "start", newText: "begin" } }] },
+		undefined,
+		undefined,
+		{ cwd: dir } as never,
+	);
+	await tool.execute(
+		"call-2",
+		{ path: filePath, edits: [{ replace_text: { oldText: "end", newText: "finish" } }] },
+		undefined,
+		undefined,
+		{ cwd: dir } as never,
+	);
+	assert.equal(readFileSync(filePath, "utf-8"), "begin middle finish");
+});
+
+test("replace_text preserves a match ending at a newline boundary", async () => {
+	const filePath = join(dir, "g5.ts");
+	writeFileSync(filePath, "first\nmiddle\nlast");
+	const tool = createHashlineEditTool(defaultConfig);
+	await tool.execute(
+		"call-1",
+		{
+			path: filePath,
+			edits: [{ replace_text: { oldText: "first\nmiddle\n", newText: "header\n" } }],
+		},
+		undefined,
+		undefined,
+		{ cwd: dir } as never,
+	);
+	assert.equal(readFileSync(filePath, "utf-8"), "header\nlast");
+});
+
 test("replace_text rejects zero matches with E_NO_MATCH", async () => {
 	const filePath = join(dir, "h.ts");
 	writeFileSync(filePath, "const x = 1;");
@@ -379,6 +454,28 @@ test("mixed replace_text preserves partial-line context across a multi-line repl
 	assert.equal(readFileSync(filePath, "utf-8"), "prefix new\ninserted\ntext suffix\nFINAL");
 });
 
+test("replace_text combines with append and prepend", async () => {
+	const filePath = join(dir, "o3b.ts");
+	const original = "one\ntwo target\nthree";
+	writeFileSync(filePath, original);
+	const tool = createHashlineEditTool(defaultConfig);
+	await tool.execute(
+		"call-1",
+		{
+			path: filePath,
+			edits: [
+				{ prepend: { lines: ["zero"] } },
+				{ replace_text: { oldText: "target", newText: "new" } },
+				{ append: { lines: ["four"] } },
+			],
+		},
+		undefined,
+		undefined,
+		{ cwd: dir } as never,
+	);
+	assert.equal(readFileSync(filePath, "utf-8"), "zero\none\ntwo new\nthree\nfour");
+});
+
 test("multiple non-overlapping replace_text operations apply in one batch", async () => {
 	const filePath = join(dir, "o4.ts");
 	const original = "first token\nsecond token\nthird";
@@ -414,6 +511,66 @@ test("overlapping mixed edits reject with E_EDIT_CONFLICT and no partial write",
 					path: filePath,
 					edits: [
 						{ replace: { pos: anchor, lines: ["TWO TARGET"] } },
+						{ replace_text: { oldText: "target", newText: "new" } },
+					],
+				},
+				undefined,
+				undefined,
+				{ cwd: dir } as never,
+			),
+		(error: unknown) => {
+			assert.match(String(error), /E_EDIT_CONFLICT/);
+			assert.match(String(error), /split.*batch|separate.*call/i);
+			return true;
+		},
+	);
+	assert.equal(readFileSync(filePath, "utf-8"), original);
+});
+
+test("append conflicts with a replace_text match without writing", async () => {
+	const filePath = join(dir, "o5b.ts");
+	const original = "one\ntwo target\nthree\nfour";
+	writeFileSync(filePath, original);
+	const anchor = anchorFor(original, 2);
+	const tool = createHashlineEditTool(defaultConfig);
+	await assert.rejects(
+		() =>
+			tool.execute(
+				"call-1",
+				{
+					path: filePath,
+					edits: [
+						{ append: { pos: anchor, lines: ["after"] } },
+						{ replace_text: { oldText: "target\nthree", newText: "new\nTHREE" } },
+					],
+				},
+				undefined,
+				undefined,
+				{ cwd: dir } as never,
+			),
+		(error: unknown) => {
+			assert.match(String(error), /E_EDIT_CONFLICT/);
+			assert.match(String(error), /split.*batch|separate.*call/i);
+			return true;
+		},
+	);
+	assert.equal(readFileSync(filePath, "utf-8"), original);
+});
+
+test("prepend conflicts with a replace_text match without writing", async () => {
+	const filePath = join(dir, "o5c.ts");
+	const original = "one\ntwo target\nthree";
+	writeFileSync(filePath, original);
+	const anchor = anchorFor(original, 2);
+	const tool = createHashlineEditTool(defaultConfig);
+	await assert.rejects(
+		() =>
+			tool.execute(
+				"call-1",
+				{
+					path: filePath,
+					edits: [
+						{ prepend: { pos: anchor, lines: ["before"] } },
 						{ replace_text: { oldText: "target", newText: "new" } },
 					],
 				},

@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import {
 	badRefError,
+	editConflictError,
 	HashlineError,
 	invalidArgumentError,
 	invalidPatchError,
@@ -59,4 +60,15 @@ test("invalidArgumentError carries E_INVALID_ARGUMENT code", () => {
 	assert.equal(err.code, "E_INVALID_ARGUMENT");
 	assert.match(err.message, /^\[E_INVALID_ARGUMENT\]/);
 	assert.match(err.message, /JSON string/);
+});
+
+test("editConflictError carries E_EDIT_CONFLICT code and split-batch guidance", () => {
+	const err = editConflictError("edit 1 overlaps edit 2");
+	assert.ok(err instanceof HashlineError);
+	assert.equal(err.code, "E_EDIT_CONFLICT");
+	assert.match(err.message, /^\[E_EDIT_CONFLICT\]/);
+	assert.match(
+		err.message,
+		/split the batch into separate edit calls|revise the overlapping ranges/i,
+	);
 });
