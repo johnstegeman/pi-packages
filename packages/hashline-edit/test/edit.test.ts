@@ -194,6 +194,25 @@ test("replace_text rejects multiple matches with E_MULTIPLE_MATCHES", async () =
 	);
 });
 
+test("replace_text rejects overlapping matches with E_MULTIPLE_MATCHES", async () => {
+	const filePath = join(dir, "i2.ts");
+	const original = "aaa";
+	writeFileSync(filePath, original);
+	const tool = createHashlineEditTool(defaultConfig);
+	await assert.rejects(
+		() =>
+			tool.execute(
+				"call-1",
+				{ path: filePath, edits: [{ replace_text: { oldText: "aa", newText: "x" } }] },
+				undefined,
+				undefined,
+				{ cwd: dir } as never,
+			),
+		/E_MULTIPLE_MATCHES/,
+	);
+	assert.equal(readFileSync(filePath, "utf-8"), original);
+});
+
 test("replace_text is rejected when config.replaceText is false", async () => {
 	const filePath = join(dir, "j.ts");
 	writeFileSync(filePath, "const x = 1;");

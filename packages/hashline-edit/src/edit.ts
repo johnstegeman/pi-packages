@@ -370,7 +370,7 @@ function resolveEntry(
 			const foundIndex = fullText.indexOf(oldText, searchIndex);
 			if (foundIndex === -1) break;
 			matchCount++;
-			searchIndex = foundIndex + Math.max(1, oldText.length);
+			searchIndex = foundIndex + 1;
 		}
 		if (matchCount !== 1) throw multipleMatchesError(oldText, matchCount);
 
