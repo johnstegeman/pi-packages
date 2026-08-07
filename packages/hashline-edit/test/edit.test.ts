@@ -338,22 +338,26 @@ test("replace_text combines with anchored edits atomically", async () => {
 	assert.equal(readFileSync(filePath, "utf-8"), "ONE\ntwo new\nthree");
 });
 
-test("replace_text preserves partial-line context across a multi-line replacement", async () => {
+test("mixed replace_text preserves partial-line context across a multi-line replacement", async () => {
 	const filePath = join(dir, "o3.ts");
 	const original = "prefix old\nmiddle old suffix\nlast";
 	writeFileSync(filePath, original);
+	const anchor = anchorFor(original, 2);
 	const tool = createHashlineEditTool(defaultConfig);
 	await tool.execute(
 		"call-1",
 		{
 			path: filePath,
-			edits: [{ replace_text: { oldText: "old\nmiddle old", newText: "new\ninserted\ntext" } }],
+			edits: [
+				{ replace: { pos: anchor, lines: ["LAST"] } },
+				{ replace_text: { oldText: "old\nmiddle old", newText: "new\ninserted\ntext" } },
+			],
 		},
 		undefined,
 		undefined,
 		{ cwd: dir } as never,
 	);
-	assert.equal(readFileSync(filePath, "utf-8"), "prefix new\ninserted\ntext suffix\nlast");
+	assert.equal(readFileSync(filePath, "utf-8"), "prefix new\ninserted\ntext suffix\nLAST");
 });
 
 test("multiple non-overlapping replace_text operations apply in one batch", async () => {
