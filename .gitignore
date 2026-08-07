@@ -3,3 +3,5 @@ package-lock.json
 *.js.map
 dist/
 .DS_Store
+
+.worktrees/

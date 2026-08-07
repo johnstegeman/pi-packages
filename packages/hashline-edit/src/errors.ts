@@ -5,7 +5,8 @@ export type HashlineErrorCode =
 	| "E_INVALID_ARGUMENT"
 	| "E_NOT_FOUND"
 	| "E_NO_MATCH"
-	| "E_MULTIPLE_MATCHES";
+	| "E_MULTIPLE_MATCHES"
+	| "E_EDIT_CONFLICT";
 
 export function invalidArgumentError(detail: string): HashlineError {
 	return new HashlineError("E_INVALID_ARGUMENT", detail);
@@ -33,6 +34,13 @@ export function badRefError(anchor: string, reason: string): HashlineError {
 
 export function invalidPatchError(detail: string): HashlineError {
 	return new HashlineError("E_INVALID_PATCH", `Replacement text is invalid: ${detail}.`);
+}
+
+export function editConflictError(detail: string): HashlineError {
+	return new HashlineError(
+		"E_EDIT_CONFLICT",
+		`${detail}. Split the batch into separate edit calls or revise the overlapping ranges.`,
+	);
 }
 
 export function notFoundError(path: string, reason: string): HashlineError {
