@@ -420,10 +420,11 @@ export function createHashlineEditTool(
 		name: "edit",
 		label: "edit (hashline)",
 		description:
-			"Edit a file using hash-anchored line references (from a prior read/grep). Ops: replace, append, prepend, replace_text. All anchors and replacement ranges are resolved against the original file content before any write occurs.",
+			"Edit a file using hash-anchored line references (from a prior read/grep). Ops: replace, append, prepend, replace_text. All operations are resolved against the same pre-edit file snapshot and applied atomically; replace_text may be combined with other non-overlapping edits, but overlapping ranges fail with E_EDIT_CONFLICT.",
 		promptGuidelines: [
 			"Pass the edits parameter as an array of objects, not as a JSON string. Do not stringify or escape the array.",
 			'Example: edits=[{"replace":{"pos":"2#TmR","lines":["  console.log(\'hi\');"]}}]',
+			"Overlapping edit ranges fail with E_EDIT_CONFLICT; split the batch into separate calls or revise the overlapping ranges.",
 		],
 		parameters: editSchema,
 		prepareArguments: prepareEditArguments,
