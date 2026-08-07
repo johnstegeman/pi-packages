@@ -316,11 +316,72 @@ test("multiple edits in one call apply bottom-up without anchors shifting", asyn
 	assert.equal(readFileSync(filePath, "utf-8"), "one\nTWO\nTWO-B\nthree\nFOUR");
 });
 
-test("replace_text cannot be combined with another edit in the same batch", async () => {
+test("replace_text combines with anchored edits atomically", async () => {
 	const filePath = join(dir, "o2.ts");
-	const original = "one\ntwo\nthree";
+	const original = "one\ntwo target\nthree";
 	writeFileSync(filePath, original);
-	const anchor1 = anchorFor(original, 1);
+	const anchor = anchorFor(original, 1);
+	const tool = createHashlineEditTool(defaultConfig);
+	await tool.execute(
+		"call-1",
+		{
+			path: filePath,
+			edits: [
+				{ replace: { pos: anchor, lines: ["ONE"] } },
+				{ replace_text: { oldText: "target", newText: "new" } },
+			],
+		},
+		undefined,
+		undefined,
+		{ cwd: dir } as never,
+	);
+	assert.equal(readFileSync(filePath, "utf-8"), "ONE\ntwo new\nthree");
+});
+
+test("replace_text preserves partial-line context across a multi-line replacement", async () => {
+	const filePath = join(dir, "o3.ts");
+	const original = "prefix old\nmiddle old suffix\nlast";
+	writeFileSync(filePath, original);
+	const tool = createHashlineEditTool(defaultConfig);
+	await tool.execute(
+		"call-1",
+		{
+			path: filePath,
+			edits: [{ replace_text: { oldText: "old\nmiddle old", newText: "new\ninserted\ntext" } }],
+		},
+		undefined,
+		undefined,
+		{ cwd: dir } as never,
+	);
+	assert.equal(readFileSync(filePath, "utf-8"), "prefix new\ninserted\ntext suffix\nlast");
+});
+
+test("multiple non-overlapping replace_text operations apply in one batch", async () => {
+	const filePath = join(dir, "o4.ts");
+	const original = "first token\nsecond token\nthird";
+	writeFileSync(filePath, original);
+	const tool = createHashlineEditTool(defaultConfig);
+	await tool.execute(
+		"call-1",
+		{
+			path: filePath,
+			edits: [
+				{ replace_text: { oldText: "first", newText: "1st" } },
+				{ replace_text: { oldText: "second", newText: "2nd" } },
+			],
+		},
+		undefined,
+		undefined,
+		{ cwd: dir } as never,
+	);
+	assert.equal(readFileSync(filePath, "utf-8"), "1st token\n2nd token\nthird");
+});
+
+test("overlapping mixed edits reject with E_EDIT_CONFLICT and no partial write", async () => {
+	const filePath = join(dir, "o5.ts");
+	const original = "one\ntwo target\nthree";
+	writeFileSync(filePath, original);
+	const anchor = anchorFor(original, 2);
 	const tool = createHashlineEditTool(defaultConfig);
 	await assert.rejects(
 		() =>
@@ -329,15 +390,19 @@ test("replace_text cannot be combined with another edit in the same batch", asyn
 				{
 					path: filePath,
 					edits: [
-						{ replace: { pos: anchor1, lines: ["ONE"] } },
-						{ replace_text: { oldText: "two", newText: "TWO" } },
+						{ replace: { pos: anchor, lines: ["TWO TARGET"] } },
+						{ replace_text: { oldText: "target", newText: "new" } },
 					],
 				},
 				undefined,
 				undefined,
 				{ cwd: dir } as never,
 			),
-		/E_BAD_REF/,
+		(error: unknown) => {
+			assert.match(String(error), /E_EDIT_CONFLICT/);
+			assert.match(String(error), /split.*batch|separate.*call/i);
+			return true;
+		},
 	);
 	assert.equal(readFileSync(filePath, "utf-8"), original);
 });
