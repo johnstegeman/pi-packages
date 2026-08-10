@@ -82,7 +82,11 @@ non-empty phase in memory. It writes that phase under the `superpowers_phase`
 metadata key on the root agent observation at start and finish, and on every
 LLM generation observation at request start. Clearing the phase omits the key;
 no phase is persisted. The value follows the same capture-policy path as the
-extension's git source metadata.
+extension's git source metadata. In addition to the metadata, the extension
+maintains a single trace-level tag named `phase:<latest-phase>` reflecting
+the current phase. Traces can begin untagged (before any phase event is
+received). When the phase changes, the previous `phase:*` tag is replaced
+with the new one, and clearing the phase removes the tag entirely.
 
 ## Upstream provenance
 
