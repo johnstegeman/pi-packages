@@ -1143,3 +1143,65 @@ test("updateTraceTags rejects when the ingestion request fails", async () => {
     globalThis.fetch = originalFetch;
   }
 });
+
+test("updateTraceTags preserves existing trace fields instead of wiping them", async () => {
+  const previousConfig = state.config;
+  const originalFetch = globalThis.fetch;
+  const requests: Array<{ batch: Array<{ type: string; body: Record<string, unknown> }> }> = [];
+  globalThis.fetch = (async (input, init) => {
+    const url = String(input);
+    if (url.includes("/api/public/ingestion")) {
+      requests.push(JSON.parse(String(init?.body)));
+      return new Response(JSON.stringify({ errors: [] }), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      });
+    }
+    return new Response("{}", { status: 404 });
+  }) as typeof fetch;
+
+  try {
+    state.config = {
+      publicKey: "pk_test",
+      secretKey: "sk_test",
+      host: "https://example.com",
+    };
+    const runtime = await getRuntime();
+
+    const root = runtime.startObservation(
+      "pi-agent",
+      { input: { prompt: "hello" }, metadata: { cwd: "/tmp" } },
+      { asType: "agent" },
+    ) as unknown as {
+      traceId: string;
+      update(body?: Record<string, unknown>): unknown;
+      end(): void;
+    };
+    root.update({ metadata: { extra: "value" } });
+
+    await runtime.updateTraceTags(root.traceId, ["phase:development"]);
+
+    assert.equal(requests.length, 1);
+    const tagUpdateBatch = requests[0].batch;
+    assert.equal(tagUpdateBatch.length, 1);
+    assert.equal(tagUpdateBatch[0].type, "trace-create");
+    const body = tagUpdateBatch[0].body as {
+      id: string;
+      name?: string;
+      input?: unknown;
+      metadata?: Record<string, unknown>;
+      tags?: string[];
+    };
+    assert.equal(body.id, root.traceId);
+    assert.equal(body.name, "pi-agent");
+    assert.deepEqual(body.input, { prompt: "hello" });
+    assert.deepEqual(body.metadata, { cwd: "/tmp", extra: "value" });
+    assert.deepEqual(body.tags, ["phase:development"]);
+
+    root.end();
+  } finally {
+    await forceShutdownRuntime();
+    state.config = previousConfig;
+    globalThis.fetch = originalFetch;
+  }
+});

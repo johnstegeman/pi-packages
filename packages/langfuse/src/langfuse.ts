@@ -30,6 +30,7 @@ interface RestFallbackTrace {
   output?: unknown;
   sessionId?: string;
   metadata?: Record<string, unknown>;
+  tags?: string[];
 }
 
 interface RestFallbackObservation {
@@ -579,6 +580,35 @@ async function updateTraceTags(rt: LangfuseRuntime, traceId: string, tags: strin
   );
   timeout.unref?.();
 
+  // Langfuse's public ingestion API only exposes a `trace-create` event for
+  // trace-level changes: there is no `trace-update`/PATCH event, and the
+  // public REST API (see @langfuse/core's `Trace` client) only supports
+  // get/list/delete for traces, not partial updates. The ingestion docs
+  // describe `trace-create` as "Creates a new trace. Upserts on id for
+  // updates if trace with id exists", which does not guarantee that fields
+  // omitted from the body are preserved rather than cleared.
+  //
+  // To make the tag update safe regardless of the server's exact merge
+  // semantics, resend the full set of trace fields we already know about
+  // (mirrored locally in `restFallback.trace`, which every root observation
+  // keeps in sync via applyTraceUpdate/wrapObservation) alongside the new
+  // tags, instead of sending a bare `{ id, tags }` body that could wipe
+  // name/input/output/sessionId/metadata if the server does a full replace.
+  const store = rt.restFallback as RestFallbackStore | undefined;
+  const knownTrace = store?.trace && store.trace.id === traceId ? store.trace : undefined;
+  const body: Record<string, unknown> = knownTrace
+    ? {
+        id: knownTrace.id,
+        timestamp: knownTrace.timestamp,
+        name: knownTrace.name,
+        input: knownTrace.input,
+        output: knownTrace.output,
+        sessionId: knownTrace.sessionId,
+        metadata: knownTrace.metadata,
+        tags,
+      }
+    : { id: traceId, tags };
+
   try {
     const errors = await ingestBatch(
       rt,
@@ -586,15 +616,15 @@ async function updateTraceTags(rt: LangfuseRuntime, traceId: string, tags: strin
         type: "trace-create",
         id: randomUUID(),
         timestamp: nowIso(),
-        body: {
-          id: traceId,
-          tags,
-        },
+        body,
       }],
       controller.signal,
     );
     if (errors.length > 0) {
       throw new Error(JSON.stringify(errors));
+    }
+    if (knownTrace) {
+      knownTrace.tags = tags;
     }
   } catch (error) {
     rememberRuntimeError("trace tag update", error);
@@ -634,6 +664,7 @@ async function fallbackToRestIngestion(rt: LangfuseRuntime, signal: AbortSignal)
         output: trace.output,
         sessionId: trace.sessionId,
         metadata: trace.metadata,
+        tags: trace.tags,
       },
     },
   ];
