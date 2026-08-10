@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 
 import registerExtension from "../index.ts";
+import { finishAgentRun, startAgentRun } from "../src/handlers/agent.ts";
 import { __setRuntimeForTest } from "../src/langfuse.ts";
 import { clearAllSessionStates, state } from "../src/state.ts";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
@@ -32,8 +33,49 @@ test("registers the Superpowers phase event listener", async () => {
     assert.ok(phaseHandler);
     phaseHandler!({ phase: "development" });
     assert.deepEqual(buildPhaseMetadata(), { superpowers_phase: "development" });
+    phaseHandler!(null);
+    assert.deepEqual(buildPhaseMetadata(), {});
+    phaseHandler!({ phase: 42 });
+    assert.deepEqual(buildPhaseMetadata(), {});
   } finally {
     setPhase(null);
+  }
+});
+
+test("root agent observations receive retained phase metadata", async () => {
+  const previousConfig = state.config;
+  const observation = {
+    traceId: "trace-id",
+    updates: [] as Array<Record<string, any> | undefined>,
+    metadata: undefined as Record<string, unknown> | undefined,
+    setTraceIO() {},
+    update(body?: Record<string, any>) {
+      this.updates.push(body);
+      return this;
+    },
+    end() {},
+  };
+  const runtime: LangfuseRuntime = {
+    startObservation: (_name, body) => {
+      observation.metadata = body?.metadata;
+      return observation;
+    },
+    propagateAttributes: (_attributes, fn) => fn(),
+    scoreClient: {},
+  };
+  try {
+    state.config = { publicKey: "pk_test", secretKey: "sk_test", host: "https://example.com" };
+    __setRuntimeForTest(runtime);
+    setPhase("development");
+    await startAgentRun({ prompt: "test" }, {});
+    assert.equal(observation.metadata?.superpowers_phase, "development");
+    await finishAgentRun({ messages: [] });
+    assert.equal(observation.updates.at(-1)?.metadata?.superpowers_phase, "development");
+  } finally {
+    setPhase(null);
+    __setRuntimeForTest(null);
+    clearAllSessionStates();
+    state.config = previousConfig;
   }
 });
 type ExtensionHandler = Parameters<ExtensionAPI["on"]>[1];

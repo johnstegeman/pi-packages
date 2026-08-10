@@ -11,6 +11,7 @@ import {
   state,
 } from "../src/state.ts";
 import type { AgentState, LangfuseObservation, ObservationUpdate } from "../src/types.js";
+import { setPhase } from "../src/phase.js";
 
 class FakeObservation implements LangfuseObservation {
   id = "fake-observation";
@@ -109,4 +110,34 @@ test("finishGenerationFromMessage preserves modelParameters on update from event
     reasoning_effort: "high",
   });
   assert.equal(child?.ended, true);
+});
+
+test("startGeneration includes retained phase in generation metadata", async () => {
+  clearAllSessionStates();
+  setCurrentSession("generation-phase-test");
+  const root = new FakeObservation();
+  state.agentState = makeAgentState(root);
+  try {
+    setPhase("development");
+    await startGeneration({ requestId: "request-phase", payload: { model: "gpt-test" } });
+    assert.equal(root.children[0]?.body?.metadata?.superpowers_phase, "development");
+  } finally {
+    setPhase(null);
+    clearAllSessionStates();
+  }
+});
+
+test("startGeneration omits cleared phase from generation metadata", async () => {
+  clearAllSessionStates();
+  setCurrentSession("generation-phase-cleared-test");
+  const root = new FakeObservation();
+  state.agentState = makeAgentState(root);
+  try {
+    setPhase(null);
+    await startGeneration({ requestId: "request-cleared", payload: { model: "gpt-test" } });
+    assert.equal(root.children[0]?.body?.metadata?.superpowers_phase, undefined);
+  } finally {
+    setPhase(null);
+    clearAllSessionStates();
+  }
 });
