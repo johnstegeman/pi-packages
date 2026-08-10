@@ -85,8 +85,9 @@ no phase is persisted. The value follows the same capture-policy path as the
 extension's git source metadata. In addition to the metadata, the extension
 maintains a single trace-level tag named `phase:<latest-phase>` reflecting
 the current phase. Traces can begin untagged (before any phase event is
-received). When the phase changes, the previous `phase:*` tag is replaced
-with the new one, and clearing the phase removes the tag entirely.
+received). When the phase changes, all existing `phase:*` tags are removed
+before the new one is applied, unrelated tags are preserved, and clearing the
+phase removes all `phase:*` tags entirely.
 
 ## Upstream provenance
 
