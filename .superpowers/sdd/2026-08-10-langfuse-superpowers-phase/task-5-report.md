@@ -46,7 +46,7 @@ Changes:
 - Expanded `packages/langfuse/README.md` with credentials/host, privacy presets and capture behavior, flush/timeout/tracing settings, payload limits, debug logging, and shutdown timeout documentation.
 
 Verification commands and results:
-1. `python3 - <<'PY' ...` fence-balance check for `README.md`, `AGENTS.md`, and `packages/langfuse/README.md` — passed; delimiter counts were 12, 2, and 4, respectively, all balanced.
+1. `python3 -c 'from pathlib import Path\nfor name in ["README.md","AGENTS.md","packages/langfuse/README.md"]:\n text=Path(name).read_text(); fences=sum(1 for line in text.splitlines() if line.strip().startswith("```")); print(f"{name}: fenced-delimiter-count={fences}, balanced={fences % 2 == 0}"); assert fences % 2 == 0'` — passed; delimiter counts were 12, 2, and 4, respectively, all balanced.
 2. `git diff --check` — passed.
 3. `cd packages/langfuse && npm run typecheck` — passed (`tsc --noEmit`).
 4. `cd packages/langfuse && npm test` — passed: 81 tests, 81 passed, 0 failed.
