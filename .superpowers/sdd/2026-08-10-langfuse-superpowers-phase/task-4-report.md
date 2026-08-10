@@ -72,3 +72,32 @@ The final suite includes all upstream tests and phase-tracker tests; focused pha
    - **Passed:** 81; **Failed:** 0; **Cancelled:** 0; **Skipped:** 0.
 
 **Commit:** `fix: require superpowers phase event bus` (final commit includes this report update).
+
+
+## Final review fix report: handler metadata coverage
+
+**Status:** Completed and committed focused tests for the final Important review gap. No production behavior or package scope was changed.
+
+**Changes:**
+- Added root handler coverage proving retained `superpowers_phase` reaches the root start observation metadata and root finish update metadata using a fake Langfuse runtime/observation.
+- Added generation-start coverage proving retained phase metadata is attached and cleared phase metadata omits `superpowers_phase`.
+- Extended the existing listener fixture to verify malformed (`null`) and non-string (`{ phase: 42 }`) payloads clear retained state.
+- Every test isolates module-global phase state with `setPhase(null)` in `finally` blocks.
+- Clarification: upstream tests were not left unchanged; `test/index.test.ts` already contained prior Task 4 listener coverage and this fix adds further focused assertions there, alongside new generation-handler tests.
+
+**Commits:**
+- `0bc5ef754310579bade7d4a83088ed7377c1dc59` — `test: cover phase metadata in langfuse handlers`
+- This report update follows the test commit.
+
+**Exact verification results:**
+1. `cd packages/langfuse && node --import tsx --test test/index.test.ts test/generation.test.ts` — passed: 9 tests, 9 passed, 0 failed, 0 cancelled, 0 skipped.
+2. `cd packages/langfuse && npm run typecheck` — passed: TypeScript compilation with `tsc --noEmit`.
+3. `cd packages/langfuse && npm test` — passed: 84 tests, 84 passed, 0 failed, 0 cancelled, 0 skipped.
+4. `cd packages/bifrost && npm test` — passed: 12 tests, 12 passed, 0 failed, 0 cancelled, 0 skipped.
+5. `cd packages/hashline-edit && npm test` — passed: 87 tests, 87 passed, 0 failed, 0 cancelled, 0 skipped.
+6. `cd packages/statusline && npm test` — passed: 31 tests, 31 passed, 0 failed, 0 cancelled, 0 skipped.
+7. `git diff --check` — passed.
+
+**Concerns:**
+- The existing bifrost, hashline-edit, and statusline test runs emitted Node `module.register()` deprecation warnings; they did not affect results.
+- The pre-existing untracked `.pi/` directory remains intentionally unstaged.
