@@ -7,6 +7,10 @@ test("non-empty string is retained", () => {
   assert.equal(applyPhaseUpdate(null, "brainstorming"), "brainstorming");
 });
 
+test("non-empty string with surrounding whitespace is retained verbatim", () => {
+  assert.equal(applyPhaseUpdate(null, "  development  "), "  development  ");
+});
+
 test("empty string clears the retained phase", () => {
   assert.equal(applyPhaseUpdate("brainstorming", ""), null);
 });
@@ -28,11 +32,14 @@ test("retained value is replaced by a new non-empty phase", () => {
 });
 
 test("buildPhaseMetadata returns the phase fragment when retained", () => {
+  setPhase(null);
   setPhase("development");
   assert.deepEqual(buildPhaseMetadata(), { superpowers_phase: "development" });
+  setPhase(null);
 });
 
 test("buildPhaseMetadata returns {} when cleared", () => {
   setPhase(null);
   assert.deepEqual(buildPhaseMetadata(), {});
+  setPhase(null);
 });
