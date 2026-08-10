@@ -128,17 +128,23 @@ test("phase events synchronize tags on the active trace", async () => {
     end() {},
   };
   const updateTraceTagsCalls: Array<[string, string[]]> = [];
+  const getTraceTagsCalls: Array<[string, string[]]> = [];
+  let currentTags = ["team:alpha", "phase:development", "phase:legacy"];
   let shouldReject = false;
   const runtime: LangfuseRuntime = {
     startObservation: (_name, _body) => observation,
     propagateAttributes: (_attributes, fn) => fn(),
     scoreClient: {},
-    getTraceTags: async () => [],
+    getTraceTags: async (traceId) => {
+      getTraceTagsCalls.push([traceId, [...currentTags]]);
+      return [...currentTags];
+    },
     updateTraceTags: async (traceId, tags) => {
       updateTraceTagsCalls.push([traceId, tags]);
       if (shouldReject) {
         throw new Error("boom");
       }
+      currentTags = [...tags];
     },
   };
 
@@ -162,17 +168,17 @@ test("phase events synchronize tags on the active trace", async () => {
 
     await startAgentRun({ prompt: "test" }, {});
 
-    phaseHandler!({ phase: "development" });
-    await new Promise((resolve) => setTimeout(resolve, 0));
-    assert.deepEqual(updateTraceTagsCalls.at(-1), ["trace-id", ["phase:development"]]);
-
     phaseHandler!({ phase: "brainstorming" });
     await new Promise((resolve) => setTimeout(resolve, 0));
-    assert.deepEqual(updateTraceTagsCalls.at(-1), ["trace-id", ["phase:brainstorming"]]);
+    assert.deepEqual(getTraceTagsCalls.at(-1), ["trace-id", ["team:alpha", "phase:development", "phase:legacy"]]);
+    assert.deepEqual(updateTraceTagsCalls.at(-1), ["trace-id", ["team:alpha", "phase:brainstorming"]]);
+    assert.deepEqual(currentTags, ["team:alpha", "phase:brainstorming"]);
 
     phaseHandler!(null);
     await new Promise((resolve) => setTimeout(resolve, 0));
-    assert.deepEqual(updateTraceTagsCalls.at(-1), ["trace-id", []]);
+    assert.deepEqual(getTraceTagsCalls.at(-1), ["trace-id", ["team:alpha", "phase:brainstorming"]]);
+    assert.deepEqual(updateTraceTagsCalls.at(-1), ["trace-id", ["team:alpha"]]);
+    assert.deepEqual(currentTags, ["team:alpha"]);
 
     shouldReject = true;
     await assert.doesNotReject(async () => {
@@ -186,6 +192,57 @@ test("phase events synchronize tags on the active trace", async () => {
     state.config = previousConfig;
   }
 });
+
+test("phase tag sync skips update when reading current tags fails", async () => {
+  const previousConfig = state.config;
+  const observation = {
+    traceId: "trace-id",
+    setTraceIO() {},
+    update() {
+      return this;
+    },
+    end() {},
+  };
+  let updateTraceTagsCalls = 0;
+  const runtime: LangfuseRuntime = {
+    startObservation: (_name, _body) => observation,
+    propagateAttributes: (_attributes, fn) => fn(),
+    scoreClient: {},
+    getTraceTags: async () => {
+      throw new Error("read failed");
+    },
+    updateTraceTags: async () => {
+      updateTraceTagsCalls += 1;
+    },
+  };
+  let phaseHandler: ((data: unknown) => void) | undefined;
+
+  try {
+    state.config = { publicKey: "pk_test", secretKey: "sk_test", host: "https://example.com" };
+    __setRuntimeForTest(runtime);
+    await registerExtension({
+      registerCommand() {},
+      events: {
+        emit() {},
+        on(_channel, handler) {
+          phaseHandler = handler;
+          return () => {};
+        },
+      },
+      on() {},
+    } as any);
+    await startAgentRun({ prompt: "test" }, {});
+    phaseHandler!({ phase: "development" });
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    assert.equal(updateTraceTagsCalls, 0);
+  } finally {
+    setPhase(null);
+    __setRuntimeForTest(null);
+    clearAllSessionStates();
+    state.config = previousConfig;
+  }
+});
+
 
 test("concurrent sessions never cross trace ids or tags during phase sync", async () => {
   const previousConfig = state.config;

@@ -5,7 +5,7 @@ import { shapePayload, truncate, extractFinalAssistant, extractAssistantOutput, 
 import { closeDanglingObservations } from "./tool.js";
 import { applyCapturePolicy } from "../capture-policy.js";
 import { collectSourceMetadata } from "../source-metadata.js";
-import { buildPhaseMetadata, buildPhaseTags } from "../phase.js";
+import { buildPhaseMetadata, buildPhaseTags, replacePhaseTags } from "../phase.js";
 
 function stringMetadata(metadata: Record<string, unknown> | undefined): Record<string, string> | undefined {
   if (!metadata) {
@@ -55,7 +55,9 @@ export async function syncActiveTracePhaseTags(): Promise<void> {
   const next = previous.then(async () => {
     try {
       const rt = await getRuntime();
-      await rt.updateTraceTags(traceId, desiredTags);
+      const currentTags = await rt.getTraceTags(traceId);
+      const replacementTags = replacePhaseTags(currentTags, desiredTags);
+      await rt.updateTraceTags(traceId, replacementTags);
     } catch (e) {
       console.warn("\u{1F4CA} Langfuse: Failed to update phase tags", e);
     }
