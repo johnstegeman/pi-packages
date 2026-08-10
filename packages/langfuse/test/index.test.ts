@@ -55,12 +55,16 @@ test("root agent observations receive retained phase metadata", async () => {
     },
     end() {},
   };
+  let propagatedAttributes: Record<string, any> | undefined;
   const runtime: LangfuseRuntime = {
     startObservation: (_name, body) => {
       observation.metadata = body?.metadata;
       return observation;
     },
-    propagateAttributes: (_attributes, fn) => fn(),
+    propagateAttributes: (attributes, fn) => {
+      propagatedAttributes = attributes as Record<string, any>;
+      return fn();
+    },
     scoreClient: {},
   };
   try {
@@ -69,8 +73,109 @@ test("root agent observations receive retained phase metadata", async () => {
     setPhase("development");
     await startAgentRun({ prompt: "test" }, {});
     assert.equal(observation.metadata?.superpowers_phase, "development");
+    assert.deepEqual(propagatedAttributes?.tags, ["phase:development"]);
     await finishAgentRun({ messages: [] });
     assert.equal(observation.updates.at(-1)?.metadata?.superpowers_phase, "development");
+  } finally {
+    setPhase(null);
+    __setRuntimeForTest(null);
+    clearAllSessionStates();
+    state.config = previousConfig;
+  }
+});
+
+test("root agent observations omit tags attribute when no phase is retained", async () => {
+  const previousConfig = state.config;
+  const observation = {
+    traceId: "trace-id",
+    setTraceIO() {},
+    update() {
+      return this;
+    },
+    end() {},
+  };
+  let propagatedAttributes: Record<string, any> | undefined;
+  const runtime: LangfuseRuntime = {
+    startObservation: (_name, _body) => observation,
+    propagateAttributes: (attributes, fn) => {
+      propagatedAttributes = attributes as Record<string, any>;
+      return fn();
+    },
+    scoreClient: {},
+  };
+  try {
+    state.config = { publicKey: "pk_test", secretKey: "sk_test", host: "https://example.com" };
+    __setRuntimeForTest(runtime);
+    await startAgentRun({ prompt: "test" }, {});
+    assert.equal(propagatedAttributes?.tags, undefined);
+  } finally {
+    __setRuntimeForTest(null);
+    clearAllSessionStates();
+    state.config = previousConfig;
+  }
+});
+
+test("phase events synchronize tags on the active trace", async () => {
+  const previousConfig = state.config;
+  const observation = {
+    traceId: "trace-id",
+    setTraceIO() {},
+    update() {
+      return this;
+    },
+    end() {},
+  };
+  const updateTraceTagsCalls: Array<[string, string[]]> = [];
+  let shouldReject = false;
+  const runtime: LangfuseRuntime = {
+    startObservation: (_name, _body) => observation,
+    propagateAttributes: (_attributes, fn) => fn(),
+    scoreClient: {},
+    updateTraceTags: async (traceId, tags) => {
+      updateTraceTagsCalls.push([traceId, tags]);
+      if (shouldReject) {
+        throw new Error("boom");
+      }
+    },
+  };
+
+  let phaseHandler: ((data: unknown) => void) | undefined;
+
+  try {
+    state.config = { publicKey: "pk_test", secretKey: "sk_test", host: "https://example.com" };
+    __setRuntimeForTest(runtime);
+
+    await registerExtension({
+      registerCommand() {},
+      events: {
+        emit() {},
+        on(_channel, handler) {
+          phaseHandler = handler;
+          return () => {};
+        },
+      },
+      on() {},
+    } as any);
+
+    await startAgentRun({ prompt: "test" }, {});
+
+    phaseHandler!({ phase: "development" });
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    assert.deepEqual(updateTraceTagsCalls.at(-1), ["trace-id", ["phase:development"]]);
+
+    phaseHandler!({ phase: "brainstorming" });
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    assert.deepEqual(updateTraceTagsCalls.at(-1), ["trace-id", ["phase:brainstorming"]]);
+
+    phaseHandler!(null);
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    assert.deepEqual(updateTraceTagsCalls.at(-1), ["trace-id", []]);
+
+    shouldReject = true;
+    await assert.doesNotReject(async () => {
+      phaseHandler!({ phase: "development" });
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    });
   } finally {
     setPhase(null);
     __setRuntimeForTest(null);

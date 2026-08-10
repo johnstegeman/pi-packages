@@ -5,7 +5,7 @@ import { shapePayload, truncate, extractFinalAssistant, extractAssistantOutput, 
 import { closeDanglingObservations } from "./tool.js";
 import { applyCapturePolicy } from "../capture-policy.js";
 import { collectSourceMetadata } from "../source-metadata.js";
-import { buildPhaseMetadata } from "../phase.js";
+import { buildPhaseMetadata, buildPhaseTags } from "../phase.js";
 
 function stringMetadata(metadata: Record<string, unknown> | undefined): Record<string, string> | undefined {
   if (!metadata) {
@@ -21,6 +21,26 @@ function stringMetadata(metadata: Record<string, unknown> | undefined): Record<s
     }
   }
   return Object.keys(output).length > 0 ? output : undefined;
+}
+
+let tagSyncChain: Promise<void> = Promise.resolve();
+
+export async function syncActiveTracePhaseTags(): Promise<void> {
+  tagSyncChain = tagSyncChain.then(async () => {
+    const root = state.agentState?.root;
+    const traceId = state.agentState?.traceId;
+    if (!root || !traceId) {
+      return;
+    }
+
+    try {
+      const rt = await getRuntime();
+      await rt.updateTraceTags(traceId, buildPhaseTags());
+    } catch (e) {
+      console.warn("\u{1F4CA} Langfuse: Failed to update phase tags", e);
+    }
+  });
+  return tagSyncChain;
 }
 
 export function updateTraceIO(input?: unknown, output?: unknown) {
@@ -87,11 +107,13 @@ export async function startAgentRun(event: Record<string, unknown>, ctx: any) {
       providerMetadataByRequest: new Map(),
     };
 
+    const phaseTags = buildPhaseTags();
     const root = rt.propagateAttributes(
       {
         sessionId: state.currentSessionId ? truncate(state.currentSessionId, 200) : undefined,
         traceName: "pi-agent",
         metadata: stringMetadata(captured.metadata),
+        ...(phaseTags.length > 0 ? { tags: phaseTags } : {}),
       },
       () =>
         rt.startObservation(

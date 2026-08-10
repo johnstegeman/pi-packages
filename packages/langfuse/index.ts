@@ -17,7 +17,7 @@ import { handleLangfusePrivacyCommand, handleLangfuseStatusCommand, handleLangfu
 import { getMessageFromEvent, extractAssistantOutput, getCapturePolicy } from "./src/utils.js";
 import { applyCapturePolicy } from "./src/capture-policy.js";
 import { setPhase } from "./src/phase.js";
-import { startAgentRun, finishAgentRun, recordSystemPrompt } from "./src/handlers/agent.js";
+import { startAgentRun, finishAgentRun, recordSystemPrompt, syncActiveTracePhaseTags } from "./src/handlers/agent.js";
 import { startTurnObservation, finishTurnObservation } from "./src/handlers/turn.js";
 import {
   startGeneration,
@@ -84,6 +84,7 @@ export default async function (pi: ExtensionAPI) {
         ? (data as { phase: unknown }).phase
         : undefined;
     setPhase(typeof phase === "string" ? phase : null);
+    void syncActiveTracePhaseTags();
   });
 
   const getSessionId = (ctx?: unknown): string | undefined => {
