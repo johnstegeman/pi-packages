@@ -194,7 +194,7 @@ set_phase tool (Superpowers)
 
 ### Testing
 
-- Keep all 16 upstream test files untouched (they characterize vendored
+- Keep all 13 upstream test files untouched (they characterize vendored
   behavior we did not change).
 - New `packages/langfuse/test/phase-tracker.test.ts` (repo's `node:test` +
   `node:assert/strict` pattern), testing `src/phase.ts`:
