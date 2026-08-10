@@ -8,6 +8,34 @@ import { clearAllSessionStates, state } from "../src/state.ts";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import type { LangfuseRuntime } from "../src/types.ts";
 
+import { buildPhaseMetadata, setPhase } from "../src/phase.ts";
+
+test("registers the Superpowers phase event listener", async () => {
+  let registeredChannel: string | undefined;
+  let phaseHandler: ((data: unknown) => void) | undefined;
+
+  try {
+    await registerExtension({
+      registerCommand() {},
+      events: {
+        emit() {},
+        on(channel, handler) {
+          registeredChannel = channel;
+          phaseHandler = handler;
+          return () => {};
+        },
+      },
+      on() {},
+    } as any);
+
+    assert.equal(registeredChannel, "superpowers:phase");
+    assert.ok(phaseHandler);
+    phaseHandler!({ phase: "development" });
+    assert.deepEqual(buildPhaseMetadata(), { superpowers_phase: "development" });
+  } finally {
+    setPhase(null);
+  }
+});
 type ExtensionHandler = Parameters<ExtensionAPI["on"]>[1];
 
 test("agent_end waits for runtime shutdown", async () => {
@@ -40,6 +68,10 @@ test("agent_end waits for runtime shutdown", async () => {
     __setRuntimeForTest(runtime, 1_000);
     await registerExtension({
       registerCommand() {},
+      events: {
+        emit() {},
+        on() { return () => {}; },
+      },
       on(name: string, handler: (event: Record<string, unknown>, ctx: unknown) => Promise<void>) {
         handlers.set(name, handler);
       },
@@ -103,6 +135,10 @@ void test("uses logical Pi session IDs with the legacy file fallback", async () 
     await registerExtension({
       registerCommand() {
         return undefined;
+      },
+      events: {
+        emit() {},
+        on() { return () => {}; },
       },
       on(name, handler) {
         handlers.set(name, handler);

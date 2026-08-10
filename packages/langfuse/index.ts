@@ -78,7 +78,7 @@ export default async function (pi: ExtensionAPI) {
   // ---- Superpowers phase tracking -----------------------------------------
   // Superpowers emits { phase } on this shared event bus. Retain the latest
   // non-empty value for live metadata attachment on Langfuse observations.
-  pi.events?.on("superpowers:phase", (data) => {
+  pi.events.on("superpowers:phase", (data) => {
     const phase =
       typeof data === "object" && data !== null && "phase" in data
         ? (data as { phase: unknown }).phase
