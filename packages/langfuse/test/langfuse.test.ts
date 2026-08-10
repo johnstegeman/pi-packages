@@ -35,6 +35,9 @@ function createTestRuntime(overrides: Partial<LangfuseRuntime> = {}): LangfuseRu
     updateTraceTags: (() => {
       throw new Error("not used");
     }) as LangfuseRuntime["updateTraceTags"],
+    getTraceTags: (() => {
+      throw new Error("not used");
+    }) as LangfuseRuntime["getTraceTags"],
     scoreClient: {},
     ...overrides,
   };
@@ -135,6 +138,7 @@ test("force shutdown does not hang when Langfuse SDK shutdown stalls", async () 
       flush: never,
       shutdown: never,
     },
+    getTraceTags: async () => [],
     tracerProvider: {
       forceFlush: never,
       shutdown: never,
@@ -178,6 +182,7 @@ test("force shutdown applies one total deadline to stalled telemetry operations"
       flush: never,
       shutdown: never,
     },
+    getTraceTags: async () => [],
     tracerProvider: {
       forceFlush: never,
       shutdown: never,
@@ -359,6 +364,66 @@ test("runtime preserves the configured Langfuse OTel request timeout", async () 
     } else {
       process.env.LANGFUSE_TIMEOUT = previousTimeout;
     }
+  }
+});
+
+test("runtime retrieves existing trace tags through the Langfuse client trace API", async () => {
+  const originalFetch = globalThis.fetch;
+  const previousConfig = state.config;
+  const requests: Array<{ url: string; method: string | undefined }> = [];
+  let responseBody: unknown = {
+    id: "trace-1",
+    timestamp: new Date().toISOString(),
+    name: "pi-agent",
+    sessionId: null,
+    release: null,
+    version: null,
+    userId: null,
+    tags: ["phase:stale-a", "phase:stale-b", "unrelated"],
+    public: false,
+    environment: "default",
+  };
+  const successfulFetch = (async (input, init) => {
+    requests.push({ url: String(input), method: init?.method });
+    return new Response(JSON.stringify(responseBody), {
+      status: 200,
+      headers: { "content-type": "application/json" },
+    });
+  }) as typeof fetch;
+  globalThis.fetch = successfulFetch;
+  state.config = {
+    publicKey: "pk_test",
+    secretKey: "sk_test",
+    host: "https://example.com",
+  };
+
+  try {
+    const runtime = await getRuntime();
+    const getTraceTags = runtime.getTraceTags;
+    assert.deepEqual(await getTraceTags("trace-1"), [
+      "phase:stale-a",
+      "phase:stale-b",
+      "unrelated",
+    ]);
+    assert.equal(requests[0]?.url, "https://example.com/api/public/traces/trace-1");
+    assert.equal(requests[0]?.method, "GET");
+
+    responseBody = { ...responseBody, tags: "not-an-array" };
+    assert.deepEqual(await getTraceTags("trace-1"), []);
+
+    responseBody = { ...responseBody, tags: undefined };
+    assert.deepEqual(await getTraceTags("trace-1"), []);
+
+    globalThis.fetch = (async () => new Response(JSON.stringify({ message: "failed" }), {
+      status: 500,
+      headers: { "content-type": "application/json" },
+    })) as typeof fetch;
+    await assert.rejects(() => getTraceTags("trace-1"));
+    globalThis.fetch = successfulFetch;
+  } finally {
+    await forceShutdownRuntime();
+    state.config = previousConfig;
+    globalThis.fetch = originalFetch;
   }
 });
 
@@ -735,6 +800,7 @@ test("scores are buffered instead of starting an unbounded SDK request", async (
         },
       },
     },
+    getTraceTags: async () => [],
     pendingScores: [],
   } satisfies LangfuseRuntime;
   const previousConfig = state.config;
@@ -773,6 +839,7 @@ test("score flush uses the runtime's original config after global config is clea
       throw new Error("not used");
     }) as LangfuseRuntime["updateTraceTags"],
     scoreClient: {},
+    getTraceTags: async () => [],
     runtimeConfig: {
       publicKey: "pk-old",
       secretKey: "sk-old",
@@ -829,6 +896,7 @@ test("score flush logs per-event ingestion errors", async () => {
       throw new Error("not used");
     }) as LangfuseRuntime["updateTraceTags"],
     scoreClient: {},
+    getTraceTags: async () => [],
     runtimeConfig: {
       publicKey: "pk-test",
       secretKey: "sk-test",

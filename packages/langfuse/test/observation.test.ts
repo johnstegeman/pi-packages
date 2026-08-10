@@ -28,6 +28,7 @@ function makeRuntime(calls: string[]): LangfuseRuntime {
     propagateAttributes(_params, fn) {
       return fn();
     },
+    getTraceTags: async () => [],
     scoreClient: {},
   };
 }

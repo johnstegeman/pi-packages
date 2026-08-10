@@ -760,6 +760,11 @@ export async function getRuntime(): Promise<LangfuseRuntime> {
       const tracerProvider = new BasicTracerProvider({ spanProcessors: [spanProcessor] });
       tracing.setLangfuseTracerProvider(tracerProvider);
 
+      const client = new LangfuseClient({
+        publicKey: state.config.publicKey,
+        secretKey: state.config.secretKey,
+        baseUrl: state.config.host,
+      });
       runtime = {
         startObservation: ((name: string, body?: Record<string, unknown>, options?: { asType?: string }) => {
           const observation = (tracing as any).startObservation(name, body, options);
@@ -767,11 +772,13 @@ export async function getRuntime(): Promise<LangfuseRuntime> {
         }) as unknown as LangfuseRuntime["startObservation"],
         propagateAttributes: tracing.propagateAttributes as unknown as LangfuseRuntime["propagateAttributes"],
         updateTraceTags: (traceId: string, tags: string[]) => updateTraceTags(runtime as LangfuseRuntime, traceId, tags),
-        scoreClient: new LangfuseClient({
-          publicKey: state.config.publicKey,
-          secretKey: state.config.secretKey,
-          baseUrl: state.config.host,
-        }) as LangfuseScoreClient,
+        getTraceTags: async (traceId: string) => {
+          const response = await (client as unknown as {
+            fetchTrace: (traceId: string) => Promise<{ tags?: unknown }>;
+          }).fetchTrace(traceId);
+          return Array.isArray(response?.tags) ? response.tags : [];
+        },
+        scoreClient: client as LangfuseScoreClient,
         spanProcessor,
         tracerProvider,
         clearTracerProvider: () => tracing.setLangfuseTracerProvider(null),

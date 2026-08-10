@@ -34,6 +34,7 @@ test("test command does not hang when direct Langfuse flush stalls", async () =>
   const runtime: LangfuseRuntime = {
     startObservation: () => makeObservation(),
     propagateAttributes: (_params, fn) => fn(),
+    getTraceTags: async () => [],
     scoreClient: {
       flush: never,
     },

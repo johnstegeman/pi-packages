@@ -28,6 +28,7 @@ const runtime = {
   propagateAttributes: (() => {
     throw new Error("not used");
   }) as LangfuseRuntime["propagateAttributes"],
+  getTraceTags: async () => [],
   scoreClient: {},
   runtimeConfig: { ...state.config },
   pendingScores: [],

@@ -66,6 +66,7 @@ test("root agent observations receive retained phase metadata", async () => {
       return fn();
     },
     scoreClient: {},
+    getTraceTags: async () => [],
   };
   try {
     state.config = { publicKey: "pk_test", secretKey: "sk_test", host: "https://example.com" };
@@ -102,6 +103,7 @@ test("root agent observations omit tags attribute when no phase is retained", as
       return fn();
     },
     scoreClient: {},
+    getTraceTags: async () => [],
   };
   try {
     state.config = { publicKey: "pk_test", secretKey: "sk_test", host: "https://example.com" };
@@ -131,6 +133,7 @@ test("phase events synchronize tags on the active trace", async () => {
     startObservation: (_name, _body) => observation,
     propagateAttributes: (_attributes, fn) => fn(),
     scoreClient: {},
+    getTraceTags: async () => [],
     updateTraceTags: async (traceId, tags) => {
       updateTraceTagsCalls.push([traceId, tags]);
       if (shouldReject) {
@@ -196,6 +199,7 @@ test("concurrent sessions never cross trace ids or tags during phase sync", asyn
     startObservation: (_name, _body) => observations[state.currentSessionId] as any,
     propagateAttributes: (_attributes, fn) => fn(),
     scoreClient: {},
+    getTraceTags: async () => [],
     updateTraceTags: async (traceId, tags) => {
       if (traceId === "trace-a") {
         await new Promise<void>((resolve) => {
@@ -271,6 +275,7 @@ test("agent_end waits for runtime shutdown", async () => {
       throw new Error("not used");
     }) as LangfuseRuntime["propagateAttributes"],
     scoreClient: {},
+    getTraceTags: async () => [],
     tracerProvider: {
       forceFlush: () => new Promise<void>((resolve) => {
         forceFlushStarted = true;
@@ -343,6 +348,7 @@ void test("uses logical Pi session IDs with the legacy file fallback", async () 
       return fn();
     },
     scoreClient: {},
+    getTraceTags: async () => [],
   };
 
   try {
