@@ -45,5 +45,10 @@ declare module "@langfuse/client" {
       secretKey: string;
       baseUrl: string;
     });
+    api: {
+      trace: {
+        get(traceId: string): Promise<{ tags?: unknown }>;
+      };
+    };
   }
 }

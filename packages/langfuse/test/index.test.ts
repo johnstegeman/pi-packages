@@ -193,7 +193,7 @@ test("phase events synchronize tags on the active trace", async () => {
   }
 });
 
-test("phase tag sync skips update when reading current tags fails", async () => {
+test("phase tag sync retries the same phase after a failed read", async () => {
   const previousConfig = state.config;
   const observation = {
     traceId: "trace-id",
@@ -204,19 +204,23 @@ test("phase tag sync skips update when reading current tags fails", async () => 
     end() {},
   };
   let updateTraceTagsCalls = 0;
+  let shouldReject = true;
   const runtime: LangfuseRuntime = {
     startObservation: (_name, _body) => observation,
     propagateAttributes: (_attributes, fn) => fn(),
     scoreClient: {},
     getTraceTags: async () => {
-      throw new Error("read failed");
+      if (shouldReject) {
+        throw new Error("read failed");
+      }
+      return [];
     },
     updateTraceTags: async () => {
       updateTraceTagsCalls += 1;
     },
   };
   let phaseHandler: ((data: unknown) => void) | undefined;
-
+  
   try {
     state.config = { publicKey: "pk_test", secretKey: "sk_test", host: "https://example.com" };
     __setRuntimeForTest(runtime);
@@ -235,6 +239,11 @@ test("phase tag sync skips update when reading current tags fails", async () => 
     phaseHandler!({ phase: "development" });
     await new Promise((resolve) => setTimeout(resolve, 0));
     assert.equal(updateTraceTagsCalls, 0);
+    
+    shouldReject = false;
+    phaseHandler!({ phase: "development" });
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    assert.equal(updateTraceTagsCalls, 1);
   } finally {
     setPhase(null);
     __setRuntimeForTest(null);

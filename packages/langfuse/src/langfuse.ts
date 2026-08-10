@@ -773,9 +773,7 @@ export async function getRuntime(): Promise<LangfuseRuntime> {
         propagateAttributes: tracing.propagateAttributes as unknown as LangfuseRuntime["propagateAttributes"],
         updateTraceTags: (traceId: string, tags: string[]) => updateTraceTags(runtime as LangfuseRuntime, traceId, tags),
         getTraceTags: async (traceId: string) => {
-          const response = await (client as unknown as {
-            fetchTrace: (traceId: string) => Promise<{ tags?: unknown }>;
-          }).fetchTrace(traceId);
+          const response = await client.api.trace.get(traceId);
           return Array.isArray(response?.tags) ? response.tags : [];
         },
         scoreClient: client as LangfuseScoreClient,

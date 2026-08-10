@@ -59,7 +59,10 @@ export async function syncActiveTracePhaseTags(): Promise<void> {
       const replacementTags = replacePhaseTags(currentTags, desiredTags);
       await rt.updateTraceTags(traceId, replacementTags);
     } catch (e) {
-      console.warn("\u{1F4CA} Langfuse: Failed to update phase tags", e);
+      if (lastSentTagsBySession.get(sessionKey) === desiredTagsKey) {
+        lastSentTagsBySession.delete(sessionKey);
+      }
+      console.warn("📊 Langfuse: Failed to update phase tags", e);
     }
   });
   tagSyncChains.set(sessionKey, next);
