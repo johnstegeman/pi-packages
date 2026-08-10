@@ -8,10 +8,9 @@ Guidance for AI coding agents working in this repo.
 packages/
 ├── ayu/         – Ayu color scheme for Pi (Day, Dusk, Dark)
 ├── bifrost/     – Custom provider for Bifrost AI gateway
-├── langfuse/     – Langfuse observability with Superpowers phase metadata
-└── statusline/   – Single-line statusline footer with ayu/tokyo-night/classic presets
-├── langfuse/     – Langfuse observability with Superpowers phase metadata
-└── statusline/   – Single-line statusline footer with ayu/tokyo-night/classic presets
+├── hashline-edit/ – Hash-anchored read/edit tool override, with opt-in grep
+├── langfuse/    – Langfuse observability with Superpowers phase metadata
+└── statusline/  – Single-line statusline footer with ayu/tokyo-night/classic presets
 ```
 
 This is a monorepo of independent pi extensions/themes. Each package under

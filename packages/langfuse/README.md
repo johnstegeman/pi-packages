@@ -22,13 +22,58 @@ npm run typecheck
 
 ## Configure
 
-Run `/langfuse-setup` inside Pi, or set the required credentials in the environment:
+Run `/langfuse-setup` inside Pi, or set the following environment variables. Both
+`LANGFUSE_PUBLIC_KEY` and `LANGFUSE_SECRET_KEY` are required to enable tracing.
+
+### Credentials and transport
 
 - `LANGFUSE_PUBLIC_KEY` — required public key.
 - `LANGFUSE_SECRET_KEY` — required secret key.
-- `LANGFUSE_BASE_URL` or `LANGFUSE_HOST` — optional host, defaulting to `https://cloud.langfuse.com`.
+- `LANGFUSE_BASE_URL` or `LANGFUSE_HOST` — optional host, defaulting to
+  `https://cloud.langfuse.com`. `LANGFUSE_BASE_URL` takes precedence when both are set.
+- `LANGFUSE_TRACING_ENVIRONMENT` — optional Langfuse tracing environment name.
+- `LANGFUSE_TIMEOUT` — positive request timeout in seconds; defaults to 5.
+- `LANGFUSE_FLUSH_AT` — positive number of queued scores that triggers a flush;
+  defaults to 10.
+- `LANGFUSE_FLUSH_INTERVAL` — positive score-flush interval in seconds; defaults
+  to 1.
 
-Optional environment controls include `LANGFUSE_PRIVACY_PRESET`, `LANGFUSE_CAPTURE_INPUTS`, `LANGFUSE_CAPTURE_OUTPUTS`, `LANGFUSE_CAPTURE_TOOL_IO`, `LANGFUSE_CAPTURE_SYSTEM_PROMPT`, and `LANGFUSE_CAPTURE_CWD`. `PI_LANGFUSE_SCORE_SHUTDOWN_TIMEOUT` bounds the final score-delivery attempt during shutdown and defaults to 2 seconds. Use `/langfuse-status` to inspect configuration and `/langfuse-privacy` to view or change the capture preset.
+### Privacy and capture
+
+`LANGFUSE_PRIVACY_PRESET` accepts exactly these values:
+
+| Preset | Captures | Omits |
+| --- | --- | --- |
+| `metadata-only` | Redacted metadata (except `cwd`) | Inputs, outputs, tool input/output, system prompt, and `cwd` |
+| `prompts-only` | Redacted inputs and metadata (except `cwd`) | Outputs, tool input/output, system prompt, and `cwd` |
+| `conversations` | Redacted inputs, outputs, and metadata (except `cwd`) | Tool input/output, system prompt, and `cwd` |
+| `full-debug` | Redacted inputs, outputs, tool input/output, system prompt, and metadata including `cwd` | Nothing from these capture categories |
+
+The default, and the fallback for an unrecognized preset, is `full-debug`. The
+individual boolean controls `LANGFUSE_CAPTURE_INPUTS`,
+`LANGFUSE_CAPTURE_OUTPUTS`, `LANGFUSE_CAPTURE_TOOL_IO`,
+`LANGFUSE_CAPTURE_SYSTEM_PROMPT`, and `LANGFUSE_CAPTURE_CWD` override the preset
+when set to `1`, `true`, `yes`, or `on` (or disable it with `0`, `false`, `no`,
+or `off`). Captured values are redacted and shaped according to the payload
+limits below; disabled fields are omitted. Use `/langfuse-status` to inspect
+configuration and `/langfuse-privacy` to view or change the capture preset.
+
+### Payload limits and diagnostics
+
+The `PI_LANGFUSE_*` variables are package-specific safeguards. Each accepts a
+positive number (rounded down); `0`, `off`, `none`, `false`, `no`, `unlimited`,
+`inf`, or `infinity` removes that limit. Unset, blank, or invalid values retain
+the built-in default.
+
+- `PI_LANGFUSE_MAX_STRING_LENGTH` — maximum characters per captured string.
+- `PI_LANGFUSE_MAX_TOOL_PAYLOAD_LENGTH` — maximum characters for tool inputs/outputs.
+- `PI_LANGFUSE_MAX_DEPTH` — maximum structured-payload nesting depth.
+- `PI_LANGFUSE_MAX_ARRAY_ITEMS` — maximum array elements retained per array.
+- `PI_LANGFUSE_MAX_OBJECT_KEYS` — maximum own keys retained per object.
+- `PI_LANGFUSE_MAX_PAYLOAD_NODES` — maximum nodes visited per payload.
+- `PI_LANGFUSE_DEBUG` — set to `1` or `true` to enable diagnostic logging.
+- `PI_LANGFUSE_SCORE_SHUTDOWN_TIMEOUT` — positive shutdown score-delivery timeout
+  in seconds; defaults to 2 seconds.
 
 ## Superpowers phase metadata
 

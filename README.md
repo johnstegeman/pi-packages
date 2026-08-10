@@ -41,6 +41,7 @@ If you only want one of the packages, point pi at its subdirectory using a local
 pi install /path/to/pi-packages/packages/ayu
 pi install /path/to/pi-packages/packages/bifrost
 pi install /path/to/pi-packages/packages/langfuse
+```
 
 ## Install from a local clone
 
