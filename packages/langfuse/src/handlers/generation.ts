@@ -15,6 +15,7 @@ import {
 } from "../utils.js";
 import type { GenerationState, ObservationUpdate } from "../types.js";
 import { applyCapturePolicy } from "../capture-policy.js";
+import { buildPhaseMetadata } from "../phase.js";
 
 export function getOpenGeneration(): GenerationState | undefined {
   if (state.isTracingDisabled || !state.agentState) {
@@ -45,6 +46,7 @@ export async function startGeneration(event: Record<string, unknown>) {
     const provider = String(event.provider ?? state.currentProvider ?? "");
     const metadata = shapePayload({
       provider,
+      ...buildPhaseMetadata(),
       requestId: key,
       url: event.url,
       method: event.method,

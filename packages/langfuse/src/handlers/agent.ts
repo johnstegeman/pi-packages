@@ -5,6 +5,7 @@ import { shapePayload, truncate, extractFinalAssistant, extractAssistantOutput, 
 import { closeDanglingObservations } from "./tool.js";
 import { applyCapturePolicy } from "../capture-policy.js";
 import { collectSourceMetadata } from "../source-metadata.js";
+import { buildPhaseMetadata } from "../phase.js";
 
 function stringMetadata(metadata: Record<string, unknown> | undefined): Record<string, string> | undefined {
   if (!metadata) {
@@ -66,6 +67,7 @@ export async function startAgentRun(event: Record<string, unknown>, ctx: any) {
         metadata: {
           cwd,
           ...sourceMetadata,
+          ...buildPhaseMetadata(),
           ...(state.currentModel ? { model: state.currentModel } : {}),
           ...(state.currentProvider ? { provider: state.currentProvider } : {}),
           sessionId: state.currentSessionId || undefined,
@@ -168,6 +170,7 @@ export async function finishAgentRun(event: Record<string, unknown> = {}) {
       metadata: {
         cwd: state.agentState.cwd,
         ...(state.agentState.sourceMetadata ?? {}),
+        ...buildPhaseMetadata(),
         completed: true,
         model: state.currentModel || undefined,
         provider: state.currentProvider || undefined,

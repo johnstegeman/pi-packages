@@ -16,6 +16,7 @@ import { shutdownRuntime } from "./src/langfuse.js";
 import { handleLangfusePrivacyCommand, handleLangfuseStatusCommand, handleLangfuseTestCommand } from "./src/commands.js";
 import { getMessageFromEvent, extractAssistantOutput, getCapturePolicy } from "./src/utils.js";
 import { applyCapturePolicy } from "./src/capture-policy.js";
+import { setPhase } from "./src/phase.js";
 import { startAgentRun, finishAgentRun, recordSystemPrompt } from "./src/handlers/agent.js";
 import { startTurnObservation, finishTurnObservation } from "./src/handlers/turn.js";
 import {
@@ -72,6 +73,17 @@ export default async function (pi: ExtensionAPI) {
     handler: async (args, ctx) => {
       await handleLangfusePrivacyCommand(String(args ?? ""), ctx);
     },
+  });
+
+  // ---- Superpowers phase tracking -----------------------------------------
+  // Superpowers emits { phase } on this shared event bus. Retain the latest
+  // non-empty value for live metadata attachment on Langfuse observations.
+  pi.events?.on("superpowers:phase", (data) => {
+    const phase =
+      typeof data === "object" && data !== null && "phase" in data
+        ? (data as { phase: unknown }).phase
+        : undefined;
+    setPhase(typeof phase === "string" ? phase : null);
   });
 
   const getSessionId = (ctx?: unknown): string | undefined => {
