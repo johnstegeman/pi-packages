@@ -9,6 +9,7 @@ packages/
 ├── ayu/            – Ayu color scheme for Pi (Day, Dusk, Dark)
 ├── bifrost/        – Custom provider for Bifrost AI gateway
 ├── hashline-edit/  – Hash-anchored read/edit tool override, with opt-in grep
+├── langfuse/       – Langfuse observability with Superpowers phase metadata
 └── statusline/     – Single-line statusline footer with ayu/tokyo-night/classic presets
 ```
 
@@ -39,6 +40,7 @@ If you only want one of the packages, point pi at its subdirectory using a local
 ```bash
 pi install /path/to/pi-packages/packages/ayu
 pi install /path/to/pi-packages/packages/bifrost
+pi install /path/to/pi-packages/packages/langfuse
 ```
 
 ## Install from a local clone
