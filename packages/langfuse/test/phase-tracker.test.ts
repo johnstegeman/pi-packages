@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { applyPhaseUpdate, buildPhaseMetadata, buildPhaseTags, setPhase } from "../src/phase.js";
+import { applyPhaseUpdate, buildPhaseMetadata, buildPhaseTags, replacePhaseTags, setPhase } from "../src/phase.js";
 
 test("non-empty string is retained", () => {
   assert.equal(applyPhaseUpdate(null, "brainstorming"), "brainstorming");
@@ -62,4 +62,21 @@ test("setPhase returns the replacement phase", () => {
   assert.equal(setPhase("brainstorming"), "brainstorming");
   assert.equal(setPhase("development"), "development");
   assert.equal(setPhase(null), null);
+});
+
+test("replaces all existing phase tags while preserving unrelated tags", () => {
+  assert.deepEqual(
+    replacePhaseTags(
+      ["team:alpha", "phase:old", "environment:test", "phase:older"],
+      ["phase:development"],
+    ),
+    ["team:alpha", "environment:test", "phase:development"],
+  );
+});
+
+test("removes phase tags when the desired phase is cleared", () => {
+  assert.deepEqual(
+    replacePhaseTags(["phase:old", "owner:pi"], []),
+    ["owner:pi"],
+  );
 });

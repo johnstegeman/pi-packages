@@ -26,3 +26,8 @@ export function buildPhaseMetadata(): Record<string, string> {
 export function buildPhaseTags(): string[] {
   return retainedPhase ? [`phase:${retainedPhase}`] : [];
 }
+
+/** Replace all namespaced phase tags while preserving unrelated tags. */
+export function replacePhaseTags(currentTags: readonly string[], desiredPhaseTags: readonly string[]): string[] {
+  return [...currentTags.filter((tag) => !tag.startsWith("phase:")), ...desiredPhaseTags];
+}
