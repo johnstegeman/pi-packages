@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { applyPhaseUpdate, buildPhaseMetadata, setPhase } from "../src/phase.js";
+import { applyPhaseUpdate, buildPhaseMetadata, buildPhaseTags, setPhase } from "../src/phase.js";
 
 test("non-empty string is retained", () => {
   assert.equal(applyPhaseUpdate(null, "brainstorming"), "brainstorming");
@@ -42,4 +42,24 @@ test("buildPhaseMetadata returns {} when cleared", () => {
   setPhase(null);
   assert.deepEqual(buildPhaseMetadata(), {});
   setPhase(null);
+});
+
+test("buildPhaseTags namespaces the retained phase", () => {
+  setPhase(null);
+  setPhase("development");
+  assert.deepEqual(buildPhaseTags(), ["phase:development"]);
+  setPhase(null);
+});
+
+test("buildPhaseTags is empty when the phase is cleared", () => {
+  setPhase("development");
+  assert.equal(setPhase("  "), null);
+  assert.deepEqual(buildPhaseTags(), []);
+  setPhase(null);
+});
+
+test("setPhase returns the replacement phase", () => {
+  assert.equal(setPhase("brainstorming"), "brainstorming");
+  assert.equal(setPhase("development"), "development");
+  assert.equal(setPhase(null), null);
 });
