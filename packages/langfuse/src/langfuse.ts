@@ -570,6 +570,40 @@ function eventTimestamp(record: { endTime?: string; startTime?: string; timestam
   return record.endTime ?? record.startTime ?? record.timestamp ?? nowIso();
 }
 
+async function updateTraceTags(rt: LangfuseRuntime, traceId: string, tags: string[]): Promise<void> {
+  const controller = new AbortController();
+  const timeoutMs = rt.scoreRequestTimeoutMs ?? DEFAULT_LANGFUSE_REQUEST_TIMEOUT_SECONDS * 1_000;
+  const timeout = setTimeout(
+    () => controller.abort(new DOMException("Langfuse trace tag update timed out", "AbortError")),
+    timeoutMs,
+  );
+  timeout.unref?.();
+
+  try {
+    const errors = await ingestBatch(
+      rt,
+      [{
+        type: "trace-create",
+        id: randomUUID(),
+        timestamp: nowIso(),
+        body: {
+          id: traceId,
+          tags,
+        },
+      }],
+      controller.signal,
+    );
+    if (errors.length > 0) {
+      throw new Error(JSON.stringify(errors));
+    }
+  } catch (error) {
+    rememberRuntimeError("trace tag update", error);
+    throw error;
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
 async function fallbackToRestIngestion(rt: LangfuseRuntime, signal: AbortSignal) {
   const store = rt.restFallback as RestFallbackStore | undefined;
   if (!store?.trace || store.attempted) {
@@ -701,6 +735,7 @@ export async function getRuntime(): Promise<LangfuseRuntime> {
           return wrapObservation(observation, restFallback, name, body, options?.asType);
         }) as unknown as LangfuseRuntime["startObservation"],
         propagateAttributes: tracing.propagateAttributes as unknown as LangfuseRuntime["propagateAttributes"],
+        updateTraceTags: (traceId: string, tags: string[]) => updateTraceTags(runtime as LangfuseRuntime, traceId, tags),
         scoreClient: new LangfuseClient({
           publicKey: state.config.publicKey,
           secretKey: state.config.secretKey,
