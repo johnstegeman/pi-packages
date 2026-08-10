@@ -12,7 +12,8 @@
     "extensions": [
       "./packages/bifrost/index.ts",
       "./packages/statusline/src/statusline.ts",
-      "./packages/hashline-edit/src/index.ts"
+      "./packages/hashline-edit/src/index.ts",
+      "./packages/langfuse/index.ts"
     ],
     "themes": ["./packages/ayu/themes"]
   }
