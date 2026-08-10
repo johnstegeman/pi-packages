@@ -5,7 +5,7 @@ import { shapePayload, truncate, extractFinalAssistant, extractAssistantOutput, 
 import { closeDanglingObservations } from "./tool.js";
 import { applyCapturePolicy } from "../capture-policy.js";
 import { collectSourceMetadata } from "../source-metadata.js";
-import { buildPhaseMetadata } from "../phase.js";
+import { buildPhaseMetadata, buildPhaseTags } from "../phase.js";
 
 function stringMetadata(metadata: Record<string, unknown> | undefined): Record<string, string> | undefined {
   if (!metadata) {
@@ -21,6 +21,47 @@ function stringMetadata(metadata: Record<string, unknown> | undefined): Record<s
     }
   }
   return Object.keys(output).length > 0 ? output : undefined;
+}
+
+// Tag sync is serialized per-session so concurrent sessions can never
+// interleave: each session gets its own promise chain, and the trace id /
+// desired tags for a given update are captured synchronously here (before
+// the update is queued) rather than re-read from `state` when the queued
+// callback eventually runs. Without this, a single shared chain plus a
+// deferred read of `state.agentState` could apply one session's phase
+// tags to a different session's trace if their async work interleaves.
+const tagSyncChains = new Map<string, Promise<void>>();
+const lastSentTagsBySession = new Map<string, string>();
+const DEFAULT_TAG_SYNC_SESSION_KEY = "__pi_langfuse_default_session__";
+
+export async function syncActiveTracePhaseTags(): Promise<void> {
+  const sessionKey = state.currentSessionId || DEFAULT_TAG_SYNC_SESSION_KEY;
+  const root = state.agentState?.root;
+  const traceId = state.agentState?.traceId;
+  if (!root || !traceId) {
+    return;
+  }
+
+  const desiredTags = buildPhaseTags();
+  const desiredTagsKey = `${traceId}\u0000${JSON.stringify(desiredTags)}`;
+  if (lastSentTagsBySession.get(sessionKey) === desiredTagsKey) {
+    // Identical tag set already sent (or in flight) for this trace; skip the
+    // redundant ingestion request.
+    return tagSyncChains.get(sessionKey) ?? Promise.resolve();
+  }
+  lastSentTagsBySession.set(sessionKey, desiredTagsKey);
+
+  const previous = tagSyncChains.get(sessionKey) ?? Promise.resolve();
+  const next = previous.then(async () => {
+    try {
+      const rt = await getRuntime();
+      await rt.updateTraceTags(traceId, desiredTags);
+    } catch (e) {
+      console.warn("\u{1F4CA} Langfuse: Failed to update phase tags", e);
+    }
+  });
+  tagSyncChains.set(sessionKey, next);
+  return next;
 }
 
 export function updateTraceIO(input?: unknown, output?: unknown) {
@@ -87,11 +128,13 @@ export async function startAgentRun(event: Record<string, unknown>, ctx: any) {
       providerMetadataByRequest: new Map(),
     };
 
+    const phaseTags = buildPhaseTags();
     const root = rt.propagateAttributes(
       {
         sessionId: state.currentSessionId ? truncate(state.currentSessionId, 200) : undefined,
         traceName: "pi-agent",
         metadata: stringMetadata(captured.metadata),
+        ...(phaseTags.length > 0 ? { tags: phaseTags } : {}),
       },
       () =>
         rt.startObservation(

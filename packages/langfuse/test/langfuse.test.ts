@@ -32,6 +32,9 @@ function createTestRuntime(overrides: Partial<LangfuseRuntime> = {}): LangfuseRu
     propagateAttributes: (() => {
       throw new Error("not used");
     }) as LangfuseRuntime["propagateAttributes"],
+    updateTraceTags: (() => {
+      throw new Error("not used");
+    }) as LangfuseRuntime["updateTraceTags"],
     scoreClient: {},
     ...overrides,
   };
@@ -125,6 +128,9 @@ test("force shutdown does not hang when Langfuse SDK shutdown stalls", async () 
     propagateAttributes: (() => {
       throw new Error("not used");
     }) as LangfuseRuntime["propagateAttributes"],
+    updateTraceTags: (() => {
+      throw new Error("not used");
+    }) as LangfuseRuntime["updateTraceTags"],
     scoreClient: {
       flush: never,
       shutdown: never,
@@ -165,6 +171,9 @@ test("force shutdown applies one total deadline to stalled telemetry operations"
     propagateAttributes: (() => {
       throw new Error("not used");
     }) as LangfuseRuntime["propagateAttributes"],
+    updateTraceTags: (() => {
+      throw new Error("not used");
+    }) as LangfuseRuntime["updateTraceTags"],
     scoreClient: {
       flush: never,
       shutdown: never,
@@ -716,6 +725,9 @@ test("scores are buffered instead of starting an unbounded SDK request", async (
     propagateAttributes: (() => {
       throw new Error("not used");
     }) as LangfuseRuntime["propagateAttributes"],
+    updateTraceTags: (() => {
+      throw new Error("not used");
+    }) as LangfuseRuntime["updateTraceTags"],
     scoreClient: {
       score: {
         create: () => {
@@ -757,6 +769,9 @@ test("score flush uses the runtime's original config after global config is clea
     propagateAttributes: (() => {
       throw new Error("not used");
     }) as LangfuseRuntime["propagateAttributes"],
+    updateTraceTags: (() => {
+      throw new Error("not used");
+    }) as LangfuseRuntime["updateTraceTags"],
     scoreClient: {},
     runtimeConfig: {
       publicKey: "pk-old",
@@ -810,6 +825,9 @@ test("score flush logs per-event ingestion errors", async () => {
     propagateAttributes: (() => {
       throw new Error("not used");
     }) as LangfuseRuntime["propagateAttributes"],
+    updateTraceTags: (() => {
+      throw new Error("not used");
+    }) as LangfuseRuntime["updateTraceTags"],
     scoreClient: {},
     runtimeConfig: {
       publicKey: "pk-test",
@@ -978,6 +996,9 @@ test("REST fallback checks legacy API capability and ingests a missing trace", a
     propagateAttributes: (() => {
       throw new Error("not used");
     }) as LangfuseRuntime["propagateAttributes"],
+    updateTraceTags: (() => {
+      throw new Error("not used");
+    }) as LangfuseRuntime["updateTraceTags"],
     scoreClient: {},
     runtimeConfig: {
       publicKey: "pk-test",
@@ -1058,4 +1079,129 @@ test("shutdown aborts stalled score HTTP work so a child process exits", async (
   });
 
   assert.deepEqual(result, { code: 0, timedOut: false });
+});
+
+
+test("updateTraceTags sends the full tag list via the ingestion fallback", async () => {
+  const previousConfig = state.config;
+  const originalFetch = globalThis.fetch;
+  const requests: unknown[] = [];
+  globalThis.fetch = (async (_input, init) => {
+    requests.push(JSON.parse(String(init?.body)));
+    return new Response(JSON.stringify({ errors: [] }), {
+      status: 200,
+      headers: { "Content-Type": "application/json" },
+    });
+  }) as typeof fetch;
+
+  try {
+    state.config = {
+      publicKey: "pk_test",
+      secretKey: "sk_test",
+      host: "https://example.com",
+    };
+    const runtime = await getRuntime();
+
+    await runtime.updateTraceTags("trace-1", ["phase:development"]);
+
+    assert.equal(requests.length, 1);
+    const body = requests[0] as { batch: Array<{ type: string; body: { id: string; tags: string[] } }> };
+    assert.equal(body.batch.length, 1);
+    assert.equal(body.batch[0].type, "trace-create");
+    assert.equal(body.batch[0].body.id, "trace-1");
+    assert.deepEqual(body.batch[0].body.tags, ["phase:development"]);
+
+    await runtime.updateTraceTags("trace-1", []);
+
+    assert.equal(requests.length, 2);
+    const clearBody = requests[1] as { batch: Array<{ body: { tags: string[] } }> };
+    assert.deepEqual(clearBody.batch[0].body.tags, []);
+  } finally {
+    await forceShutdownRuntime();
+    state.config = previousConfig;
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test("updateTraceTags rejects when the ingestion request fails", async () => {
+  const previousConfig = state.config;
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = (async () => new Response("boom", { status: 500 })) as typeof fetch;
+
+  try {
+    state.config = {
+      publicKey: "pk_test",
+      secretKey: "sk_test",
+      host: "https://example.com",
+    };
+    const runtime = await getRuntime();
+
+    await assert.rejects(() => runtime.updateTraceTags("trace-1", ["phase:development"]));
+  } finally {
+    await forceShutdownRuntime();
+    state.config = previousConfig;
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test("updateTraceTags preserves existing trace fields instead of wiping them", async () => {
+  const previousConfig = state.config;
+  const originalFetch = globalThis.fetch;
+  const requests: Array<{ batch: Array<{ type: string; body: Record<string, unknown> }> }> = [];
+  globalThis.fetch = (async (input, init) => {
+    const url = String(input);
+    if (url.includes("/api/public/ingestion")) {
+      requests.push(JSON.parse(String(init?.body)));
+      return new Response(JSON.stringify({ errors: [] }), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      });
+    }
+    return new Response("{}", { status: 404 });
+  }) as typeof fetch;
+
+  try {
+    state.config = {
+      publicKey: "pk_test",
+      secretKey: "sk_test",
+      host: "https://example.com",
+    };
+    const runtime = await getRuntime();
+
+    const root = runtime.startObservation(
+      "pi-agent",
+      { input: { prompt: "hello" }, metadata: { cwd: "/tmp" } },
+      { asType: "agent" },
+    ) as unknown as {
+      traceId: string;
+      update(body?: Record<string, unknown>): unknown;
+      end(): void;
+    };
+    root.update({ metadata: { extra: "value" } });
+
+    await runtime.updateTraceTags(root.traceId, ["phase:development"]);
+
+    assert.equal(requests.length, 1);
+    const tagUpdateBatch = requests[0].batch;
+    assert.equal(tagUpdateBatch.length, 1);
+    assert.equal(tagUpdateBatch[0].type, "trace-create");
+    const body = tagUpdateBatch[0].body as {
+      id: string;
+      name?: string;
+      input?: unknown;
+      metadata?: Record<string, unknown>;
+      tags?: string[];
+    };
+    assert.equal(body.id, root.traceId);
+    assert.equal(body.name, "pi-agent");
+    assert.deepEqual(body.input, { prompt: "hello" });
+    assert.deepEqual(body.metadata, { cwd: "/tmp", extra: "value" });
+    assert.deepEqual(body.tags, ["phase:development"]);
+
+    root.end();
+  } finally {
+    await forceShutdownRuntime();
+    state.config = previousConfig;
+    globalThis.fetch = originalFetch;
+  }
 });

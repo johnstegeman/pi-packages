@@ -12,11 +12,17 @@ export function applyPhaseUpdate(
 
 let retainedPhase: string | null = null;
 
-export function setPhase(incoming: string | null | undefined): void {
+export function setPhase(incoming: string | null | undefined): string | null {
   retainedPhase = applyPhaseUpdate(retainedPhase, incoming);
+  return retainedPhase;
 }
 
 /** Return the metadata fragment to spread into Langfuse observations. */
 export function buildPhaseMetadata(): Record<string, string> {
   return retainedPhase ? { superpowers_phase: retainedPhase } : {};
+}
+
+/** Return the namespaced phase tag to attach to Langfuse traces. */
+export function buildPhaseTags(): string[] {
+  return retainedPhase ? [`phase:${retainedPhase}`] : [];
 }

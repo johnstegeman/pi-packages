@@ -91,6 +91,7 @@ export interface LangfuseRuntime {
     },
     fn: () => LangfuseObservation,
   ) => LangfuseObservation;
+  updateTraceTags: (traceId: string, tags: string[]) => Promise<void>;
   scoreClient: LangfuseScoreClient;
   spanProcessor?: { forceFlush?: () => Promise<void>; shutdown?: () => Promise<void> };
   tracerProvider?: { forceFlush?: () => Promise<void>; shutdown?: () => Promise<void> };
