@@ -8,7 +8,10 @@ Guidance for AI coding agents working in this repo.
 packages/
 ├── ayu/         – Ayu color scheme for Pi (Day, Dusk, Dark)
 ├── bifrost/     – Custom provider for Bifrost AI gateway
-└── statusline/  – Single-line statusline footer with ayu/tokyo-night/classic presets
+├── langfuse/     – Langfuse observability with Superpowers phase metadata
+└── statusline/   – Single-line statusline footer with ayu/tokyo-night/classic presets
+├── langfuse/     – Langfuse observability with Superpowers phase metadata
+└── statusline/   – Single-line statusline footer with ayu/tokyo-night/classic presets
 ```
 
 This is a monorepo of independent pi extensions/themes. Each package under
@@ -20,6 +23,7 @@ script exists.
 
 - Per-package tests: `cd packages/<name> && npm test`
 - Statusline tests: `cd packages/statusline && npm test`
+- Langfuse tests: `cd packages/langfuse && npm install` once for runtime dependencies, then `npm test`; the root workspace does not install those dependencies.
 
 ### Statusline settings file isolation
 
