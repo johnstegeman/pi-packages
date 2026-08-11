@@ -308,6 +308,7 @@ test("phase tag sync isolates a permanently missing trace", async () => {
       assert.equal(typeof warning[0], "string");
       assert.match(warning[0] as string, /Phase tag sync unavailable/);
       assert.match(warning[0] as string, /tracing continues/);
+      assert.match(warning[0] as string, /trace is not visible yet or is outside the configured Langfuse project/);
       assert.doesNotMatch(warning[0] as string, /LangfuseNotFoundError|authorization|sdk stack|\n/);
     }
   } finally {

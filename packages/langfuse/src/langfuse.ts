@@ -125,20 +125,30 @@ function isTraceNotVisibleError(error: unknown): boolean {
   );
 }
 
+function createMalformedTraceTagsError(): Error {
+  const error = new Error("Langfuse trace response contained malformed tags");
+  error.name = "LangfuseMalformedTraceError";
+  return error;
+}
+
 async function readTraceTagsWithRetry(
   client: TraceTagClient,
   traceId: string,
+  signal?: AbortSignal,
 ): Promise<string[]> {
   for (let attempt = 0; ; attempt += 1) {
     try {
       const response = await client.api.trace.get(traceId);
-      return Array.isArray(response?.tags) ? response.tags : [];
+      if (!Array.isArray(response?.tags)) {
+        throw createMalformedTraceTagsError();
+      }
+      return response.tags;
     } catch (error) {
       const delayMs = TRACE_TAG_READ_DELAYS_MS[attempt];
       if (!isTraceNotVisibleError(error) || delayMs === undefined) {
         throw error;
       }
-      await delay(delayMs);
+      await delay(delayMs, signal);
     }
   }
 }
@@ -801,14 +811,15 @@ export async function getRuntime(): Promise<LangfuseRuntime> {
         secretKey: state.config.secretKey,
         baseUrl: state.config.host,
       });
-      runtime = {
+      const lifecycleController = new AbortController();
+      const runtimeInstance: LangfuseRuntime = {
         startObservation: ((name: string, body?: Record<string, unknown>, options?: { asType?: string }) => {
           const observation = (tracing as any).startObservation(name, body, options);
           return wrapObservation(observation, restFallback, name, body, options?.asType);
         }) as unknown as LangfuseRuntime["startObservation"],
         propagateAttributes: tracing.propagateAttributes as unknown as LangfuseRuntime["propagateAttributes"],
-        updateTraceTags: (traceId: string, tags: string[]) => updateTraceTags(runtime as LangfuseRuntime, traceId, tags),
-        getTraceTags: (traceId: string) => readTraceTagsWithRetry(client, traceId),
+        updateTraceTags: (traceId: string, tags: string[]) => updateTraceTags(runtimeInstance, traceId, tags),
+        getTraceTags: (traceId: string) => readTraceTagsWithRetry(client, traceId, lifecycleController.signal),
         scoreClient: client as LangfuseScoreClient,
         spanProcessor,
         tracerProvider,
@@ -819,12 +830,15 @@ export async function getRuntime(): Promise<LangfuseRuntime> {
         scoreFlushIntervalMs,
         scoreRequestTimeoutMs,
         scoreFlushStopped: false,
+        lifecycleSignal: lifecycleController.signal,
+        lifecycleController,
         runtimeConfig: {
           publicKey: state.config.publicKey,
           secretKey: state.config.secretKey,
           host: state.config.host,
         },
       };
+      runtime = runtimeInstance;
       lastRuntimeError = null;
     } catch (e) {
       rememberRuntimeError("runtime init", e);
@@ -842,6 +856,7 @@ function doShutdownRuntime(): Promise<void> {
     }
 
     const rt = runtime;
+    rt.lifecycleController?.abort(new DOMException("Langfuse runtime shut down", "AbortError"));
     runtime = null;
     const deadline = Date.now() + shutdownStepTimeoutMs;
     const controller = new AbortController();
@@ -925,6 +940,7 @@ export async function forceShutdownRuntime(): Promise<void> {
 export function __setRuntimeForTest(rt: LangfuseRuntime | null, timeoutMs = DEFAULT_SHUTDOWN_STEP_TIMEOUT_MS): void {
   if (runtime && runtime !== rt) {
     stopScoreFlush(runtime);
+    runtime.lifecycleController?.abort(new DOMException("Langfuse runtime reconfigured", "AbortError"));
   }
   runtime = rt;
   if (rt) {
