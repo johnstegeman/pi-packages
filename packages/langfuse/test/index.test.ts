@@ -319,6 +319,70 @@ test("phase tag sync isolates a permanently missing trace", async () => {
   }
 });
 
+test("phase tag sync bounds generic diagnostics without leaking sensitive error content", async () => {
+  const previousConfig = state.config;
+  const observation = {
+    traceId: "trace-id",
+    setTraceIO() {},
+    update() { return this; },
+    end() {},
+  };
+  let phaseHandler: ((data: unknown) => void) | undefined;
+  const sensitiveError = new Error(
+    `request failed: Authorization: Bearer super-secret-token\n` +
+    `X-API-Key: credential-value\n` +
+    `response body: {"secret":"response-secret","password":"hunter2"}\n` +
+    `${"diagnostic detail ".repeat(100)}\n at sdk stack`,
+  );
+  const runtime: LangfuseRuntime = {
+    startObservation: () => observation,
+    propagateAttributes: (_attributes, fn) => fn(),
+    scoreClient: {},
+    getTraceTags: async () => {
+      throw sensitiveError;
+    },
+    updateTraceTags: async () => {
+      throw new Error("update must not run after a failed tag read");
+    },
+  };
+  const warnings: unknown[][] = [];
+  const previousWarn = console.warn;
+  try {
+    state.config = { publicKey: "pk_test", secretKey: "sk_test", host: "https://example.com" };
+    __setRuntimeForTest(runtime);
+    console.warn = (...args: unknown[]) => { warnings.push(args); };
+    await registerExtension({
+      registerCommand() {},
+      events: {
+        emit() {},
+        on(_channel, handler) {
+          phaseHandler = handler;
+          return () => {};
+        },
+      },
+      on() {},
+    } as any);
+    setPhase(null);
+    await startAgentRun({ prompt: "test" }, {});
+    phaseHandler!({ phase: "sensitive-failure" });
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    assert.equal(warnings.length, 1);
+    assert.equal(warnings[0].length, 1);
+    const warning = warnings[0][0];
+    assert.equal(typeof warning, "string");
+    assert.ok((warning as string).length <= 200);
+    assert.match(warning as string, /Phase tag sync unavailable/);
+    assert.match(warning as string, /tracing continues/);
+    assert.doesNotMatch(warning as string, /Authorization|Bearer|super-secret|X-API-Key|credential|response body|response-secret|password|hunter2|sdk stack|\n/);
+  } finally {
+    console.warn = previousWarn;
+    setPhase(null);
+    __setRuntimeForTest(null);
+    clearAllSessionStates();
+    state.config = previousConfig;
+  }
+});
+
 
 test("concurrent sessions never cross trace ids or tags during phase sync", async () => {
   const previousConfig = state.config;

@@ -38,10 +38,9 @@ function formatPhaseTagSyncError(error: unknown): string {
   if (typeof error === "object" && error !== null && "statusCode" in error && (error as { statusCode?: unknown }).statusCode === 404) {
     return "trace is not visible yet or is outside the configured Langfuse project";
   }
-  if (error instanceof Error && error.message.trim()) {
-    return error.message.split("\n", 1)[0].slice(0, 240);
-  }
-  return "unknown Langfuse error";
+  // Generic SDK errors can contain request headers, credentials, response bodies, or stacks.
+  // Use a stable classification rather than copying arbitrary Error.message content.
+  return "unexpected error while synchronizing trace tags";
 }
 
 export async function syncActiveTracePhaseTags(): Promise<void> {
