@@ -409,16 +409,25 @@ test("runtime retrieves existing trace tags through the Langfuse client trace AP
     assert.equal(requests[0]?.method, "GET");
 
     responseBody = { ...responseBody, tags: "not-an-array" };
-    assert.deepEqual(await getTraceTags("trace-1"), []);
-
-    responseBody = { ...responseBody, tags: undefined };
-    assert.deepEqual(await getTraceTags("trace-1"), []);
+    await assert.rejects(
+      () => getTraceTags("trace-1"),
+      (error: unknown) => {
+        assert.equal((error as Error).name, "LangfuseMalformedTraceError");
+        return true;
+      },
+    );
 
     globalThis.fetch = (async () => new Response(JSON.stringify({ message: "failed" }), {
       status: 500,
       headers: { "content-type": "application/json" },
     })) as typeof fetch;
-    await assert.rejects(() => getTraceTags("trace-1"));
+    await assert.rejects(
+      () => getTraceTags("trace-1"),
+      (error: unknown) => {
+        assert.equal((error as { statusCode?: number }).statusCode, 500);
+        return true;
+      },
+    );
     globalThis.fetch = successfulFetch;
   } finally {
     await forceShutdownRuntime();
@@ -1267,6 +1276,125 @@ test("updateTraceTags preserves existing trace fields instead of wiping them", a
     assert.deepEqual(body.tags, ["phase:development"]);
 
     root.end();
+  } finally {
+    await forceShutdownRuntime();
+    state.config = previousConfig;
+    globalThis.fetch = originalFetch;
+  }
+});
+
+
+test("retries trace tag reads while an OTel trace is not yet visible", async () => {
+  const previousConfig = state.config;
+  const originalFetch = globalThis.fetch;
+  let traceReads = 0;
+
+  try {
+    state.config = {
+      publicKey: "pk_test",
+      secretKey: "sk_test",
+      host: "https://example.com",
+    };
+    globalThis.fetch = (async (input) => {
+      const url = String(input);
+      if (url.endsWith("/api/public/traces/trace-1")) {
+        traceReads += 1;
+        if (traceReads < 3) {
+          return new Response(
+            JSON.stringify({
+              message: "Trace trace-1 not found within authorized project",
+              error: "LangfuseNotFoundError",
+            }),
+            { status: 404, headers: { "content-type": "application/json" } },
+          );
+        }
+        return new Response(JSON.stringify({ tags: ["team:alpha"] }), { status: 200 });
+      }
+      throw new Error(`unexpected URL: ${url}`);
+    }) as typeof fetch;
+
+    const runtime = await getRuntime();
+    assert.deepEqual(await runtime.getTraceTags("trace-1"), ["team:alpha"]);
+    assert.equal(traceReads, 3);
+  } finally {
+    await forceShutdownRuntime();
+    state.config = previousConfig;
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test("does not retry non-404 trace lookup failures", async () => {
+  const previousConfig = state.config;
+  const originalFetch = globalThis.fetch;
+  let traceReads = 0;
+  try {
+    state.config = { publicKey: "pk_test", secretKey: "sk_test", host: "https://example.com" };
+    globalThis.fetch = (async (input) => {
+      traceReads += 1;
+      assert.ok(String(input).endsWith("/api/public/traces/trace-1"));
+      return new Response(JSON.stringify({ message: "unauthorized" }), { status: 401 });
+    }) as typeof fetch;
+    const runtime = await getRuntime();
+    await assert.rejects(
+      () => runtime.getTraceTags("trace-1"),
+      (error: unknown) => {
+        assert.equal((error as { statusCode?: number }).statusCode, 401);
+        return true;
+      },
+    );
+    assert.equal(traceReads, 1);
+  } finally {
+    await forceShutdownRuntime();
+    state.config = previousConfig;
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test("stops retrying when a trace never becomes visible", async () => {
+  const previousConfig = state.config;
+  const originalFetch = globalThis.fetch;
+  let traceReads = 0;
+  try {
+    state.config = { publicKey: "pk_test", secretKey: "sk_test", host: "https://example.com" };
+    globalThis.fetch = (async (input) => {
+      traceReads += 1;
+      assert.ok(String(input).endsWith("/api/public/traces/trace-1"));
+      return new Response(JSON.stringify({ message: "not found within authorized project" }), { status: 404 });
+    }) as typeof fetch;
+    const runtime = await getRuntime();
+    await assert.rejects(
+      () => runtime.getTraceTags("trace-1"),
+      (error: unknown) => {
+        assert.equal((error as { statusCode?: number }).statusCode, 404);
+        return true;
+      },
+    );
+    assert.equal(traceReads, 5);
+  } finally {
+    await forceShutdownRuntime();
+    state.config = previousConfig;
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test("rejects a successful trace response with malformed tags", async () => {
+  const previousConfig = state.config;
+  const originalFetch = globalThis.fetch;
+  try {
+    state.config = { publicKey: "pk_test", secretKey: "sk_test", host: "https://example.com" };
+    globalThis.fetch = (async (input) => {
+      assert.ok(String(input).endsWith("/api/public/traces/trace-1"));
+      return new Response(JSON.stringify({ tags: ["phase:development", 42] }), { status: 200 });
+    }) as typeof fetch;
+    const runtime = await getRuntime();
+    await assert.rejects(
+      () => runtime.getTraceTags("trace-1"),
+      (error: unknown) => {
+        assert.equal((error as Error).name, "LangfuseMalformedTraceError");
+        assert.equal((error as Error).message, "Langfuse trace response contained malformed tags");
+        return true;
+      },
+    );
   } finally {
     await forceShutdownRuntime();
     state.config = previousConfig;

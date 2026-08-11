@@ -89,6 +89,14 @@ received). When the phase changes, all existing `phase:*` tags are removed
 before the new one is applied, unrelated tags are preserved, and clearing the
 phase removes all `phase:*` tags entirely.
 
+Phase-tag synchronization first reads the existing trace tags before replacing
+`phase:*` tags. A newly created OpenTelemetry trace may briefly return `404`
+before Langfuse makes it queryable, so the extension retries that transient
+visibility response for a bounded period. Persistent `404` responses remain
+isolated from Pi execution and produce a compact warning rather than a raw SDK
+stack trace. A persistent authorized-project `404` may indicate stale credentials,
+a wrong host or project, or a trace that was never ingested.
+
 ## Upstream provenance
 
 This is a trimmed monorepo vendoring of `gooyoung/pi-langfuse` at commit

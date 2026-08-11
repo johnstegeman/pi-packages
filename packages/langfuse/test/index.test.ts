@@ -252,6 +252,138 @@ test("phase tag sync retries the same phase after a failed read", async () => {
   }
 });
 
+test("phase tag sync isolates a permanently missing trace", async () => {
+  const previousConfig = state.config;
+  const observation = {
+    traceId: "trace-id",
+    setTraceIO() {},
+    update() { return this; },
+    end() {},
+  };
+  let phaseHandler: ((data: unknown) => void) | undefined;
+  const runtime: LangfuseRuntime = {
+    startObservation: () => observation,
+    propagateAttributes: (_attributes, fn) => fn(),
+    scoreClient: {},
+    getTraceTags: async () => {
+      throw Object.assign(
+        new Error(`LangfuseNotFoundError response body
+    at sdk stack`),
+        { statusCode: 404 },
+      );
+    },
+    updateTraceTags: async () => {
+      throw new Error("update must not run after a failed tag read");
+    },
+  };
+  const warnings: unknown[][] = [];
+  const previousWarn = console.warn;
+
+  try {
+    state.config = { publicKey: "pk_test", secretKey: "sk_test", host: "https://example.com" };
+    __setRuntimeForTest(runtime);
+    console.warn = (...args: unknown[]) => { warnings.push(args); };
+    await registerExtension({
+      registerCommand() {},
+      events: {
+        emit() {},
+        on(_channel, handler) {
+          phaseHandler = handler;
+          return () => {};
+        },
+      },
+      on() {},
+    } as any);
+    setPhase(null);
+    await startAgentRun({ prompt: "test" }, {});
+
+    phaseHandler!({ phase: "permanent-failure" });
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    phaseHandler!({ phase: "permanent-failure" });
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    assert.equal(warnings.length, 2);
+    for (const warning of warnings) {
+      assert.equal(warning.length, 1);
+      assert.equal(typeof warning[0], "string");
+      assert.match(warning[0] as string, /Phase tag sync unavailable/);
+      assert.match(warning[0] as string, /tracing continues/);
+      assert.match(warning[0] as string, /trace is not visible yet or is outside the configured Langfuse project/);
+      assert.doesNotMatch(warning[0] as string, /LangfuseNotFoundError|authorization|sdk stack|\n/);
+    }
+  } finally {
+    console.warn = previousWarn;
+    setPhase(null);
+    __setRuntimeForTest(null);
+    clearAllSessionStates();
+    state.config = previousConfig;
+  }
+});
+
+test("phase tag sync bounds generic diagnostics without leaking sensitive error content", async () => {
+  const previousConfig = state.config;
+  const observation = {
+    traceId: "trace-id",
+    setTraceIO() {},
+    update() { return this; },
+    end() {},
+  };
+  let phaseHandler: ((data: unknown) => void) | undefined;
+  const sensitiveError = new Error(
+    `request failed: Authorization: Bearer super-secret-token\n` +
+    `X-API-Key: credential-value\n` +
+    `response body: {"secret":"response-secret","password":"hunter2"}\n` +
+    `${"diagnostic detail ".repeat(100)}\n at sdk stack`,
+  );
+  const runtime: LangfuseRuntime = {
+    startObservation: () => observation,
+    propagateAttributes: (_attributes, fn) => fn(),
+    scoreClient: {},
+    getTraceTags: async () => {
+      throw sensitiveError;
+    },
+    updateTraceTags: async () => {
+      throw new Error("update must not run after a failed tag read");
+    },
+  };
+  const warnings: unknown[][] = [];
+  const previousWarn = console.warn;
+  try {
+    state.config = { publicKey: "pk_test", secretKey: "sk_test", host: "https://example.com" };
+    __setRuntimeForTest(runtime);
+    console.warn = (...args: unknown[]) => { warnings.push(args); };
+    await registerExtension({
+      registerCommand() {},
+      events: {
+        emit() {},
+        on(_channel, handler) {
+          phaseHandler = handler;
+          return () => {};
+        },
+      },
+      on() {},
+    } as any);
+    setPhase(null);
+    await startAgentRun({ prompt: "test" }, {});
+    phaseHandler!({ phase: "sensitive-failure" });
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    assert.equal(warnings.length, 1);
+    assert.equal(warnings[0].length, 1);
+    const warning = warnings[0][0];
+    assert.equal(typeof warning, "string");
+    assert.ok((warning as string).length <= 200);
+    assert.match(warning as string, /Phase tag sync unavailable/);
+    assert.match(warning as string, /tracing continues/);
+    assert.doesNotMatch(warning as string, /Authorization|Bearer|super-secret|X-API-Key|credential|response body|response-secret|password|hunter2|sdk stack|\n/);
+  } finally {
+    console.warn = previousWarn;
+    setPhase(null);
+    __setRuntimeForTest(null);
+    clearAllSessionStates();
+    state.config = previousConfig;
+  }
+});
+
 
 test("concurrent sessions never cross trace ids or tags during phase sync", async () => {
   const previousConfig = state.config;
@@ -319,6 +451,63 @@ test("concurrent sessions never cross trace ids or tags during phase sync", asyn
       ["trace-b", ["phase:beta"]],
       ["trace-a", ["phase:alpha"]],
     ]);
+  } finally {
+    setPhase(null);
+    __setRuntimeForTest(null);
+    clearAllSessionStates();
+    state.config = previousConfig;
+  }
+});
+
+test("queued phase tag sync skips work after runtime replacement", async () => {
+  const previousConfig = state.config;
+  const observation = {
+    traceId: "trace-id",
+    setTraceIO() {},
+    update() { return this; },
+    end() {},
+  };
+  let releaseRead!: () => void;
+  let readStarted = false;
+  let replacementReads = 0;
+  let replacementUpdates = 0;
+  const oldRuntime: LangfuseRuntime = {
+    startObservation: () => observation,
+    propagateAttributes: (_attributes, fn) => fn(),
+    scoreClient: {},
+    lifecycleController: new AbortController(),
+    getTraceTags: async () => {
+      readStarted = true;
+      await new Promise<void>((resolve) => { releaseRead = resolve; });
+      return [];
+    },
+    updateTraceTags: async () => {},
+  };
+  const replacementRuntime: LangfuseRuntime = {
+    startObservation: () => observation,
+    propagateAttributes: (_attributes, fn) => fn(),
+    scoreClient: {},
+    getTraceTags: async () => { replacementReads += 1; return []; },
+    updateTraceTags: async () => { replacementUpdates += 1; },
+  };
+
+  try {
+    state.config = { publicKey: "pk_test", secretKey: "sk_test", host: "https://example.com" };
+    __setRuntimeForTest(oldRuntime);
+    await startAgentRun({ prompt: "test" }, {});
+    setPhase("alpha");
+    const first = syncActiveTracePhaseTags();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    assert.equal(readStarted, true);
+
+    setPhase("beta");
+    const queued = syncActiveTracePhaseTags();
+    __setRuntimeForTest(replacementRuntime);
+    releaseRead();
+    await Promise.all([first, queued]);
+
+    assert.equal(replacementReads, 0);
+    assert.equal(replacementUpdates, 0);
   } finally {
     setPhase(null);
     __setRuntimeForTest(null);

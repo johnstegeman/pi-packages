@@ -107,6 +107,9 @@ export interface LangfuseRuntime {
   scoreFlushController?: AbortController;
   scoreFlushStopped?: boolean;
   runtimeConfig?: LangfuseRuntimeConfig;
+  /** Internal lifecycle state used to cancel delayed visibility retries. */
+  lifecycleSignal?: AbortSignal;
+  lifecycleController?: AbortController;
 }
 
 export interface GenerationState {
