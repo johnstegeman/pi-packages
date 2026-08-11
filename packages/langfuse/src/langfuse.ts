@@ -66,6 +66,7 @@ const OTEL_VISIBILITY_POLL_INTERVAL_MS = 200;
 const DEFAULT_SHUTDOWN_STEP_TIMEOUT_MS = 2_000;
 const DEFAULT_SCORE_SHUTDOWN_TIMEOUT_MS = 2_000;
 const DEFAULT_LANGFUSE_REQUEST_TIMEOUT_SECONDS = 5;
+const TRACE_TAG_READ_DELAYS_MS = [100, 250, 500, 1_000] as const;
 const DEFAULT_SCORE_FLUSH_AT = 10;
 const DEFAULT_SCORE_FLUSH_INTERVAL_MS = 1_000;
 const MAX_SCORE_QUEUE_SIZE = 100_000;
@@ -105,6 +106,41 @@ function delay(ms: number, signal?: AbortSignal) {
       reject(signal.reason);
     }, { once: true });
   });
+}
+
+type TraceTagClient = {
+  api: {
+    trace: {
+      get(traceId: string): Promise<{ tags?: unknown }>;
+    };
+  };
+};
+
+function isTraceNotVisibleError(error: unknown): boolean {
+  return (
+    typeof error === "object" &&
+    error !== null &&
+    "statusCode" in error &&
+    (error as { statusCode?: unknown }).statusCode === 404
+  );
+}
+
+async function readTraceTagsWithRetry(
+  client: TraceTagClient,
+  traceId: string,
+): Promise<string[]> {
+  for (let attempt = 0; ; attempt += 1) {
+    try {
+      const response = await client.api.trace.get(traceId);
+      return Array.isArray(response?.tags) ? response.tags : [];
+    } catch (error) {
+      const delayMs = TRACE_TAG_READ_DELAYS_MS[attempt];
+      if (!isTraceNotVisibleError(error) || delayMs === undefined) {
+        throw error;
+      }
+      await delay(delayMs);
+    }
+  }
 }
 
 function debugLog(message: string) {
@@ -772,10 +808,7 @@ export async function getRuntime(): Promise<LangfuseRuntime> {
         }) as unknown as LangfuseRuntime["startObservation"],
         propagateAttributes: tracing.propagateAttributes as unknown as LangfuseRuntime["propagateAttributes"],
         updateTraceTags: (traceId: string, tags: string[]) => updateTraceTags(runtime as LangfuseRuntime, traceId, tags),
-        getTraceTags: async (traceId: string) => {
-          const response = await client.api.trace.get(traceId);
-          return Array.isArray(response?.tags) ? response.tags : [];
-        },
+        getTraceTags: (traceId: string) => readTraceTagsWithRetry(client, traceId),
         scoreClient: client as LangfuseScoreClient,
         spanProcessor,
         tracerProvider,
