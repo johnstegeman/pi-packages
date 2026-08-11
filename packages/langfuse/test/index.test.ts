@@ -252,6 +252,73 @@ test("phase tag sync retries the same phase after a failed read", async () => {
   }
 });
 
+test("phase tag sync isolates a permanently missing trace", async () => {
+  const previousConfig = state.config;
+  const observation = {
+    traceId: "trace-id",
+    setTraceIO() {},
+    update() { return this; },
+    end() {},
+  };
+  let phaseHandler: ((data: unknown) => void) | undefined;
+  const runtime: LangfuseRuntime = {
+    startObservation: () => observation,
+    propagateAttributes: (_attributes, fn) => fn(),
+    scoreClient: {},
+    getTraceTags: async () => {
+      throw Object.assign(
+        new Error(`LangfuseNotFoundError response body
+    at sdk stack`),
+        { statusCode: 404 },
+      );
+    },
+    updateTraceTags: async () => {
+      throw new Error("update must not run after a failed tag read");
+    },
+  };
+  const warnings: unknown[][] = [];
+  const previousWarn = console.warn;
+
+  try {
+    state.config = { publicKey: "pk_test", secretKey: "sk_test", host: "https://example.com" };
+    __setRuntimeForTest(runtime);
+    console.warn = (...args: unknown[]) => { warnings.push(args); };
+    await registerExtension({
+      registerCommand() {},
+      events: {
+        emit() {},
+        on(_channel, handler) {
+          phaseHandler = handler;
+          return () => {};
+        },
+      },
+      on() {},
+    } as any);
+    setPhase(null);
+    await startAgentRun({ prompt: "test" }, {});
+
+    phaseHandler!({ phase: "permanent-failure" });
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    phaseHandler!({ phase: "permanent-failure" });
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    assert.equal(warnings.length, 2);
+    for (const warning of warnings) {
+      assert.equal(warning.length, 1);
+      assert.equal(typeof warning[0], "string");
+      assert.match(warning[0] as string, /Phase tag sync unavailable/);
+      assert.match(warning[0] as string, /tracing continues/);
+      assert.doesNotMatch(warning[0] as string, /LangfuseNotFoundError|authorization|sdk stack|\n/);
+    }
+  } finally {
+    console.warn = previousWarn;
+    setPhase(null);
+    __setRuntimeForTest(null);
+    clearAllSessionStates();
+    state.config = previousConfig;
+  }
+});
+
 
 test("concurrent sessions never cross trace ids or tags during phase sync", async () => {
   const previousConfig = state.config;

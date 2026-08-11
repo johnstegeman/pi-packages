@@ -34,6 +34,16 @@ const tagSyncChains = new Map<string, Promise<void>>();
 const lastSentTagsBySession = new Map<string, string>();
 const DEFAULT_TAG_SYNC_SESSION_KEY = "__pi_langfuse_default_session__";
 
+function formatPhaseTagSyncError(error: unknown): string {
+  if (typeof error === "object" && error !== null && "statusCode" in error && (error as { statusCode?: unknown }).statusCode === 404) {
+    return "trace is not visible yet or is outside the configured Langfuse project";
+  }
+  if (error instanceof Error && error.message.trim()) {
+    return error.message.split("\n", 1)[0].slice(0, 240);
+  }
+  return "unknown Langfuse error";
+}
+
 export async function syncActiveTracePhaseTags(): Promise<void> {
   const sessionKey = state.currentSessionId || DEFAULT_TAG_SYNC_SESSION_KEY;
   const root = state.agentState?.root;
@@ -62,7 +72,7 @@ export async function syncActiveTracePhaseTags(): Promise<void> {
       if (lastSentTagsBySession.get(sessionKey) === desiredTagsKey) {
         lastSentTagsBySession.delete(sessionKey);
       }
-      console.warn("📊 Langfuse: Failed to update phase tags", e);
+      console.warn(`📊 Langfuse: Phase tag sync unavailable (${formatPhaseTagSyncError(e)}); tracing continues.`);
     }
   });
   tagSyncChains.set(sessionKey, next);
