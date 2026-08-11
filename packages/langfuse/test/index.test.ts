@@ -458,6 +458,63 @@ test("concurrent sessions never cross trace ids or tags during phase sync", asyn
     state.config = previousConfig;
   }
 });
+
+test("queued phase tag sync skips work after runtime replacement", async () => {
+  const previousConfig = state.config;
+  const observation = {
+    traceId: "trace-id",
+    setTraceIO() {},
+    update() { return this; },
+    end() {},
+  };
+  let releaseRead!: () => void;
+  let readStarted = false;
+  let replacementReads = 0;
+  let replacementUpdates = 0;
+  const oldRuntime: LangfuseRuntime = {
+    startObservation: () => observation,
+    propagateAttributes: (_attributes, fn) => fn(),
+    scoreClient: {},
+    lifecycleController: new AbortController(),
+    getTraceTags: async () => {
+      readStarted = true;
+      await new Promise<void>((resolve) => { releaseRead = resolve; });
+      return [];
+    },
+    updateTraceTags: async () => {},
+  };
+  const replacementRuntime: LangfuseRuntime = {
+    startObservation: () => observation,
+    propagateAttributes: (_attributes, fn) => fn(),
+    scoreClient: {},
+    getTraceTags: async () => { replacementReads += 1; return []; },
+    updateTraceTags: async () => { replacementUpdates += 1; },
+  };
+
+  try {
+    state.config = { publicKey: "pk_test", secretKey: "sk_test", host: "https://example.com" };
+    __setRuntimeForTest(oldRuntime);
+    await startAgentRun({ prompt: "test" }, {});
+    setPhase("alpha");
+    const first = syncActiveTracePhaseTags();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    assert.equal(readStarted, true);
+
+    setPhase("beta");
+    const queued = syncActiveTracePhaseTags();
+    __setRuntimeForTest(replacementRuntime);
+    releaseRead();
+    await Promise.all([first, queued]);
+
+    assert.equal(replacementReads, 0);
+    assert.equal(replacementUpdates, 0);
+  } finally {
+    setPhase(null);
+    __setRuntimeForTest(null);
+    clearAllSessionStates();
+    state.config = previousConfig;
+  }
+});
 type ExtensionHandler = Parameters<ExtensionAPI["on"]>[1];
 
 test("agent_end waits for runtime shutdown", async () => {

@@ -1384,7 +1384,7 @@ test("rejects a successful trace response with malformed tags", async () => {
     state.config = { publicKey: "pk_test", secretKey: "sk_test", host: "https://example.com" };
     globalThis.fetch = (async (input) => {
       assert.ok(String(input).endsWith("/api/public/traces/trace-1"));
-      return new Response(JSON.stringify({ tags: { phase: "development" } }), { status: 200 });
+      return new Response(JSON.stringify({ tags: ["phase:development", 42] }), { status: 200 });
     }) as typeof fetch;
     const runtime = await getRuntime();
     await assert.rejects(

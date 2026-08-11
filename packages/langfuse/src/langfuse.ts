@@ -137,9 +137,12 @@ async function readTraceTagsWithRetry(
   signal?: AbortSignal,
 ): Promise<string[]> {
   for (let attempt = 0; ; attempt += 1) {
+    if (signal?.aborted) {
+      throw signal.reason;
+    }
     try {
       const response = await client.api.trace.get(traceId);
-      if (!Array.isArray(response?.tags)) {
+      if (!Array.isArray(response?.tags) || !response.tags.every((tag): tag is string => typeof tag === "string")) {
         throw createMalformedTraceTagsError();
       }
       return response.tags;
@@ -149,6 +152,9 @@ async function readTraceTagsWithRetry(
         throw error;
       }
       await delay(delayMs, signal);
+      if (signal?.aborted) {
+        throw signal.reason;
+      }
     }
   }
 }
@@ -948,6 +954,11 @@ export function __setRuntimeForTest(rt: LangfuseRuntime | null, timeoutMs = DEFA
   }
   shutdownStepTimeoutMs = timeoutMs;
   activeSessions.clear();
+}
+
+/** Return whether a captured runtime is still the globally active lifecycle. */
+export function isRuntimeActive(rt: LangfuseRuntime): boolean {
+  return runtime === rt && !rt.lifecycleSignal?.aborted;
 }
 
 export async function sendScore(name: string, value: number, options: { traceId?: string; observationId?: string } = {}) {

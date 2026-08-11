@@ -1,5 +1,6 @@
 import { state, resetRunState, computeEvaluationScores } from "../state.js";
-import { getRuntime, sendScore } from "../langfuse.js";
+import { getRuntime, isRuntimeActive, sendScore } from "../langfuse.js";
+import type { LangfuseRuntime } from "../types.js";
 import { ensureConfig } from "../config.js";
 import { shapePayload, truncate, extractFinalAssistant, extractAssistantOutput, getCapturePolicy, getLimits } from "../utils.js";
 import { closeDanglingObservations } from "./tool.js";
@@ -50,28 +51,52 @@ export async function syncActiveTracePhaseTags(): Promise<void> {
   if (!root || !traceId) {
     return;
   }
-
   const desiredTags = buildPhaseTags();
   const desiredTagsKey = `${traceId}\u0000${JSON.stringify(desiredTags)}`;
   if (lastSentTagsBySession.get(sessionKey) === desiredTagsKey) {
-    // Identical tag set already sent (or in flight) for this trace; skip the
-    // redundant ingestion request.
     return tagSyncChains.get(sessionKey) ?? Promise.resolve();
   }
+  let rt: LangfuseRuntime;
+  try {
+    // Capture the runtime before enqueueing. The global runtime may be replaced
+    // while this session's earlier work is still in flight.
+    rt = await getRuntime();
+  } catch (e) {
+    console.warn(`📊 Langfuse: Phase tag sync unavailable (${formatPhaseTagSyncError(e)}); tracing continues.`);
+    return;
+  }
   lastSentTagsBySession.set(sessionKey, desiredTagsKey);
-
   const previous = tagSyncChains.get(sessionKey) ?? Promise.resolve();
   const next = previous.then(async () => {
     try {
-      const rt = await getRuntime();
+      if (!isRuntimeActive(rt)) {
+        if (lastSentTagsBySession.get(sessionKey) === desiredTagsKey) {
+          lastSentTagsBySession.delete(sessionKey);
+        }
+        return;
+      }
       const currentTags = await rt.getTraceTags(traceId);
+      if (!isRuntimeActive(rt)) {
+        if (lastSentTagsBySession.get(sessionKey) === desiredTagsKey) {
+          lastSentTagsBySession.delete(sessionKey);
+        }
+        return;
+      }
       const replacementTags = replacePhaseTags(currentTags, desiredTags);
+      if (!isRuntimeActive(rt)) {
+        if (lastSentTagsBySession.get(sessionKey) === desiredTagsKey) {
+          lastSentTagsBySession.delete(sessionKey);
+        }
+        return;
+      }
       await rt.updateTraceTags(traceId, replacementTags);
     } catch (e) {
       if (lastSentTagsBySession.get(sessionKey) === desiredTagsKey) {
         lastSentTagsBySession.delete(sessionKey);
       }
-      console.warn(`📊 Langfuse: Phase tag sync unavailable (${formatPhaseTagSyncError(e)}); tracing continues.`);
+      if (isRuntimeActive(rt)) {
+        console.warn(`📊 Langfuse: Phase tag sync unavailable (${formatPhaseTagSyncError(e)}); tracing continues.`);
+      }
     }
   });
   tagSyncChains.set(sessionKey, next);
