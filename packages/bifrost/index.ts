@@ -171,6 +171,20 @@ const REASONING_INCLUDE_PATTERNS: RegExp[] = [
   /\breasoning\b/,
 ];
 
+function fallbackContextWindow(id: string): number {
+  // Bifrost omits `context_length` for some Fireworks `accounts/.../models/...`
+  // ids (DeepSeek V4, Kimi K3) and assorted non-chat OpenAI models. Mirror pi's
+  // built-in model catalog so a 1M-context model isn't understated to 128k —
+  // understatement forces aggressive compaction and collapses the output budget
+  // (contextWindow - input - safety) in large sessions.
+  const modelId = id.toLowerCase();
+  const base = modelId.includes("/") ? modelId.slice(modelId.indexOf("/") + 1) : modelId;
+  if (/deepseek-v[3-9]|deepseek-r[1-9]/.test(base)) return 1_000_000;
+  if (/kimi-k3/.test(base)) return 1_048_576;
+  if (/kimi-k2/.test(base)) return 262_144;
+  return 128_000;
+}
+
 function detectReasoning(m: BifrostModel): boolean {
   if (m.pricing?.internal_reasoning && parseFloat(m.pricing.internal_reasoning) > 0) {
     return true;
@@ -205,6 +219,19 @@ export function toProviderModel(m: BifrostModel, gatewayUrl: string) {
     : ["text"];
 
   const isAnthropic = isBifrostAnthropicModel(m.id);
+  const reasoning = detectReasoning(m);
+
+  // Some gateway-served models (e.g. Fireworks' `accounts/.../models/...`
+  // ids) omit `max_output_tokens` / `top_provider.max_completion_tokens`.
+  // For reasoning models a small default (4096) lets thinking alone exhaust
+  // the output budget, which surfaces as "run hit the output token limit
+  // before producing any text" or "Response was truncated before completion".
+  // Use a generous default so thinking + text both fit; pi clamps it further
+  // to the remaining context window.
+  const maxTokens =
+    m.max_output_tokens ??
+    m.top_provider?.max_completion_tokens ??
+    (reasoning ? 32_768 : 4_096);
 
   return {
     id: m.id,
@@ -213,7 +240,7 @@ export function toProviderModel(m: BifrostModel, gatewayUrl: string) {
     baseUrl: isAnthropic
       ? `${gatewayUrl}/anthropic`
       : `${gatewayUrl}/v1`,
-    reasoning: detectReasoning(m),
+    reasoning,
     input,
     cost: {
       input: parsePrice(m.pricing?.prompt),
@@ -221,8 +248,8 @@ export function toProviderModel(m: BifrostModel, gatewayUrl: string) {
       cacheRead: parsePrice(m.pricing?.input_cache_read),
       cacheWrite: parsePrice(m.pricing?.input_cache_write),
     },
-    contextWindow: m.context_length ?? 128_000,
-    maxTokens: m.max_output_tokens ?? m.top_provider?.max_completion_tokens ?? 4_096,
+    contextWindow: m.context_length ?? fallbackContextWindow(m.id),
+    maxTokens,
   };
 }
 

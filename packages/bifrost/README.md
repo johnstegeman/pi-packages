@@ -62,8 +62,8 @@ The following fields are mapped from the Bifrost `/v1/models` response:
 |---|---|
 | `id` | `id` |
 | `name` | `name` |
-| `contextWindow` | `context_length` |
-| `maxTokens` | `max_output_tokens` (falls back to `top_provider.max_completion_tokens`) |
+| `contextWindow` | `context_length` (falls back to `128 000`; for Fireworks `accounts/.../models/...` ids that omit it — DeepSeek V3+/R1 and Kimi K3 where the gateway reports none — mirrors pi's catalog: `1 000 000` for DeepSeek/Kimi K3, `262 144` for Kimi K2.x) |
+| `maxTokens` | `max_output_tokens` (falls back to `top_provider.max_completion_tokens`; when neither is reported, `32 768` for reasoning models so thinking + text fit the output budget, otherwise `4 096`) |
 | `input` | `architecture.input_modalities` (detects image support) |
 | `cost.input` | `pricing.prompt` × 1 000 000 |
 | `cost.output` | `pricing.completion` × 1 000 000 |
