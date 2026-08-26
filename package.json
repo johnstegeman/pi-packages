@@ -22,8 +22,10 @@
       "./packages/bifrost/index.ts",
       "./packages/statusline/src/statusline.ts",
       "./packages/hashline-edit/src/index.ts",
-      "./packages/langfuse/index.ts"
+      "./packages/langfuse/index.ts",
+      "./packages/pi-beads/src/index.ts"
     ],
-    "themes": ["./packages/ayu/themes"]
+    "themes": ["./packages/ayu/themes"],
+    "skills": ["./packages/pi-beads/skills"]
   }
 }
