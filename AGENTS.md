@@ -10,7 +10,8 @@ packages/
 ├── bifrost/     – Custom provider for Bifrost AI gateway
 ├── hashline-edit/ – Hash-anchored read/edit tool override, with opt-in grep
 ├── langfuse/    – Langfuse observability with Superpowers phase metadata
-└── statusline/  – Single-line statusline footer with ayu/tokyo-night/classic presets
+├── statusline/  – Single-line statusline footer with ayu/tokyo-night/classic presets
+└── pi-beads/    – Fork of abix5/pi-beads (beads_* tools), wisp (--ephemeral) support
 ```
 
 This is a monorepo of independent pi extensions/themes. Each package under
@@ -23,6 +24,7 @@ script exists.
 - Per-package tests: `cd packages/<name> && npm test`
 - Statusline tests: `cd packages/statusline && npm test`
 - Langfuse tests: `cd packages/langfuse && npm install` once for runtime dependencies, then `npm test`; the root workspace does not install those dependencies.
+- pi-beads tests: `cd packages/pi-beads && npm test`
 
 ### Statusline settings file isolation
 

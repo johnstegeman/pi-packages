@@ -10,7 +10,8 @@ packages/
 ├── bifrost/        – Custom provider for Bifrost AI gateway
 ├── hashline-edit/  – Hash-anchored read/edit tool override, with opt-in grep
 ├── langfuse/       – Langfuse observability with Superpowers phase metadata
-└── statusline/     – Single-line statusline footer with ayu/tokyo-night/classic presets
+├── statusline/     – Single-line statusline footer with ayu/tokyo-night/classic presets
+└── pi-beads/       – Fork of abix5/pi-beads (beads_* tools) with wisp (--ephemeral) support in beads_create
 ```
 
 ## Install from GitHub
