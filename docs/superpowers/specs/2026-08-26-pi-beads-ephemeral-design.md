@@ -32,6 +32,8 @@ parameter that passes `--ephemeral` to `bd create` — creating **wisps**
 1. Copy the upstream repo contents into `packages/pi-beads/`, keeping it
    faithful: `package.json`, `src/` (`index.ts`, `widget-lines.mjs`,
    `widget-lines.test.mjs`), `skills/beads/SKILL.md`, `README.md`, `LICENSE`,
+   `Makefile`, `SPEC-ui.md`, `docs/`, `scripts/`, and its `.gitignore`.
+   `widget-lines.test.mjs`), `skills/beads/SKILL.md`, `README.md`, `LICENSE`,
    `Makefile`, `docs/`, `scripts/`, and its `.gitignore`.
 2. The vendored `package.json` keeps the `@abix5/pi-beads` name — the package
    name is cosmetic when installing from git (identity is the repo URL), so no
