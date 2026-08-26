@@ -3,7 +3,8 @@
  * Kept in plain JS (no TS) so it is directly runnable/testable by node.
  *
  * state: {
- *   entries: [{ id, repo?, title?, priority?, age?, closed? }, ...],
+ *   entries: [{ id, repo?, title?, priority?, age?, phase? }, ...],
+ *                        // phase: "active" (default) | "ready" | "closed"
  *   closedCount?: number,          // closed this SESSION (header counter)
  *   readyCount?: number | null,    // null/undefined => segment omitted, never "0"
  * }
@@ -114,6 +115,20 @@ function assemble(frags, width) {
 
 const MAX_ROWS = 6;
 
+/** Row phase: "active" (in progress), "ready" (open/to-do), "closed" (one turn). */
+function phaseOf(e) {
+  if (e?.phase === "ready" || e?.phase === "closed") return e.phase;
+  if (e?.closed) return "closed"; // legacy shape: `closed: true`
+  return "active";
+}
+
+// one-symbol state glyph per phase (`◐` in-progress, `○` to-do, `✓` closed)
+const GLYPH = {
+  active: { ch: "\u25d0 ", color: "warning" },
+  ready: { ch: "\u25e6 ", color: "dim" },
+  closed: { ch: "\u2713 ", color: "success" },
+};
+
 function prioColor(p) {
   if (p === 0) return "error";
   if (p === 1) return "warning";
@@ -125,9 +140,12 @@ export function widgetLines(state, width, theme) {
   const all = Array.isArray(state?.entries) ? state.entries : [];
   if (all.length === 0 || !(width > 0)) return [];
 
-  // closed rows are the first thing pushed out by the row cap
-  const active = all.filter((e) => !e.closed);
-  const ordered = [...active, ...all.filter((e) => e.closed)];
+  // ordering: in-progress first, then to-do, then (recently) closed.
+  // closed rows are still the first thing pushed out by the row cap.
+  const active = all.filter((e) => phaseOf(e) === "active");
+  const todo = all.filter((e) => phaseOf(e) === "ready");
+  const closed = all.filter((e) => phaseOf(e) === "closed");
+  const ordered = [...active, ...todo, ...closed];
   const shown = ordered.slice(0, MAX_ROWS);
   const hidden = ordered.length - shown.length;
 
@@ -162,6 +180,8 @@ export function widgetLines(state, width, theme) {
 
   const rows = shown.map((e, i) => {
     const last = i === shown.length - 1 && hidden === 0;
+    const phase = phaseOf(e);
+    const glyph = GLYPH[phase];
     const prio = Number.isFinite(e.priority) ? `P${e.priority} ` : "";
     const body = assemble(
       [
@@ -169,10 +189,7 @@ export function widgetLines(state, width, theme) {
           text: last ? "\u2514\u2500 " : "\u251c\u2500 ",
           paint: (t) => fg("dim", t),
         },
-        {
-          text: e.closed ? "\u2713 " : "\u25d0 ",
-          paint: (t) => fg(e.closed ? "success" : "warning", t),
-        },
+        { text: glyph.ch, paint: (t) => fg(glyph.color, t) },
         { text: prio, paint: (t) => fg(prioColor(e.priority), t) },
         {
           text: `${pad(String(e.id ?? ""), idW)}  `,
@@ -184,7 +201,8 @@ export function widgetLines(state, width, theme) {
         },
         {
           text: String(e.title ?? ""),
-          paint: (t) => (e.closed ? strike(fg("muted", t)) : fg("text", t)),
+          paint: (t) =>
+            phase === "closed" ? strike(fg("muted", t)) : fg("text", t),
         },
       ],
       bodyWidth,

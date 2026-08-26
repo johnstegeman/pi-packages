@@ -75,6 +75,9 @@ export default function piBeadsLean(pi: any) {
     startedAt?: string;
   };
   const wip = new Map<string, WipEntry>();
+  // open + unblocked across all known repos incl. wisps ("to do"); refreshed on
+  // the same cadence as readyCount (session start + after writes, never a timer)
+  const todo = new Map<string, WipEntry>();
   // closed tasks live exactly one agent turn (cleared at the next agent_start)
   const closedShown = new Map<string, WipEntry>();
   let closedCount = 0; // whole session, header counter
@@ -367,18 +370,23 @@ export default function piBeadsLean(pi: any) {
 
   // ---- in-progress widget ----
   function widgetState() {
-    const row = (id: string, v: WipEntry, closed: boolean) => ({
+    const row = (
+      id: string,
+      v: WipEntry,
+      phase: "active" | "ready" | "closed",
+    ) => ({
       id,
       repo: v.repo,
       title: v.title,
       priority: v.priority,
-      age: closed ? "" : formatAge(v.startedAt),
-      closed,
+      age: phase === "active" ? formatAge(v.startedAt) : "",
+      phase,
     });
     return {
       entries: [
-        ...Array.from(wip, ([id, v]) => row(id, v, false)),
-        ...Array.from(closedShown, ([id, v]) => row(id, v, true)),
+        ...Array.from(wip, ([id, v]) => row(id, v, "active")),
+        ...Array.from(todo, ([id, v]) => row(id, v, "ready")),
+        ...Array.from(closedShown, ([id, v]) => row(id, v, "closed")),
       ],
       closedCount,
       readyCount,
@@ -388,7 +396,7 @@ export default function piBeadsLean(pi: any) {
   function renderWip() {
     try {
       if (!uiRef?.setWidget) return;
-      if (wip.size === 0 && closedShown.size === 0) {
+      if (wip.size === 0 && todo.size === 0 && closedShown.size === 0) {
         uiRef.setWidget("beads-wip", undefined);
         return;
       }
@@ -417,9 +425,26 @@ export default function piBeadsLean(pi: any) {
   // `bd ready` is a separate subprocess: only at session start and after writes,
   // never on a timer. Failure => unknown, and the header segment disappears.
   async function refreshReady(): Promise<void> {
-    const r = await bd(["ready", "--json"], umbrella);
+    // wisps are open + unblocked too — surface them so the widget's to-do list
+    // (and the header counter) match what a brainstorming session actually created.
+    const r = await bd(["ready", "--json", "--include-ephemeral", "-n", "100"], umbrella);
     const arr = r.ok ? jparse(r.out) : null;
-    readyCount = Array.isArray(arr) ? arr.length : null;
+    if (!Array.isArray(arr)) {
+      readyCount = null;
+      todo.clear();
+      return;
+    }
+    readyCount = arr.length;
+    todo.clear();
+    for (const i of arr) {
+      if (!i?.id) continue;
+      const dir = dirForPrefix(String(i.id));
+      todo.set(String(i.id), {
+        repo: dir ? path.basename(dir) : "",
+        title: String(i.title ?? ""),
+        priority: Number.isFinite(i.priority) ? Number(i.priority) : undefined,
+      });
+    }
   }
 
   async function metaOf(
@@ -485,6 +510,7 @@ export default function piBeadsLean(pi: any) {
       } else {
         // /reload back into an uninitialized state: drop a stale widget
         wip.clear();
+        todo.clear();
         closedShown.clear();
         renderWip();
       }
@@ -551,7 +577,7 @@ export default function piBeadsLean(pi: any) {
           `unknown repo '${params.repo}' (known: ${knownRepos()})`,
         );
       await ensureFresh();
-      const rargs = ["ready", "--json", "-n", String(params?.limit ?? 15)];
+      const rargs = ["ready", "--json", "--include-ephemeral", "-n", String(params?.limit ?? 15)];
       if (params?.label) rargs.push("--label", String(params.label));
       if (params?.labelAny) rargs.push("--label-any", String(params.labelAny));
       const r = await bd(rargs, scope);
@@ -857,6 +883,7 @@ export default function piBeadsLean(pi: any) {
       await afterWrite(repoDir);
       if (params.status) {
         const id = String(params.id);
+        todo.delete(id); // whatever the new status, it is no longer "to do"
         if (String(params.status) === "in_progress") {
           const meta = await metaOf(id, repoDir);
           wip.set(id, {
@@ -923,13 +950,25 @@ export default function piBeadsLean(pi: any) {
       // drop what really got closed even on a partial failure, or the widget
       // keeps showing closed tasks for the rest of the session
       for (const id of done) {
-        const was = wip.get(id);
+        const was = wip.get(id) ?? todo.get(id);
         wip.delete(id);
-        closedShown.set(id, {
-          repo: was?.repo ?? path.basename(dirForPrefix(id) ?? ""),
-          title: was?.title ?? "",
-          priority: was?.priority,
-        });
+        todo.delete(id);
+        let repo = was?.repo ?? path.basename(dirForPrefix(id) ?? "");
+        let title = was?.title ?? "";
+        let priority = was?.priority;
+        // a task closed without ever being in_progress (the usual wisp path) was
+        // never in `wip`; fetch its meta so the closed row shows a title, not a
+        // bare id.
+        if (!title) {
+          const rd = dirForPrefix(id);
+          if (rd) {
+            const meta = await metaOf(id, rd);
+            if (!title) title = meta.title ?? "";
+            if (priority === undefined) priority = meta.priority;
+            if (!repo) repo = path.basename(rd);
+          }
+        }
+        closedShown.set(id, { repo, title, priority });
         closedCount += 1;
       }
       renderWip();
@@ -1054,7 +1093,7 @@ export default function piBeadsLean(pi: any) {
         return;
       }
       await ensureFresh();
-      const ready = await bd(["ready", "--json", "-n", "10"], umbrella);
+      const ready = await bd(["ready", "--json", "--include-ephemeral", "-n", "10"], umbrella);
       const inProgress = await bd(
         ["list", "--status", "in_progress", "--json"],
         umbrella,

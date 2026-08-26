@@ -32,7 +32,7 @@ live umbrella path, prefix routes, and current default-create repo for this sess
 ### Read — always span ALL repos (from the aggregate by default)
 | tool | use |
 |---|---|
-| `beads_ready({ limit?, repo?, label?, labelAny? })` | ready issues (open + unblocked). Optional `repo` narrows to one project; `label` / `labelAny` filter by labels |
+| `beads_ready({ limit?, repo?, label?, labelAny? })` | ready issues (open + unblocked, **wisps/ephemeral included** so a brainstorming batch stays visible). Optional `repo` narrows to one project; `label` / `labelAny` filter by labels |
 | `beads_list({ status?, limit?, repo?, label?, labelAny? })` | list issues across every repo; `status` = `open,in_progress,blocked,deferred,closed`; optional project/label filters |
 | `beads_show({ id })` | full details of one issue: status, **blocker ids** (`blocked_by:` + `BLOCKED` marker), and for epics **children + progress** (`children: done/total`) |
 | `beads_deps({ ids, direction? })` | dependency view: ONE id → the blocker/dependent **tree**; SEVERAL ids → one compact line each. `direction` = `blockers` (default) or `dependents` |

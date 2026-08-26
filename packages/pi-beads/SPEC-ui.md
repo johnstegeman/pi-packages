@@ -166,3 +166,30 @@ const r = await bd(["init", "--skip-agents", "--skip-hooks"], activeCwd);
    исчезает.
 4. Сузить окно терминала и убедиться, что строки обрезаются, а не переносятся.
 5. Футер содержит `bd✓` или `bd✗` и ничего больше.
+
+---
+
+# Addendum (2026-08-26) — from wip-only to a mini board
+
+The widget stopped being *wip-only* per a user report: during a pi-superpowers-plus
+brainstorming session (ephemeral wisps, none ever `in_progress`) the widget stayed
+hidden until a wisp closed, then showed only that wisp, id-only.
+
+Changes:
+
+- **To-do rows.** `refreshReady()` now stores the whole `bd ready --json
+  --include-ephemeral` list (up to 100) as rows, so the widget draws the open/unblocked
+  work — wisps included — alongside the in-progress rows. Row order is
+  active → to-do → closed; closed rows are still evicted first by the 6-row cap.
+- **Titles on closed rows.** `beads_close` enriches any closed id that never passed
+  through `wip` with a `bd show` meta lookup, so a closed wisp shows its title (and
+  priority/repo), not a bare id.
+- **Ephemeral visibility.** `bd ready` hides wisps by default; the widget's ready fetch,
+  `beads_ready`, and `/beads` now pass `--include-ephemeral` so the person-facing board
+  and the agent-facing ready list agree with what was actually created. (`bd list` has
+  no `--include-ephemeral`, so `beads_list` still cannot show wisps — a bd limitation.)
+- **Renderer.** `widget-lines.mjs` gained a `phase` model (`"active" | "ready" |
+  "closed"`) with a `○` to-do glyph; the legacy `closed: true` shape still renders.
+
+Widget state is still session memory with no polling and no disk; the to-do rows update
+at the same cadence as the ready counter (session start + after writes).
