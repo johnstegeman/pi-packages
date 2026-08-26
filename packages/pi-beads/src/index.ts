@@ -748,6 +748,11 @@ export default function piBeadsLean(pi: any) {
         },
         notes: { type: "string", description: "Optional notes" },
         design: { type: "string", description: "Optional design notes" },
+        ephemeral: {
+          type: "boolean",
+          description:
+            "Create as an ephemeral bead (wisp) by passing --ephemeral to bd create. Wisps stay out of federation sync and can be purged with `bd mol wisp gc` / `bd purge --force` once closed. Boolean true or the string \"true\" both work.",
+        },
       },
       required: ["title"],
     },
@@ -774,6 +779,8 @@ export default function piBeadsLean(pi: any) {
       if (params.labels) args.push("-l", String(params.labels));
       if (params.notes) args.push("--notes", String(params.notes));
       if (params.design) args.push("--design", String(params.design));
+      if (params.ephemeral === true || params.ephemeral === "true")
+        args.push("--ephemeral");
       const r = await bd(args, repoDir);
       if (!r.ok) return textResult(`bd create failed: ${r.err}`);
       await afterWrite(repoDir);
