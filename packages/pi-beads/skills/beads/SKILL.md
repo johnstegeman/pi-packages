@@ -42,7 +42,7 @@ Reads are already cross-repo — **do not** shell out to raw `bd list`, `bd dep 
 ### Write — routed to the OWNING repo, then the aggregate refreshes itself
 | tool | use |
 |---|---|
-| `beads_create({ title, repo?, type?, priority?, description?, parent?, labels?, notes?, design? })` | create in the owning repo; `parent` must be in the same repo |
+| `beads_create({ title, repo?, type?, priority?, description?, parent?, labels?, notes?, design?, ephemeral? })` | create in the owning repo; `parent` must be in the same repo; `ephemeral: true` (or `"true"`) passes `--ephemeral`, creating a wisp |
 | `beads_update({ id, status?, priority?, title?, parent?, notes?, appendNotes?, addLabels?, removeLabels? })` | update one issue; auto-routed by id prefix |
 | `beads_close({ ids, reason? })` | close one or many (ids space/comma separated) |
 | `beads_dep({ issue, blocker })` | `blocker` must be done before `issue` |
@@ -95,6 +95,18 @@ beads_create({
   notes: "Keep retries idempotent"
 })
 ```
+**One-off / ephemeral (wisp)**
+```
+beads_create({
+  repo: "main-orchestrator",
+  title: "Release check QA pass",
+  type: "task",
+  ephemeral: true,
+})
+```
+`ephemeral: true` passes `--ephemeral`, creating a **wisp** — a real bead that
+stays out of federation sync and is purged wholesale once closed (`bd mol wisp gc`
+or `bd purge --force`). Promote one to permanent with `bd mol squash <id>`.
 
 **Link / unlink / annotate**
 ```
