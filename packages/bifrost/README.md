@@ -90,11 +90,11 @@ is needed.
 
 ## Cost attribution
 
-Every request to the Bifrost gateway includes an `x-module-name` header set to
-`pi: <session-name>` (e.g. `pi: feature-add-x-module-name-header-for-bifrost`).
-This allows Bifrost to attribute token usage and cost to a specific pi session.
-The session name is read from pi's session metadata and updated automatically if
-it changes during a session.
+Every request to the Bifrost gateway includes an `x-pi-session` header set to
+the current workspace directory basename (e.g. the worktree name, `pi-packages`),
+so Bifrost can attribute token usage and cost to the pi session that produced it.
+The value is resolved live at request time from pi's current working directory,
+so it always reflects the active workspace.
 
 When a Superpowers workflow phase is active (emitted on the `superpowers:phase`
 event bus), Bifrost requests also carry an `x-superpowers-phase` header set to the
