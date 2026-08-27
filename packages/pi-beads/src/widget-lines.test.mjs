@@ -198,6 +198,9 @@ const state = {
       title: "y",
       priority: 3,
     })),
+    // ready/to-do rows (phase model)
+    { id: "t-1", repo: "rr", title: "todo a", priority: 2, phase: "ready" },
+    { id: "t-2", repo: "rr", title: "todo b", priority: 1, phase: "ready" },
   ],
   closedCount: 2,
   readyCount: 12,
@@ -225,5 +228,91 @@ for (const width of [10, 24, 37, 40, 80, 120]) {
   }
   assert.ok(painted.some(hasAnsi), `nothing painted at width ${width}`);
 }
+
+// ---------- phase model: active -> ready -> closed ----------
+const board = widgetLines(
+  {
+    entries: [
+      { id: "a-1", repo: "r", title: "current", priority: 1, phase: "active" },
+      { id: "t-1", repo: "r", title: "todo one", priority: 2, phase: "ready" },
+      { id: "t-2", repo: "r", title: "todo two", priority: 3, phase: "ready" },
+      { id: "c-1", repo: "r", title: "done one", priority: 0, phase: "closed" },
+    ],
+    closedCount: 1,
+    readyCount: 3,
+  },
+  100,
+);
+
+assert.equal(board.length, 5, board.join("\n")); // header + 4 rows
+// header counts: active rows, ready rows, session-closed total
+assert.ok(board[0].includes("1 active"), board[0]);
+assert.ok(board[0].includes("3 ready"), board[0]);
+assert.ok(board[0].includes("1 done"), board[0]);
+// order is active, then ready, then closed; glyphs distinguish the phases
+assert.ok(board[1].startsWith("\u251c\u2500 \u25d0 "), board[1]); // ◐ active
+assert.ok(board[2].startsWith("\u251c\u2500 \u25e6 "), board[2]); // ◦ ready
+assert.ok(board[3].startsWith("\u251c\u2500 \u25e6 "), board[3]); // ◦ ready
+assert.ok(board[4].startsWith("\u2514\u2500 \u2713 "), board[4]); // ✓ closed
+// titles ride along on every phase, not just the id
+assert.ok(board[1].includes("current"), board[1]);
+assert.ok(board[2].includes("todo one"), board[2]);
+assert.ok(board[3].includes("todo two"), board[3]);
+assert.ok(board[4].includes("done one"), board[4]);
+for (const l of board) assert.ok(displayWidth(l) <= 100, `too wide: ${l}`);
+
+// widgetState only ever sends an age for active rows — so a ready row carrying
+// an empty age must not reserve an age column at all (mirrors index.ts)
+const noAge = widgetLines(
+  {
+    entries: [
+      { id: "t-1", repo: "r", title: "todo", priority: 2, phase: "ready", age: "" },
+      { id: "a-1", repo: "r", title: "current", priority: 2, phase: "active", age: "9h" },
+    ],
+    readyCount: 1,
+  },
+  100,
+);
+assert.ok(noAge[1].endsWith("9h"), noAge[1]); // active keeps its age column
+assert.ok(!noAge[2].includes("9h"), noAge[2]); // ready does not
+
+// row cap still evicts closed rows first, now with ready rows in the middle
+const crowded = widgetLines(
+  {
+    entries: [
+      ...Array.from({ length: 4 }, (_, i) => ({
+        id: `t-${i}`,
+        repo: "r",
+        title: "todo",
+        priority: 2,
+        phase: "ready",
+      })),
+      { id: "c-1", repo: "r", title: "done one", priority: 2, phase: "closed" },
+      { id: "c-2", repo: "r", title: "done two", priority: 2, phase: "closed" },
+      { id: "c-3", repo: "r", title: "done three", priority: 2, phase: "closed" },
+    ],
+    closedCount: 3,
+    readyCount: 4,
+  },
+  80,
+);
+assert.equal(crowded.length, 8, crowded.join("\n")); // header + 6 rows + tail
+assert.equal(crowded[7], "+1 more"); // 7 rows -> cap 6, one closed evicted
+assert.ok(crowded[1].includes("t-0") && crowded[4].includes("t-3"), crowded.join("\n"));
+assert.ok(crowded[5].includes("c-1"), crowded[5]); // first closed survived
+assert.ok(crowded[6].includes("c-2"), crowded[6]); // second closed survived
+assert.ok(!crowded.join("\n").includes("c-3")); // last closed evicted
+
+// legacy `closed: true` shape still renders as the closed phase
+const legacy = widgetLines(
+  {
+    entries: [
+      { id: "c-1", repo: "r", title: "legacy done", priority: 0, closed: true },
+    ],
+    closedCount: 1,
+  },
+  80,
+);
+assert.ok(legacy[1].includes("\u2713") && legacy[1].includes("legacy done"), legacy[1]);
 
 console.log("widget-lines: ok");

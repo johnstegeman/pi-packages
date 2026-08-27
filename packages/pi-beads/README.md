@@ -8,8 +8,9 @@ and the [beads](https://github.com/steveyegge/beads) issue tracker (`bd`). The a
 gets compact in-process `beads_*` tools instead of a beads MCP server, a short prime
 once per segment instead of once per turn, reads that span every repository of an
 umbrella workspace, and writes routed to the owning repository by issue-id prefix.
-Next to the editor sits a widget of the work in progress; not one of its lines costs
-the model a token.
+Next to the editor sits a widget of the current board — the issues in progress (◐), the
+open/to-do ones (○, wisps included), and the ones just closed (✓). Not one of its lines
+costs the model a token.
 
 > [!TIP]
 > You need the `bd` binary on `PATH` and a `.beads/` directory in the project.
@@ -57,16 +58,19 @@ when the project has no `.beads/`.
 ![Every widget state and colour](https://raw.githubusercontent.com/abix5/pi-beads/main/docs/assets/widget-legend.png)
 
 1. `⦿ beads` — the header; it dims when nothing is in progress.
-2. The header counters: issues moved to `in_progress` in this session, issues closed in
-   this session, and how many are ready to work — open and unblocked. When the ready
+2. The header counters: issues in progress this session, issues closed this session, and
+   how many are ready to work — open and unblocked, wisps included. When the ready
    number is unknown the segment disappears entirely: a `0` is never shown.
-3. `◐` is in progress, `✓` is closed. A closed row survives one agent turn and then
-   leaves; the header counter stays until the session ends.
+3. `◐` is in progress, `○` is open/to-do, `✓` is closed. To-do rows come from the same
+   `bd ready` view as `beads_ready` (so brainstormed wisps appear here too). A closed
+   row survives one agent turn and then leaves; the header counter stays until the
+   session ends.
 4. `P0`…`P4` — priority: `P0` red, `P1` yellow, the rest muted.
 5. `[crm-backend]` — the owning repository; in a single-repo project the column is gone.
 6. The right-hand column is how long the issue has been in progress, pinned to the
-   right edge.
-7. A closed issue's title is struck through.
+   right edge; to-do and closed rows have none.
+7. A closed issue's title is struck through — and shown even when the task never went
+   through `in_progress` this session (a `beads_close` fetches the title on its own).
 
 At most six rows are drawn; the rest collapse into a `+N` tail, and closed rows are
 evicted first. In a narrow pane the titles are cut with an ellipsis and the repository
@@ -105,8 +109,9 @@ acts on — rather than raw JSON.
 **Writes.** Each write is dispatched to the owning repository by id prefix, then the
 aggregate is re-hydrated so the next read cannot show a stale list.
 
-**Widget.** Widget state lives in session memory: it shows what this session moved into
-progress and closed. Rendering happens in the UI process only, so it costs no tokens.
+**Widget.** Widget state lives in session memory: it shows the current board — what this
+session has in progress, what is open/to-do (wisps included), and what it closed — and
+repaints only that in-memory state in the UI process, so it costs no tokens.
 
 ## Install
 

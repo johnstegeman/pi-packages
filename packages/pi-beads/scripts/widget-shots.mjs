@@ -56,6 +56,13 @@ const shots = {
             age: ago(3 * HOUR),
           },
           {
+            id: "chub-5k2",
+            repo: "content-hub",
+            title: "Write the import draft",
+            priority: 2,
+            phase: "ready",
+          },
+          {
             id: "cicd-4f7",
             repo: "cicd",
             title: "Harden runner privileges",
@@ -95,6 +102,13 @@ const shots = {
             title: "P1 yellow: booking form validation",
             priority: 1,
             age: ago(4 * HOUR),
+          },
+          {
+            id: "chub-5k2",
+            repo: "content-hub",
+            title: "○ ready/to-do (open + unblocked, wisps included)",
+            priority: 2,
+            phase: "ready",
           },
           {
             id: "cicd-4f7",
