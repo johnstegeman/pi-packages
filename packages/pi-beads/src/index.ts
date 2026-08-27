@@ -30,7 +30,7 @@ import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import * as path from "node:path";
 import { fileURLToPath } from "node:url";
-import { widgetLines, formatAge } from "./widget-lines.mjs";
+import { widgetLines, formatAge, parseClosedWisps } from "./widget-lines.mjs";
 
 const pexec = promisify(execFile);
 
@@ -78,9 +78,11 @@ export default function piBeadsLean(pi: any) {
   // open + unblocked across all known repos incl. wisps ("to do"); refreshed on
   // the same cadence as readyCount (session start + after writes, never a timer)
   const todo = new Map<string, WipEntry>();
-  // closed tasks live exactly one agent turn (cleared at the next agent_start)
-  const closedShown = new Map<string, WipEntry>();
-  let closedCount = 0; // whole session, header counter
+  // done: closed wisps currently in the DB, refetched at session start, after
+  // beads_* writes, and on EVERY agent_start — so bare-`bd` changes (incl.
+  // superpowers' phase-end `bd mol wisp gc --closed --force`) show up within a
+  // turn. Purging the wisps empties the list; there is no in-memory accumulator.
+  const done = new Map<string, WipEntry>();
   let readyCount: number | null = null; // null => the segment is omitted, never "0"
 
   let beadsReady = false; // umbrella .beads reachable
@@ -215,11 +217,12 @@ export default function piBeadsLean(pi: any) {
   }
   // after a routed write: re-export the repo's JSONL so the next `repo sync` sees it
   async function afterWrite(repoDir: string): Promise<void> {
-    // any write can change what is ready; refresh off the critical path so the
-    // extra `bd ready` subprocess never shows up as tool latency (still no timers)
-    void refreshReady().then(renderWip, () => {
-      /* unknown stays unknown -> the header segment just disappears */
-    });
+    // any write can change what is ready or done; refresh off the critical path
+    // so the extra subprocesses never show up as tool latency (still no timers)
+    void Promise.allSettled([refreshReady(), refreshDone()]).then(
+      () => renderWip(),
+      () => {},
+    );
     if (!isUmbrella) return; // single-repo: same DB the reads use, nothing to sync
     await bd(["export", "-o", ".beads/issues.jsonl"], repoDir, 30000);
     needSync = true;
@@ -386,9 +389,9 @@ export default function piBeadsLean(pi: any) {
       entries: [
         ...Array.from(wip, ([id, v]) => row(id, v, "active")),
         ...Array.from(todo, ([id, v]) => row(id, v, "ready")),
-        ...Array.from(closedShown, ([id, v]) => row(id, v, "closed")),
+        ...Array.from(done, ([id, v]) => row(id, v, "closed")),
       ],
-      closedCount,
+      closedCount: done.size,
       readyCount,
     };
   }
@@ -396,7 +399,7 @@ export default function piBeadsLean(pi: any) {
   function renderWip() {
     try {
       if (!uiRef?.setWidget) return;
-      if (wip.size === 0 && todo.size === 0 && closedShown.size === 0) {
+      if (wip.size === 0 && todo.size === 0 && done.size === 0) {
         uiRef.setWidget("beads-wip", undefined);
         return;
       }
@@ -445,6 +448,26 @@ export default function piBeadsLean(pi: any) {
         priority: Number.isFinite(i.priority) ? Number(i.priority) : undefined,
       });
     }
+  }
+
+  async function refreshDone(): Promise<void> {
+    // closed wisps currently in the DB = the widget's done list. Wisps are
+    // per-repo-local (not in the umbrella aggregate), so in umbrella mode read
+    // each known repo and union; single-repo is one read. Failure (missing/old
+    // bd, unknown subcommand) is silent — the done list just stays as-is.
+    const dirs = isUmbrella
+      ? Array.from(new Set([...prefixToDir.values(), umbrella]))
+      : [umbrella];
+    const next = new Map<string, WipEntry>();
+    for (const dir of dirs) {
+      const r = await bd(["mol", "wisp", "list", "--all", "--json"], dir);
+      if (!r.ok) continue;
+      for (const e of parseClosedWisps(r.out, path.basename(dir))) {
+        next.set(e.id, e);
+      }
+    }
+    done.clear();
+    for (const [id, e] of next) done.set(id, e);
   }
 
   async function metaOf(
@@ -501,8 +524,8 @@ export default function piBeadsLean(pi: any) {
       setStatusLine(ctx);
       if (beadsReady) {
         // fire-and-forget: bd must not delay session start
-        void Promise.allSettled([loadWip(), refreshReady()]).then(
-          renderWip,
+        void Promise.allSettled([loadWip(), refreshReady(), refreshDone()]).then(
+          () => renderWip(),
           () => {
             /* bd missing/broken -> widget just stays empty */
           },
@@ -511,7 +534,7 @@ export default function piBeadsLean(pi: any) {
         // /reload back into an uninitialized state: drop a stale widget
         wip.clear();
         todo.clear();
-        closedShown.clear();
+        done.clear();
         renderWip();
       }
     } catch (e: any) {
@@ -522,11 +545,12 @@ export default function piBeadsLean(pi: any) {
     }
   });
 
-  // closed tasks are visible for exactly one agent turn
   pi.on("agent_start", async () => {
-    if (closedShown.size === 0) return;
-    closedShown.clear();
-    renderWip();
+    // Re-read the closed-wisp list every turn, unconditionally: superpowers
+    // mutates the DB with bare `bd` calls (closes mid-phase, and ends the phase
+    // with `bd mol wisp gc --closed --force`) that never reach the beads_*
+    // tools. Fire-and-forget so this never blocks the turn.
+    void refreshDone().then(() => renderWip());
   });
 
   // re-prime after compaction (matches beads' PreCompact refresh behavior)
@@ -934,7 +958,7 @@ export default function piBeadsLean(pi: any) {
           );
         (byRepo.get(dir) ?? byRepo.set(dir, []).get(dir)!).push(id);
       }
-      const done: string[] = [];
+      const closedIds: string[] = [];
       let failure: string | null = null;
       for (const [dir, rids] of byRepo) {
         const args = ["close", ...rids];
@@ -945,35 +969,19 @@ export default function piBeadsLean(pi: any) {
           break;
         }
         await afterWrite(dir);
-        done.push(...rids);
+        closedIds.push(...rids);
       }
-      // drop what really got closed even on a partial failure, or the widget
-      // keeps showing closed tasks for the rest of the session
-      for (const id of done) {
-        const was = wip.get(id) ?? todo.get(id);
+      // drop what really got closed even on a partial failure, so a failed close
+      // never leaves the widget showing an item that is still open
+      for (const id of closedIds) {
         wip.delete(id);
         todo.delete(id);
-        let repo = was?.repo ?? path.basename(dirForPrefix(id) ?? "");
-        let title = was?.title ?? "";
-        let priority = was?.priority;
-        // a task closed without ever being in_progress (the usual wisp path) was
-        // never in `wip`; fetch its meta so the closed row shows a title, not a
-        // bare id.
-        if (!title) {
-          const rd = dirForPrefix(id);
-          if (rd) {
-            const meta = await metaOf(id, rd);
-            if (!title) title = meta.title ?? "";
-            if (priority === undefined) priority = meta.priority;
-            if (!repo) repo = path.basename(rd);
-          }
-        }
-        closedShown.set(id, { repo, title, priority });
-        closedCount += 1;
       }
+      // the DB-derived done list (incl. the just-closed wisps, titles intact) is
+      // repainted by afterWrite -> refreshDone as soon as that read lands.
       renderWip();
       if (failure) return textResult(failure);
-      return textResult(`closed ${done.join(", ")}`);
+      return textResult(`closed ${closedIds.join(", ")}`);
     },
   });
 
