@@ -5,7 +5,7 @@
  * state: {
  *   entries: [{ id, repo?, title?, priority?, age?, phase? }, ...],
  *                        // phase: "active" (default) | "ready" | "closed"
- *   closedCount?: number,          // closed this SESSION (header counter)
+ *   closedCount?: number,          // current closed wisps in the DB (header counter)
  *   readyCount?: number | null,    // null/undefined => segment omitted, never "0"
  * }
  * width: terminal columns
@@ -78,6 +78,34 @@ export function formatAge(startedAt, now = Date.now()) {
   return `${Math.floor(h / 24)}d`;
 }
 
+/**
+ * Parse `bd mol wisp list --all --json` into the widget's "done" rows.
+ * Keeps only wisps with `status === "closed"`. Accepts the real wrapper shape
+ * ({ count, schema_version, wisps: [...] }), a bare array, and a leading tip
+ * line before the JSON object. Returns [] on any malformed input.
+ */
+export function parseClosedWisps(json, repo = "") {
+  let obj;
+  try {
+    const text = typeof json === "string" ? json.trim().replace(/^[^{[]*/, "") : json;
+    obj = text ? JSON.parse(text) : null;
+  } catch {
+    return [];
+  }
+  const wisps = Array.isArray(obj) ? obj : obj?.wisps ?? [];
+  const out = [];
+  for (const w of wisps) {
+    if (!w || w.status !== "closed" || !w.id) continue;
+    out.push({
+      id: String(w.id),
+      repo,
+      title: w.title ? String(w.title) : "",
+      priority: Number.isFinite(w.priority) ? Number(w.priority) : undefined,
+    });
+  }
+  return out;
+}
+
 const PLAIN = { fg: (_c, t) => t, strikethrough: (t) => t };
 
 function themeOf(theme) {
@@ -113,9 +141,9 @@ function assemble(frags, width) {
   return { plain, text: out, width: used };
 }
 
-const MAX_ROWS = 6;
+const MAX_ROWS = 10;
 
-/** Row phase: "active" (in progress), "ready" (open/to-do), "closed" (one turn). */
+/** Row phase: "active" (in progress), "ready" (open/to-do), "closed" (done, persists until wisps are purged). */
 function phaseOf(e) {
   if (e?.phase === "ready" || e?.phase === "closed") return e.phase;
   if (e?.closed) return "closed"; // legacy shape: `closed: true`
@@ -140,14 +168,15 @@ export function widgetLines(state, width, theme) {
   const all = Array.isArray(state?.entries) ? state.entries : [];
   if (all.length === 0 || !(width > 0)) return [];
 
-  // ordering: in-progress first, then to-do, then (recently) closed.
-  // closed rows are still the first thing pushed out by the row cap.
+  // ordering: active, then to-do, then done. Done and active win the budget;
+  // to-do is evicted first so the accumulating done list stays on screen.
   const active = all.filter((e) => phaseOf(e) === "active");
   const todo = all.filter((e) => phaseOf(e) === "ready");
   const closed = all.filter((e) => phaseOf(e) === "closed");
-  const ordered = [...active, ...todo, ...closed];
-  const shown = ordered.slice(0, MAX_ROWS);
-  const hidden = ordered.length - shown.length;
+  const budget = MAX_ROWS - active.length - closed.length;
+  const keptTodo = budget > 0 ? todo.slice(0, budget) : [];
+  const shown = [...active, ...keptTodo, ...closed];
+  const hidden = todo.length - keptTodo.length;
 
   // ---- header ----
   const segs = [`${active.length} active`];

@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { widgetLines, displayWidth, formatAge } from "./widget-lines.mjs";
+import { widgetLines, displayWidth, formatAge, parseClosedWisps } from "./widget-lines.mjs";
 
 const P = (n) => ({
   id: `p-${n}`,
@@ -128,7 +128,7 @@ assert.ok(
   )[1].length < 40,
 );
 
-// ---------- row cap: closed rows are pushed out first ----------
+// ---------- row budget: done + active win, to-do is evicted first ----------
 const many = {
   entries: [
     ...Array.from({ length: 5 }, (_, i) => ({
@@ -143,14 +143,9 @@ const many = {
   ],
   closedCount: 3,
 };
-const capped = widgetLines(many, 80);
-assert.equal(capped.length, 8); // header + 6 rows + tail
-assert.equal(capped[7], "+2 more");
-assert.ok(capped[6].includes("c-1")); // one closed survived, two evicted
-assert.ok(!capped.join("\n").includes("c-2"));
-// with a tail, no row uses the closing branch
-assert.ok(!capped.slice(1, 7).some((l) => l.startsWith("\u2514")));
-// the tail respects the width too
+const allShown = widgetLines(many, 80);
+assert.equal(allShown.length, 9); // header + 8 rows, all within the 10-row budget
+assert.ok(allShown.join("\n").includes("c-3")); // nothing is evicted any more
 for (const l of widgetLines(many, 6))
   assert.ok(displayWidth(l) <= 6, `too wide: ${l}`);
 
@@ -276,7 +271,7 @@ const noAge = widgetLines(
 assert.ok(noAge[1].endsWith("9h"), noAge[1]); // active keeps its age column
 assert.ok(!noAge[2].includes("9h"), noAge[2]); // ready does not
 
-// row cap still evicts closed rows first, now with ready rows in the middle
+// done rows win the budget alongside active; to-do fills the rest
 const crowded = widgetLines(
   {
     entries: [
@@ -296,12 +291,35 @@ const crowded = widgetLines(
   },
   80,
 );
-assert.equal(crowded.length, 8, crowded.join("\n")); // header + 6 rows + tail
-assert.equal(crowded[7], "+1 more"); // 7 rows -> cap 6, one closed evicted
-assert.ok(crowded[1].includes("t-0") && crowded[4].includes("t-3"), crowded.join("\n"));
-assert.ok(crowded[5].includes("c-1"), crowded[5]); // first closed survived
-assert.ok(crowded[6].includes("c-2"), crowded[6]); // second closed survived
-assert.ok(!crowded.join("\n").includes("c-3")); // last closed evicted
+assert.equal(crowded.length, 8, crowded.join("\n")); // header + 7 rows (4 to-do + 3 done)
+assert.ok(!crowded.join("\n").includes("+1 more"), crowded.join("\n")); // nothing evicted
+assert.ok(crowded.join("\n").includes("c-3"), crowded.join("\n")); // all done rows survive
+
+// with more rows than the 10-row budget, to-do is evicted first; done survives
+const overflow = widgetLines(
+  {
+    entries: [
+      ...Array.from({ length: 8 }, (_, i) => ({
+        id: `t-${i}`,
+        repo: "r",
+        title: "todo",
+        priority: 2,
+        phase: "ready",
+      })),
+      { id: "c-1", repo: "r", title: "done one", priority: 2, phase: "closed" },
+      { id: "c-2", repo: "r", title: "done two", priority: 2, phase: "closed" },
+      { id: "c-3", repo: "r", title: "done three", priority: 2, phase: "closed" },
+    ],
+    closedCount: 3,
+    readyCount: 8,
+  },
+  80,
+);
+assert.equal(overflow.length, 12, overflow.join("\n")); // header + 10 rows + "+1 more"
+assert.equal(overflow[11], "+1 more");
+assert.ok(overflow.join("\n").includes("c-1") && overflow.join("\n").includes("c-3"));
+assert.ok(overflow[10].includes("c-3"), overflow[10]); // last shown row is the last done row
+assert.ok(!overflow.slice(1, 11).some((l) => l.startsWith("\u2514"))); // under a tail, no row uses the closing branch
 
 // legacy `closed: true` shape still renders as the closed phase
 const legacy = widgetLines(
@@ -314,5 +332,42 @@ const legacy = widgetLines(
   80,
 );
 assert.ok(legacy[1].includes("\u2713") && legacy[1].includes("legacy done"), legacy[1]);
+
+// ---------- parseClosedWisps (bd mol wisp list --all --json -> done rows) ----------
+const closedWispList = JSON.stringify({
+  count: 2,
+  schema_version: 1,
+  wisps: [
+    { id: "beads-wisp-a", title: "Explore", status: "closed", priority: 2, type: "task" },
+    { id: "beads-wisp-b", title: "Design", status: "in_progress", priority: 1, type: "task" },
+    { id: "beads-wisp-c", title: "Wrap up", status: "closed", priority: 0, type: "task" },
+  ],
+});
+assert.deepEqual(parseClosedWisps(closedWispList, "repo-x"), [
+  { id: "beads-wisp-a", repo: "repo-x", title: "Explore", priority: 2 },
+  { id: "beads-wisp-c", repo: "repo-x", title: "Wrap up", priority: 0 },
+]);
+
+// a bare array shape also parses
+assert.deepEqual(
+  parseClosedWisps(JSON.stringify([{ id: "w-1", status: "closed", title: "t" }]), "r"),
+  [{ id: "w-1", repo: "r", title: "t", priority: undefined }],
+);
+
+// a leading tip line before the JSON object is stripped
+assert.equal(parseClosedWisps("\u{1F4A1} Tip: version info\n" + closedWispList, "r").length, 2);
+
+// empty / malformed inputs decay to []
+assert.deepEqual(parseClosedWisps("", "r"), []);
+assert.deepEqual(parseClosedWisps("not json", "r"), []);
+assert.deepEqual(parseClosedWisps(null, "r"), []);
+assert.deepEqual(parseClosedWisps(JSON.stringify({ wisps: [] }), "r"), []);
+
+// closed entries without an id are dropped
+assert.deepEqual(
+  parseClosedWisps(JSON.stringify({ wisps: [{ status: "closed", title: "no id" }] }), "r"),
+  [],
+);
+
 
 console.log("widget-lines: ok");
