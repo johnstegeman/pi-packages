@@ -78,6 +78,34 @@ export function formatAge(startedAt, now = Date.now()) {
   return `${Math.floor(h / 24)}d`;
 }
 
+/**
+ * Parse `bd mol wisp list --all --json` into the widget's "done" rows.
+ * Keeps only wisps with `status === "closed"`. Accepts the real wrapper shape
+ * ({ count, schema_version, wisps: [...] }), a bare array, and a leading tip
+ * line before the JSON object. Returns [] on any malformed input.
+ */
+export function parseClosedWisps(json, repo = "") {
+  let obj;
+  try {
+    const text = typeof json === "string" ? json.trim().replace(/^[^{[]*/, "") : json;
+    obj = text ? JSON.parse(text) : null;
+  } catch {
+    return [];
+  }
+  const wisps = Array.isArray(obj) ? obj : obj?.wisps ?? [];
+  const out = [];
+  for (const w of wisps) {
+    if (!w || w.status !== "closed" || !w.id) continue;
+    out.push({
+      id: String(w.id),
+      repo,
+      title: w.title ? String(w.title) : "",
+      priority: Number.isFinite(w.priority) ? Number(w.priority) : undefined,
+    });
+  }
+  return out;
+}
+
 const PLAIN = { fg: (_c, t) => t, strikethrough: (t) => t };
 
 function themeOf(theme) {

@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { widgetLines, displayWidth, formatAge } from "./widget-lines.mjs";
+import { widgetLines, displayWidth, formatAge, parseClosedWisps } from "./widget-lines.mjs";
 
 const P = (n) => ({
   id: `p-${n}`,
@@ -314,5 +314,42 @@ const legacy = widgetLines(
   80,
 );
 assert.ok(legacy[1].includes("\u2713") && legacy[1].includes("legacy done"), legacy[1]);
+
+// ---------- parseClosedWisps (bd mol wisp list --all --json -> done rows) ----------
+const closedWispList = JSON.stringify({
+  count: 2,
+  schema_version: 1,
+  wisps: [
+    { id: "beads-wisp-a", title: "Explore", status: "closed", priority: 2, type: "task" },
+    { id: "beads-wisp-b", title: "Design", status: "in_progress", priority: 1, type: "task" },
+    { id: "beads-wisp-c", title: "Wrap up", status: "closed", priority: 0, type: "task" },
+  ],
+});
+assert.deepEqual(parseClosedWisps(closedWispList, "repo-x"), [
+  { id: "beads-wisp-a", repo: "repo-x", title: "Explore", priority: 2 },
+  { id: "beads-wisp-c", repo: "repo-x", title: "Wrap up", priority: 0 },
+]);
+
+// a bare array shape also parses
+assert.deepEqual(
+  parseClosedWisps(JSON.stringify([{ id: "w-1", status: "closed", title: "t" }]), "r"),
+  [{ id: "w-1", repo: "r", title: "t", priority: undefined }],
+);
+
+// a leading tip line before the JSON object is stripped
+assert.equal(parseClosedWisps("\u{1F4A1} Tip: version info\n" + closedWispList, "r").length, 2);
+
+// empty / malformed inputs decay to []
+assert.deepEqual(parseClosedWisps("", "r"), []);
+assert.deepEqual(parseClosedWisps("not json", "r"), []);
+assert.deepEqual(parseClosedWisps(null, "r"), []);
+assert.deepEqual(parseClosedWisps(JSON.stringify({ wisps: [] }), "r"), []);
+
+// closed entries without an id are dropped
+assert.deepEqual(
+  parseClosedWisps(JSON.stringify({ wisps: [{ status: "closed", title: "no id" }] }), "r"),
+  [],
+);
+
 
 console.log("widget-lines: ok");
