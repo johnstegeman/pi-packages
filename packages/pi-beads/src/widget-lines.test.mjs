@@ -319,6 +319,7 @@ assert.equal(overflow.length, 12, overflow.join("\n")); // header + 10 rows + "+
 assert.equal(overflow[11], "+1 more");
 assert.ok(overflow.join("\n").includes("c-1") && overflow.join("\n").includes("c-3"));
 assert.ok(overflow[10].includes("c-3"), overflow[10]); // last shown row is the last done row
+assert.ok(!overflow.slice(1, 11).some((l) => l.startsWith("\u2514"))); // under a tail, no row uses the closing branch
 
 // legacy `closed: true` shape still renders as the closed phase
 const legacy = widgetLines(

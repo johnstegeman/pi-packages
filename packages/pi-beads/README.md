@@ -72,7 +72,8 @@ when the project has no `.beads/`.
 6. The right-hand column is how long the issue has been in progress, pinned to the
    right edge; to-do and closed rows have none.
 7. A closed issue's title is struck through — and shown even when the task never went
-   through `in_progress` this session (a `beads_close` fetches the title on its own).
+   through `in_progress` this session (titles come from the re-read of closed wisps
+   in the database, so a close from anywhere shows up).
 
 At most ten rows are drawn; when they overflow, to-do rows are evicted first (the
 accumulating done list is kept) and the rest collapse into a `+N` tail. In a narrow pane

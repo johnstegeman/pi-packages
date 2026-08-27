@@ -458,16 +458,24 @@ export default function piBeadsLean(pi: any) {
     const dirs = isUmbrella
       ? Array.from(new Set([...prefixToDir.values(), umbrella]))
       : [umbrella];
+    let anyOk = false;
     const next = new Map<string, WipEntry>();
     for (const dir of dirs) {
       const r = await bd(["mol", "wisp", "list", "--all", "--json"], dir);
       if (!r.ok) continue;
+      anyOk = true;
       for (const e of parseClosedWisps(r.out, path.basename(dir))) {
         next.set(e.id, e);
       }
     }
-    done.clear();
-    for (const [id, e] of next) done.set(id, e);
+    // Only replace on success: if every read in this refresh failed (transient
+    // bd hiccup, or a failing repo in umbrella mode), keep the accumulated done
+    // list rather than blinking it away. A permanently-unsupported old bd never
+    // populated `done` anyway, so it still settles on the correct empty list.
+    if (anyOk) {
+      done.clear();
+      for (const [id, e] of next) done.set(id, e);
+    }
   }
 
   async function metaOf(
@@ -546,11 +554,14 @@ export default function piBeadsLean(pi: any) {
   });
 
   pi.on("agent_start", async () => {
-    // Re-read the closed-wisp list every turn, unconditionally: superpowers
+    // Re-read the closed-wisp list every turn within a beads session: superpowers
     // mutates the DB with bare `bd` calls (closes mid-phase, and ends the phase
     // with `bd mol wisp gc --closed --force`) that never reach the beads_*
-    // tools. Fire-and-forget so this never blocks the turn.
-    void refreshDone().then(() => renderWip());
+    // tools, so the re-read stays unconditional there. Outside a beads session
+    // there is nothing to read — skip the `bd mol wisp list` spawn entirely.
+    // Fire-and-forget so this never blocks the turn.
+    if (!beadsReady) return;
+    void refreshDone().then(() => renderWip(), () => {});
   });
 
   // re-prime after compaction (matches beads' PreCompact refresh behavior)

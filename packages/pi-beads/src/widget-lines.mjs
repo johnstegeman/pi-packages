@@ -5,7 +5,7 @@
  * state: {
  *   entries: [{ id, repo?, title?, priority?, age?, phase? }, ...],
  *                        // phase: "active" (default) | "ready" | "closed"
- *   closedCount?: number,          // closed this SESSION (header counter)
+ *   closedCount?: number,          // current closed wisps in the DB (header counter)
  *   readyCount?: number | null,    // null/undefined => segment omitted, never "0"
  * }
  * width: terminal columns
@@ -143,7 +143,7 @@ function assemble(frags, width) {
 
 const MAX_ROWS = 10;
 
-/** Row phase: "active" (in progress), "ready" (open/to-do), "closed" (one turn). */
+/** Row phase: "active" (in progress), "ready" (open/to-do), "closed" (done, persists until wisps are purged). */
 function phaseOf(e) {
   if (e?.phase === "ready" || e?.phase === "closed") return e.phase;
   if (e?.closed) return "closed"; // legacy shape: `closed: true`
