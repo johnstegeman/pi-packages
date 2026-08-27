@@ -141,7 +141,7 @@ function assemble(frags, width) {
   return { plain, text: out, width: used };
 }
 
-const MAX_ROWS = 6;
+const MAX_ROWS = 10;
 
 /** Row phase: "active" (in progress), "ready" (open/to-do), "closed" (one turn). */
 function phaseOf(e) {
@@ -168,14 +168,15 @@ export function widgetLines(state, width, theme) {
   const all = Array.isArray(state?.entries) ? state.entries : [];
   if (all.length === 0 || !(width > 0)) return [];
 
-  // ordering: in-progress first, then to-do, then (recently) closed.
-  // closed rows are still the first thing pushed out by the row cap.
+  // ordering: active, then to-do, then done. Done and active win the budget;
+  // to-do is evicted first so the accumulating done list stays on screen.
   const active = all.filter((e) => phaseOf(e) === "active");
   const todo = all.filter((e) => phaseOf(e) === "ready");
   const closed = all.filter((e) => phaseOf(e) === "closed");
-  const ordered = [...active, ...todo, ...closed];
-  const shown = ordered.slice(0, MAX_ROWS);
-  const hidden = ordered.length - shown.length;
+  const budget = MAX_ROWS - active.length - closed.length;
+  const keptTodo = budget > 0 ? todo.slice(0, budget) : [];
+  const shown = [...active, ...keptTodo, ...closed];
+  const hidden = todo.length - keptTodo.length;
 
   // ---- header ----
   const segs = [`${active.length} active`];
