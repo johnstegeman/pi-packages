@@ -55,8 +55,8 @@ Refresh points — the same cadence as the existing widget reads, plus turn end:
   promptly (same pattern as `refreshReady` today).
 - `agent_start` — the current one-turn `closedShown.clear()` handler becomes
   `void refreshDone().then(renderWip, noop)` (fire-and-forget, never blocks the
-  turn). This is what observes bare-`bd` closes mid-phase and the phase-end
-  purge.
+  turn). Runs **unconditionally every turn** (no early return) — this is what
+  observes bare-`bd` closes mid-phase and the phase-end purge.
 - Umbrella mode: union the read across the umbrella and each additional repo
   (wisps are per-repo-local, not in the aggregate view); single-repo is one
   read.
@@ -71,7 +71,8 @@ of truth.
 ### 4. Rendering (`src/widget-lines.mjs`)
 
 - `MAX_ROWS` 6 → 10.
-- Ordering stays `active → to-do → done`.
+- Ordering stays `active → to-do → done`; done rows render in the order the DB
+  list returns them (creation order).
 - Eviction flips so done and active win and to-do is evicted first:
   `keptTodo = todo.slice(0, MAX_ROWS − active.length − done.length)`; the
   `+N more` tail counts evicted to-do.
