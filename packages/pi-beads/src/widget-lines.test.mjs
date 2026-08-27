@@ -1,5 +1,11 @@
 import assert from "node:assert/strict";
-import { widgetLines, displayWidth, formatAge, parseClosedWisps } from "./widget-lines.mjs";
+import {
+  widgetLines,
+  displayWidth,
+  formatAge,
+  parseClosedWisps,
+  titleOrdinal,
+} from "./widget-lines.mjs";
 
 const P = (n) => ({
   id: `p-${n}`,
@@ -371,3 +377,68 @@ assert.deepEqual(
 
 
 console.log("widget-lines: ok");
+
+
+// ---------- titleOrdinal: "Task N" leading ordinals, numeric not lexicographic ----------
+assert.equal(titleOrdinal("Task 1: Scan-scope exclusions"), 1);
+assert.equal(titleOrdinal("Task 10: Extractor prompt updates"), 10);
+assert.equal(titleOrdinal("Task 13: Bootstrap-vs-delta design note"), 13);
+assert.equal(titleOrdinal("  task 2: leading whitespace + lower case"), 2);
+// titles that are not task-numbered carry no ordinal
+assert.equal(titleOrdinal("Phase 3 follow-on: implement bootstrap-vs-delta"), null);
+assert.equal(titleOrdinal("Brainstorm: write design doc"), null);
+assert.equal(titleOrdinal("Refactor the scheduler"), null);
+// a decimal sequence is not an integer task number
+assert.equal(titleOrdinal("Task 3.5: refine diff path"), null);
+assert.equal(titleOrdinal(undefined), null);
+assert.equal(titleOrdinal(""), null);
+
+// ready rows: numbered tasks ascend numerically (10 after 3), unnumbered trail by incoming order
+const ord = widgetLines(
+  {
+    entries: [
+      // incoming (bd) order is deliberately scrambled vs the task numbers
+      { id: "t-13", repo: "r", title: "Task 13: last", priority: 2, phase: "ready" },
+      { id: "t-2", repo: "r", title: "Task 2: second", priority: 2, phase: "ready" },
+      { id: "t-10", repo: "r", title: "Task 10: third", priority: 2, phase: "ready" },
+      { id: "t-3", repo: "r", title: "Task 3: third", priority: 2, phase: "ready" },
+      { id: "t-misc-1", repo: "r", title: "Phase 3 follow-on: x", priority: 2, phase: "ready" },
+      { id: "t-misc-2", repo: "r", title: "Brainstorm: y", priority: 2, phase: "ready" },
+    ],
+    readyCount: 6,
+  },
+  120,
+);
+assert.deepEqual(
+  ord.slice(1).map((l) => l.match(/t-[a-z0-9-]+/)[0]),
+  ["t-2", "t-3", "t-10", "t-13", "t-misc-1", "t-misc-2"],
+  ord.join("\n"),
+);
+
+// under a tight budget the tail (highest task numbers + unnumbered) is evicted, not Task 1..N
+const tight = widgetLines(
+  {
+    entries: [
+      { id: "a-1", repo: "r", title: "current", priority: 2, phase: "active" },
+      ...Array.from({ length: 9 }, (_, i) => ({
+        id: `ready-${i + 1}`,
+        repo: "r",
+        title: `Task ${i + 1}: work`,
+        priority: 2,
+        phase: "ready",
+      })),
+      { id: "misc", repo: "r", title: "Brainstorm: y", priority: 2, phase: "ready" },
+      { id: "c-1", repo: "r", title: "done one", priority: 2, phase: "closed" },
+    ],
+    closedCount: 1,
+    readyCount: 10,
+  },
+  120,
+);
+// 10-row budget: active + closed = 2 slots, so 8 of the 10 ready rows show, 2 are evicted
+const idsTight = tight.slice(1).join("\n");
+for (const id of ["a-1", "ready-1", "ready-8", "c-1"])
+  assert.ok(idsTight.includes(id), `missing ${id}:\n${idsTight}`);
+assert.ok(!idsTight.includes("ready-9"), `latest task should be evicted:\n${idsTight}`);
+assert.ok(!idsTight.includes("misc"), `unnumbered should be evicted first:\n${idsTight}`);
+assert.ok(tight.join("\n").includes("+2 more"), tight.join("\n"));

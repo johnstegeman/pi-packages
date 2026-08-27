@@ -106,6 +106,12 @@ export function parseClosedWisps(json, repo = "") {
   return out;
 }
 
+/** Leading ordinal from a "Task N: …" title, numeric (10 > 3); null when unnumbered. */
+export function titleOrdinal(title) {
+  const m = /^\s*Task\s+(\d+)\b(?!\.)/i.exec(String(title ?? ""));
+  return m ? Number(m[1]) : null;
+}
+
 const PLAIN = { fg: (_c, t) => t, strikethrough: (t) => t };
 
 function themeOf(theme) {
@@ -174,7 +180,16 @@ export function widgetLines(state, width, theme) {
   const todo = all.filter((e) => phaseOf(e) === "ready");
   const closed = all.filter((e) => phaseOf(e) === "closed");
   const budget = MAX_ROWS - active.length - closed.length;
-  const keptTodo = budget > 0 ? todo.slice(0, budget) : [];
+  // to-do rows are evicted first when space is tight, so the de-queued tail is
+  // the latest task numbers (and any unnumbered rows), never Task 1..N.
+  const sortedTodo = todo.slice().sort((a, b) => {
+    const ao = titleOrdinal(a.title);
+    const bo = titleOrdinal(b.title);
+    if (ao == null) return bo == null ? 0 : 1;
+    if (bo == null) return -1;
+    return ao - bo;
+  });
+  const keptTodo = budget > 0 ? sortedTodo.slice(0, budget) : [];
   const shown = [...active, ...keptTodo, ...closed];
   const hidden = todo.length - keptTodo.length;
 

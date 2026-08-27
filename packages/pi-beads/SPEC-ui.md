@@ -205,3 +205,16 @@ bare `bd` caller) clears them by purging closed wisps (`bd mol wisp gc --closed
 --force`); the widget notices on the next turn. The row budget rose from 6 to 10 and
 to-do rows are evicted before done rows. `beads_close` no longer keeps a `closedShown`
 map. See `docs/superpowers/specs/2026-08-27-pi-beads-widget-done-persistence-design.md`.
+
+---
+
+# Addendum (2026-08-27) — to-do rows follow task-number order
+
+The ready (to-do) bucket now sorts by a leading "Task N" ordinal parsed from the title,
+so the board reads in execution order (Task 1, 2, 3, …, 10, 13) instead of bd's default
+priority → created sequence. Numbered rows come first in numeric (never lexicographic)
+order; unnumbered titles (e.g. "Phase 3 follow-on…", "Brainstorm: …") trail in their
+incoming bd order via a stable sort, so projects that don't number titles see the old
+behaviour unchanged. When the 10-row budget is tight the eviction tail is the latest
+task numbers + unnumbered rows — never Task 1..N. `titleOrdinal()` in
+`widget-lines.mjs` owns the parse; active/ready/closed grouping is untouched.
