@@ -58,13 +58,15 @@ when the project has no `.beads/`.
 ![Every widget state and colour](https://raw.githubusercontent.com/abix5/pi-beads/main/docs/assets/widget-legend.png)
 
 1. `⦿ beads` — the header; it dims when nothing is in progress.
-2. The header counters: issues in progress this session, issues closed this session, and
-   how many are ready to work — open and unblocked, wisps included. When the ready
-   number is unknown the segment disappears entirely: a `0` is never shown.
+2. The header counters: issues in progress, how many are ready to work — open and
+   unblocked, wisps included — and the currently-closed wisps (`N done`, which empties
+   once the phase's wisps are purged). When the ready number is unknown the segment
+   disappears entirely: a `0` is never shown.
 3. `◐` is in progress, `○` is open/to-do, `✓` is closed. To-do rows come from the same
-   `bd ready` view as `beads_ready` (so brainstormed wisps appear here too). A closed
-   row survives one agent turn and then leaves; the header counter stays until the
-   session ends.
+   `bd ready` view as `beads_ready` (so brainstormed wisps appear here too). Closed
+   (`✓`) wisps persist for the phase: they are re-read from the database every turn
+   and only disappear when purged — e.g. superpowers ends a phase with
+   `bd mol wisp gc --closed --force`.
 4. `P0`…`P4` — priority: `P0` red, `P1` yellow, the rest muted.
 5. `[crm-backend]` — the owning repository; in a single-repo project the column is gone.
 6. The right-hand column is how long the issue has been in progress, pinned to the
@@ -72,9 +74,9 @@ when the project has no `.beads/`.
 7. A closed issue's title is struck through — and shown even when the task never went
    through `in_progress` this session (a `beads_close` fetches the title on its own).
 
-At most six rows are drawn; the rest collapse into a `+N` tail, and closed rows are
-evicted first. In a narrow pane the titles are cut with an ellipsis and the repository
-column disappears:
+At most ten rows are drawn; when they overflow, to-do rows are evicted first (the
+accumulating done list is kept) and the rest collapse into a `+N` tail. In a narrow pane
+the titles are cut with an ellipsis and the repository column disappears:
 
 ![The widget in a narrow pane](https://raw.githubusercontent.com/abix5/pi-beads/main/docs/assets/widget-narrow.png)
 
@@ -185,10 +187,10 @@ as you wrote them.
 The widget exists only in pi's interactive interface. Subagents and workflow runs have no
 UI context, so nothing is drawn there — the `beads_*` tools work as usual.
 
-Widget state is session memory. Changes made in another window, or straight through `bd`,
-appear only after the next read. A closed row survives one agent turn; the closed counter
-survives until the session ends. At most six rows are drawn, the rest collapse into a
-`+N` tail.
+Widget state is session memory, but the done rows are read back from the database on
+every turn, so changes made in another window or straight through `bd` (including a
+phase-end `bd mol wisp gc --closed --force`) appear within a turn. At most ten rows are
+drawn; to-do rows are evicted before done rows, and the rest collapse into a `+N` tail.
 
 beads dependencies live inside a single repository, so `beads_dep` across repositories is
 impossible — that is how the storage works. For the same reason writing directly into the

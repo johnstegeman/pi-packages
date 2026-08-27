@@ -193,3 +193,15 @@ Changes:
 
 Widget state is still session memory with no polling and no disk; the to-do rows update
 at the same cadence as the ready counter (session start + after writes).
+
+---
+
+# Addendum update (2026-08-27) — DB-derived done rows
+
+The widget's done rows are no longer a one-turn, in-memory list: they are read from
+`bd mol wisp list --all --json` (closed wisps) on every `agent_start`, at session
+start, and after each `beads_*` write, and persist for the phase. Superpowers (or any
+bare `bd` caller) clears them by purging closed wisps (`bd mol wisp gc --closed
+--force`); the widget notices on the next turn. The row budget rose from 6 to 10 and
+to-do rows are evicted before done rows. `beads_close` no longer keeps a `closedShown`
+map. See `docs/superpowers/specs/2026-08-27-pi-beads-widget-done-persistence-design.md`.
