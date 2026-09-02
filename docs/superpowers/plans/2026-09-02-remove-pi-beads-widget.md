@@ -447,16 +447,18 @@ with:
 
 - [ ] **Step 9: Verify**
 
+Note: the new narrative legitimately contains the bare words "widget" ("the same as the widget's"; "the widget tests were removed with the widget") and "✓" (`bd✓` statusline) — do NOT grep for those bare words. This grep targets leftover widget-**content** markers only.
+
 ```bash
 cd /Users/jstegeman/orca/workspaces/pi-packages/remove-pi-beads-widget
-grep -niE "widget|◐|○|✓|beads-wip|screenshot" packages/pi-beads/README.md AGENTS.md
+grep -niE "widget\.png|widget-legend|widget-narrow|Widget legend|beads-wip|widget-shots|screenshot|◐|○|make test|make shots" packages/pi-beads/README.md AGENTS.md
 ```
 Expected: no output.
 
 ```bash
-grep -n "npm test" AGENTS.md
+grep -n "npm test" AGENTS.md | grep "pi-beads"
 ```
-Expected: no output.
+Expected: no output (statusline/langfuse `npm test` lines legitimately remain — only the pi-beads bullet was removed).
 
 - [ ] **Step 10: Commit**
 
@@ -478,12 +480,18 @@ git commit -m "docs(pi-beads): document widget removal; drop stale test note fro
 
 - [ ] **Step 1: Repo-scoped grep-zero**
 
+Code + manifest must be strictly widget-free; docs gate targets leftover widget-**content** markers only (the bare words "widget"/"✓" legitimately occur in the approved narrative and the `bd✓` statusline):
+
 ```bash
 cd /Users/jstegeman/orca/workspaces/pi-packages/remove-pi-beads-widget
+# code + manifest: strict zero-widget
 grep -rnE "widget|uiRef|setWidget|widgetLines|renderWip|WipEntry|readyCount|formatAge|parseClosedWisps|loadWip|refreshReady|refreshDone|metaOf" \
-  packages/pi-beads/src packages/pi-beads/package.json packages/pi-beads/README.md AGENTS.md
+  packages/pi-beads/src packages/pi-beads/package.json
+# docs: leftover widget content
+grep -rnE "widget\.png|widget-legend|widget-narrow|Widget legend|beads-wip|widget-shots|screenshot|◐|○|make test|make shots" \
+  packages/pi-beads/README.md AGENTS.md
 ```
-Expected: no output.
+Expected: no output from either.
 
 - [ ] **Step 2: Type-strip parse of the extension**
 
@@ -557,6 +565,6 @@ Expected: `git status` clean; the three commits above touch only the intended fi
 ## Verification (final checklist from the spec)
 
 - [ ] `packages/pi-beads` loads as a pi extension with the widget gone: 10 tools, 4 commands, status-line segment, 1 bundled skill (smoke, Task 4 Step 3).
-- [ ] Zero references to widget state / `setWidget` / deleted files in `packages/pi-beads/src`, `package.json`, `README.md`, and root `AGENTS.md`.
+- [ ] Strictly zero widget references in `packages/pi-beads/src` + `package.json`; `README.md` + `AGENTS.md` free of leftover widget content (screenshots / legend / beads-wip / glyphs / make targets). The bare words "widget" and `✓` may appear only in the approved narrative and the `bd✓` status-line text.
 - [ ] `npm test` no longer exists for pi-beads and nothing else references it.
 - [ ] `git status` clean after the last commit; deletions are exactly the widget files.
