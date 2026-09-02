@@ -140,6 +140,14 @@ const out3 = moleculeWidgetLines(gate, 80);
 assert.ok(out3[1].includes("Waiting on you:") && out3[1].includes("Gate: human"));
 assert.equal(out3.length, 2);
 
+// gate with non-empty children still never renders a subtree (and never bypasses the cap)
+const gateKids = { ...gate, children: [{ id: "g1", title: "x", status: "open", priority: 2, issue_type: "task" }] };
+const out3k = moleculeWidgetLines(gateKids, 80);
+assert.equal(out3k.length, 2, `gate renders exactly [header, trunk], got ${out3k.length} lines`);
+assert.ok(!out3k.some((l) => l.includes("├──") || l.includes("└──")), "gate output has no glyph rows");
+assert.ok(!out3k.some((l) => l.includes("g1")), "gate output contains no child id");
+assert.ok(out3k[1].includes("Waiting on you:") && out3k[1].includes("Gate: human"));
+
 // next fallback when no current step
 const next = { ...base, current_step: null, next_step: { id: "n", title: "Gate: human" }, children: [] };
 const out4 = moleculeWidgetLines(next, 80);

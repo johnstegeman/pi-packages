@@ -199,24 +199,26 @@ export function moleculeWidgetLines(state, width, theme) {
   // number of lines never exceeds MAX_LINES.
   const MAX_LINES = 15;
   const SLOTS = MAX_LINES - 2;
-  let kids = state.children ?? [];
-  let more = 0;
-  if (current && current.issue_type !== "gate" && kids.length > SLOTS) {
-    more = kids.length - (SLOTS - 1);
-    kids = kids.slice(0, SLOTS - 1);
+  if (current && current.issue_type !== "gate") {
+    let kids = state.children ?? [];
+    let more = 0;
+    if (kids.length > SLOTS) {
+      more = kids.length - (SLOTS - 1);
+      kids = kids.slice(0, SLOTS - 1);
+    }
+    kids.forEach((kid, i) => {
+      const last = i === kids.length - 1;
+      const frags = [
+        { text: last ? "\u2514\u2500\u2500 " : "\u251c\u2500\u2500 ", paint: (t) => fg("muted", t) },
+        { text: `${markerFor(kid.status)} `, paint: (t) => fg(kid.status === "closed" ? "text" : "warning", t) },
+        { text: `${kid.id ?? ""} `, paint: (t) => fg("text", t) },
+      ];
+      if (kid.priority != null) frags.push({ text: `\u25cf P${kid.priority} `, paint: (t) => fg("warning", t) });
+      frags.push({ text: kid.title ?? "", paint: (t) => fg("text", t) });
+      rows.push(assemble(frags, width).text);
+    });
+    if (more > 0) rows.push(fg("muted", truncToWidth(`\u2514\u2500\u2500 +${more} more\u2026`, width)));
   }
-  kids.forEach((kid, i) => {
-    const last = i === kids.length - 1;
-    const frags = [
-      { text: last ? "\u2514\u2500\u2500 " : "\u251c\u2500\u2500 ", paint: (t) => fg("muted", t) },
-      { text: `${markerFor(kid.status)} `, paint: (t) => fg(kid.status === "closed" ? "text" : "warning", t) },
-      { text: `${kid.id ?? ""} `, paint: (t) => fg("text", t) },
-    ];
-    if (kid.priority != null) frags.push({ text: `\u25cf P${kid.priority} `, paint: (t) => fg("warning", t) });
-    frags.push({ text: kid.title ?? "", paint: (t) => fg("text", t) });
-    rows.push(assemble(frags, width).text);
-  });
-  if (more > 0) rows.push(fg("muted", truncToWidth(`\u2514\u2500\u2500 +${more} more\u2026`, width)));
 
   return [header, ...rows].filter(Boolean);
 }
