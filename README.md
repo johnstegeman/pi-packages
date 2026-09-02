@@ -12,8 +12,15 @@ packages/
 ├── langfuse/       – Langfuse observability with Superpowers phase metadata
 ├── statusline/     – Single-line statusline footer with ayu/tokyo-night/classic presets
 ├── pi-beads/       – Fork of abix5/pi-beads (beads_* tools) with wisp (--ephemeral) support in beads_create
-└── pi-subagents/  – vendored fork via squashed git subtree of tintinweb/pi-subagents (auto-synced nightly via PR)
+├── pi-subagents/  – vendored fork via squashed git subtree of tintinweb/pi-subagents (auto-synced nightly via PR)
+└── pi-superpowers-plus/ – Vendored Superpowers workflow skills + set_phase/beads-molecule-widget extensions + agent templates
 ```
+
+packages/pi-superpowers-plus/ is a vendored copy of the Superpowers workflow skills,
+the `set_phase` extension, and the `beads-molecule-widget` extension (now integrated
+here) with the standalone repo deprecated — the whole monorepo install
+(`pi install git:github.com/johnstegeman/pi-packages`) provides both the extensions and
+the full Superpowers skill set.
 
 ## Upstream-tracked subtree: pi-subagents
 
