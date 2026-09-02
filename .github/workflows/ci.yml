@@ -1,0 +1,80 @@
+name: CI
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  manifest:
+    name: Manifest / registration
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Validate root manifest and resolve registered paths
+        run: |
+          set -euo pipefail
+          # shellcheck disable=SC2016 # ${section}/${p} template literals inside single-quoted node -e
+          node --input-type=module -e '
+            import { readFileSync, existsSync } from "node:fs";
+            const pkg = JSON.parse(readFileSync("package.json", "utf8"));
+            const errors = [];
+            for (const section of ["extensions", "themes", "skills", "prompts"]) {
+              for (const p of pkg.pi?.[section] ?? []) {
+                if (!existsSync(p)) errors.push(`pi.${section} path does not exist: ${p}`);
+              }
+            }
+            if (errors.length) { console.error(errors.join("\n")); process.exit(1); }
+            console.log("manifest OK: parses and all registered paths resolve");
+          '
+
+  deps-mirror:
+    name: Subtree deps mirrored in root
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install semver helper
+        run: npm install --no-save semver@^7 --prefix /tmp/depsmirror --silent
+      - name: Run dep-mirror gate
+        env:
+          NODE_PATH: /tmp/depsmirror/node_modules
+        run: node scripts/ci/check-deps-mirror.mjs
+
+  subtree-smoke:
+    name: Subtree install + typecheck
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: packages/pi-subagents
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: packages/pi-subagents/package-lock.json
+      - name: Install subtree deps
+        run: npm ci
+      - name: Typecheck subtree
+        run: npm run typecheck
+
+  workflow-lint:
+    name: Actionlint workflows
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install actionlint
+        run: |
+          set -euo pipefail
+          curl -sSL https://raw.githubusercontent.com/rhysd/actionlint/main/scripts/download-actionlint.bash | bash
+          sudo mv actionlint /usr/local/bin/
+      - name: Lint workflows
+        run: actionlint .github/workflows/*.yml
