@@ -108,10 +108,10 @@ Remove widget-related content and keep the rest:
   rows, ten-row budget); **keep** the cross-repo dependency and `bd` format
   bullets
 - "Development" — drop `make test`/`make shots` lines (now only `/reload`)
-- keep: Why, context-cost table, What a session looks like → replaced by a short
-  note that no board is drawn and `/beads` shows the board on demand, Install,
-  Requirements, Configuration, Commands & tools, Quiet init, Not to be confused
-  with
+- keep: Why, context-cost table, Install, Requirements, Configuration, Commands
+  & tools, Quiet init, Not to be confused with
+- where "What a session looks like" was, add a one-line note: no board is drawn
+  anymore; `/beads` shows the ready + in-progress board on demand
 
 ### 5. Behavior deltas (what actually changes for users)
 
@@ -126,7 +126,7 @@ Remove widget-related content and keep the rest:
 
 ### 6. Verification (no automated tests remain — by design)
 
-1. `grep -nE 'widget|uiRef|setWidget|widgetLines|renderWip' src/index.ts` → zero hits.
+1. `grep -nE 'widget|uiRef|setWidget|widgetLines|renderWip|WipEntry|readyCount|formatAge|parseClosedWisps' src/index.ts` → zero hits.
 2. Type-strip parse check: `node --experimental-strip-types --check src/index.ts`
    proves the file is still valid TS as pi loads it.
 3. Throwaway smoke (in `/tmp`, not committed): a minimal mock-`pi`
