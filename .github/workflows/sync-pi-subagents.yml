@@ -54,7 +54,7 @@ jobs:
           If this PR adds or removes runtime dependencies, mirror them into root
           package.json \`dependencies\` (croner, nanoid, @sinclair/typebox, typebox).
           The deps-mirror CI job gates this automatically."
-          EXISTING=$(gh pr list --head bot/update-pi-subagents --state open --json number -q '.[0].number')
+          EXISTING=$(gh pr list --head bot/update-pi-subagents --state open --json number -q '.[0].number // empty')
           if [ -z "$EXISTING" ]; then
             gh pr create --base main --head bot/update-pi-subagents \
               --title "chore: sync pi-subagents from upstream" \
