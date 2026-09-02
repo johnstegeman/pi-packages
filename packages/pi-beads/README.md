@@ -8,9 +8,8 @@ and the [beads](https://github.com/steveyegge/beads) issue tracker (`bd`). The a
 gets compact in-process `beads_*` tools instead of a beads MCP server, a short prime
 once per segment instead of once per turn, reads that span every repository of an
 umbrella workspace, and writes routed to the owning repository by issue-id prefix.
-Next to the editor sits a widget of the current board — the issues in progress (◐), the
-open/to-do ones (○, wisps included), and the ones just closed (✓). Not one of its lines
-costs the model a token.
+There is no always-on board next to the editor; `/beads` prints the ready +
+in-progress view on demand, and the `beads_*` tools cover every query.
 
 > [!TIP]
 > You need the `bd` binary on `PATH` and a `.beads/` directory in the project.
@@ -41,45 +40,13 @@ development, not a measurement on your project; the order of magnitude is right.
 
 ## What a session looks like
 
-An umbrella workspace, three issues in progress and one just closed, at 80 columns:
+The status line shows `bd✓` when beads is ready and `bd✗` when the project has no
+`.beads/` directory. There is no board drawn beside the editor — run `/beads` to see the
+ready + in-progress view, or use the `beads_*` tools.
 
-![The in-progress widget in an umbrella workspace](https://raw.githubusercontent.com/abix5/pi-beads/main/docs/assets/widget.png)
-
-Every shot here is the real widget: the pictures are rendered by
-`scripts/widget-shots.mjs`, which imports `src/widget-lines.mjs` and calls
-`widgetLines(state, width - 1, theme)` with one leading space — exactly the way
-`src/index.ts` drives it — so nothing in this README is hand-drawn.
-
-Besides the widget there is a status-line segment: `bd✓` when beads is ready, `bd✗`
-when the project has no `.beads/`.
-
-## Widget legend
-
-![Every widget state and colour](https://raw.githubusercontent.com/abix5/pi-beads/main/docs/assets/widget-legend.png)
-
-1. `⦿ beads` — the header; it dims when nothing is in progress.
-2. The header counters: issues in progress, how many are ready to work — open and
-   unblocked, wisps included — and the currently-closed wisps (`N done`, which empties
-   once the phase's wisps are purged). When the ready number is unknown the segment
-   disappears entirely: a `0` is never shown.
-3. `◐` is in progress, `○` is open/to-do, `✓` is closed. To-do rows come from the same
-   `bd ready` view as `beads_ready` (so brainstormed wisps appear here too). Closed
-   (`✓`) wisps persist for the phase: they are re-read from the database every turn
-   and only disappear when purged — e.g. superpowers ends a phase with
-   `bd mol wisp gc --closed --force`.
-4. `P0`…`P4` — priority: `P0` red, `P1` yellow, the rest muted.
-5. `[crm-backend]` — the owning repository; in a single-repo project the column is gone.
-6. The right-hand column is how long the issue has been in progress, pinned to the
-   right edge; to-do and closed rows have none.
-7. A closed issue's title is struck through — and shown even when the task never went
-   through `in_progress` this session (titles come from the re-read of closed wisps
-   in the database, so a close from anywhere shows up).
-
-At most ten rows are drawn; when they overflow, to-do rows are evicted first (the
-accumulating done list is kept) and the rest collapse into a `+N` tail. In a narrow pane
-the titles are cut with an ellipsis and the repository column disappears:
-
-![The widget in a narrow pane](https://raw.githubusercontent.com/abix5/pi-beads/main/docs/assets/widget-narrow.png)
+An umbrella workspace, three issues in progress and one just closed, at 80 columns — the
+information is the same as the widget's, but it appears in tool output and `/beads`, not
+on screen.
 
 ## Umbrella mode: many repositories, one list
 
@@ -111,10 +78,6 @@ acts on — rather than raw JSON.
 
 **Writes.** Each write is dispatched to the owning repository by id prefix, then the
 aggregate is re-hydrated so the next read cannot show a stale list.
-
-**Widget.** Widget state lives in session memory: it shows the current board — what this
-session has in progress, what is open/to-do (wisps included), and what it closed — and
-repaints only that in-memory state in the UI process, so it costs no tokens.
 
 ## Install
 
@@ -185,14 +148,6 @@ as you wrote them.
 
 ## Limitations
 
-The widget exists only in pi's interactive interface. Subagents and workflow runs have no
-UI context, so nothing is drawn there — the `beads_*` tools work as usual.
-
-Widget state is session memory, but the done rows are read back from the database on
-every turn, so changes made in another window or straight through `bd` (including a
-phase-end `bd mol wisp gc --closed --force`) appear within a turn. At most ten rows are
-drawn; to-do rows are evicted before done rows, and the rest collapse into a `+N` tail.
-
 beads dependencies live inside a single repository, so `beads_dep` across repositories is
 impossible — that is how the storage works. For the same reason writing directly into the
 umbrella aggregate is not allowed: routing by id prefix is the only path.
@@ -207,10 +162,6 @@ npm carries an older `pi-beads` package by a different author, depending on the 
 
 ## Development
 
-```bash
-make test     # node --test src/widget-lines.test.mjs
-make shots    # re-render the README screenshots from the shipped code (needs vhs + imagemagick)
-```
-
-Source lives in `src/` and there is no build step: after editing, `/reload` in pi.
+There is no build step and no automated test suite (the widget tests were removed with
+the widget): after editing, `/reload` in pi.
 Licensed [MIT](https://github.com/abix5/pi-beads/blob/main/LICENSE).
