@@ -29,9 +29,16 @@ of `tintinweb/pi-subagents` (branch `master`). It is **upstream-tracked — do n
 files inside it**; local edits will conflict with the next sync.
 
 A nightly GitHub Action (`.github/workflows/sync-pi-subagents.yml`, 04:00 UTC + manual
-`workflow_dispatch`) runs `git subtree pull` on a `bot/update-pi-subagents` branch and opens a
-review PR when upstream changes. Merge it to accept the update. No changes are ever pushed to
-`main` or auto-merged.
+`workflow_dispatch`) runs `git subtree pull` on a **persistent** `bot/update-pi-subagents`
+branch and opens a review PR when upstream changes. Each run merges upstream onto the
+branch's current tip, so a dep-mirror fix committed to the sync PR survives reruns — the
+branch is never force-pushed. Merge the PR to accept the update. No changes are ever pushed
+to `main` or auto-merged.
+
+A CI workflow (`.github/workflows/ci.yml`, on any PR to `main` and push to `main`) validates
+the root manifest, enforces that subtree dependencies are mirrored in root `package.json`
+with a compatible range, and runs the subtree's `npm ci` + `tsc --noEmit`. Sync PRs therefore
+carry a real red/green signal.
 
 ## Install from GitHub
 

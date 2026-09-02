@@ -12,7 +12,7 @@ packages/
 ├── langfuse/    – Langfuse observability with Superpowers phase metadata
 ├── statusline/  – Single-line statusline footer with ayu/tokyo-night/classic presets
 ├── pi-beads/    – Fork of abix5/pi-beads (beads_* tools), wisp (--ephemeral) support
-├── pi-subagents/  – Squashed git subtree of tintinweb/pi-subagents; upstream-tracked (do not hand-edit); synced nightly via .github/workflows/sync-pi-subagents.yml (opens a review PR). Manual sync: `git subtree pull --prefix packages/pi-subagents <url> master --squash`.
+├── pi-subagents/  – Squashed git subtree of tintinweb/pi-subagents; upstream-tracked (do not hand-edit); synced nightly via .github/workflows/sync-pi-subagents.yml (opens a review PR). Manual sync: `git subtree pull --prefix packages/pi-subagents <url> master --squash`. The bot branch is persistent and never force-pushed; see .github/workflows/ci.yml for the manifest/dep-mirror/typecheck gate on PRs to main.
 └── pi-superpowers-plus/ – Vendored Superpowers skills + set_phase + beads-molecule-widget extensions + agent templates
 ```
 
