@@ -249,14 +249,18 @@ Notes:
 - The push step first establishes a local tracking ref for `bot/update-pi-subagents` (`git fetch ... || true`), so `--force-with-lease` has a real lease in a fresh Actions checkout (which only fetches `main`). Otherwise, once the branch exists on the remote, a fresh checkout's push is rejected with "stale info" and the sync hard-fails exactly when it has work to do. If the branch does not exist yet, the tolerant fetch fails harmlessly and the push creates it.
 - The final step skips creating a duplicate PR when one is already open for that branch — the force-push above has already refreshed it.
 
-- [ ] **Step 2: Verify the workflow parses as YAML**
+- [ ] **Step 2: Verify the workflow with actionlint (or a YAML parse as fallback)**
+
+Annotate/lint with [actionlint](https://github.com/rhysd/actionlint), which also catches shell-quoting and permissions issues:
 
 ```bash
-ruby -e "require 'yaml'; YAML.load_file('.github/workflows/sync-pi-subagents.yml'); puts 'valid YAML'" || \
-python3 -c "import sys, yaml; yaml.safe_load(open('.github/workflows/sync-pi-subagents.yml')); print('valid YAML')"
+# actionlint is the reliable check; the ruby Psych check alone is flaky
+# (YAML 1.1 parses the top-level 'on:' key as a boolean)
+actionlint .github/workflows/sync-pi-subagents.yml || \
+  ruby -e "require 'yaml'; YAML.load_file('.github/workflows/sync-pi-subagents.yml'); puts 'valid YAML'"
 ```
 
-Expected: prints "valid YAML". (macOS ships `ruby` with YAML; fall back to `python3 -c` if `ruby` is unavailable. If neither is present, skip the check and rely on the careful copy + GitHub's own validation on push.)
+Expected: actionlint reports no errors (or, in an environment without actionlint, ruby must print "valid YAML" as a fallback smoke check).
 
 - [ ] **Step 3: Commit**
 

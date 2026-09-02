@@ -9,6 +9,10 @@ permissions:
   contents: write
   pull-requests: write
 
+concurrency:
+  group: sync-pi-subagents
+  cancel-in-progress: true
+
 jobs:
   sync:
     runs-on: ubuntu-latest
@@ -38,7 +42,8 @@ jobs:
       - name: Detect whether anything changed
         id: changes
         run: |
-          if [ "$(git rev-parse HEAD)" = "$(git rev-parse origin/main)" ]; then
+          echo "upstream_sha=$(git rev-parse --short subagents/master)" >> "$GITHUB_OUTPUT"
+          if git diff --quiet origin/main HEAD -- packages/pi-subagents; then
             echo "changed=false" >> "$GITHUB_OUTPUT"
             echo "No upstream changes — nothing to sync."
           else
@@ -60,7 +65,7 @@ jobs:
           if [ -z "$EXISTING" ]; then
             gh pr create --base main --head bot/update-pi-subagents \
               --title "chore: sync pi-subagents from upstream" \
-              --body "Automated \`git subtree pull\` of tintinweb/pi-subagents@master.
+              --body "Automated \`git subtree pull\` of tintinweb/pi-subagents@${{ steps.changes.outputs.upstream_sha }}.
 
           If this PR adds or removes runtime dependencies, mirror them into root
           package.json \`dependencies\` (croner, nanoid, @sinclair/typebox, typebox)."
