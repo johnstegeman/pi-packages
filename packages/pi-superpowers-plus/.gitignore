@@ -1,0 +1,6 @@
+node_modules/
+
+# KotaDB local storage
+.kotadb/
+.pi/superpowers-state.json
+.pi/tasks/

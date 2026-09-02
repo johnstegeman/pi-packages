@@ -1,0 +1,44 @@
+{
+  "name": "pi-superpowers-plus",
+  "version": "0.8.0",
+  "description": "Superpowers workflow skills adapted for pi",
+  "keywords": [
+    "pi-package"
+  ],
+  "scripts": {
+    "test": "biome check .",
+    "lint": "biome check .",
+    "check": "biome check ."
+  },
+  "license": "MIT",
+  "author": "coctostan",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/johnstegeman/pi-packages.git"
+  },
+  "homepage": "https://github.com/johnstegeman/pi-packages#readme",
+  "files": [
+    "agent-templates/",
+    "skills/",
+    "extensions/",
+    "formulas/",
+    "banner-plus.jpg",
+    "LICENSE",
+    "README.md"
+  ],
+  "pi": {
+    "extensions": [
+      "./extensions"
+    ],
+    "skills": [
+      "skills"
+    ]
+  },
+  "peerDependencies": {
+    "@earendil-works/pi-coding-agent": "*",
+    "typebox": "*"
+  },
+  "devDependencies": {
+    "@biomejs/biome": "^2.3.15"
+  }
+}
