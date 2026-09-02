@@ -30,7 +30,6 @@ import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import * as path from "node:path";
 import { fileURLToPath } from "node:url";
-import { widgetLines, formatAge, parseClosedWisps } from "./widget-lines.mjs";
 
 const pexec = promisify(execFile);
 
@@ -65,25 +64,6 @@ export default function piBeadsLean(pi: any) {
   const prefixToDir = new Map<string, string>(); // issue-id prefix -> owning repo dir (write routing)
   const basenameToDir = new Map<string, string>(); // repo folder name -> repo dir (create targeting)
   let defaultRepoDir: string | null = null; // repo that contains activeCwd (default create target)
-
-  // ---- in-session "in progress" widget state (memory only, no disk, no polling) ----
-  let uiRef: any = null; // ctx.ui captured at session_start; absent in subagents/workflows
-  type WipEntry = {
-    repo: string;
-    title: string;
-    priority?: number;
-    startedAt?: string;
-  };
-  const wip = new Map<string, WipEntry>();
-  // open + unblocked across all known repos incl. wisps ("to do"); refreshed on
-  // the same cadence as readyCount (session start + after writes, never a timer)
-  const todo = new Map<string, WipEntry>();
-  // done: closed wisps currently in the DB, refetched at session start, after
-  // beads_* writes, and on EVERY agent_start — so bare-`bd` changes (incl.
-  // superpowers' phase-end `bd mol wisp gc --closed --force`) show up within a
-  // turn. Purging the wisps empties the list; there is no in-memory accumulator.
-  const done = new Map<string, WipEntry>();
-  let readyCount: number | null = null; // null => the segment is omitted, never "0"
 
   let beadsReady = false; // umbrella .beads reachable
   let needPrime = true; // inject lean prime on next turn (reset at start + after compaction)
@@ -217,12 +197,6 @@ export default function piBeadsLean(pi: any) {
   }
   // after a routed write: re-export the repo's JSONL so the next `repo sync` sees it
   async function afterWrite(repoDir: string): Promise<void> {
-    // any write can change what is ready or done; refresh off the critical path
-    // so the extra subprocesses never show up as tool latency (still no timers)
-    void Promise.allSettled([refreshReady(), refreshDone()]).then(
-      () => renderWip(),
-      () => {},
-    );
     if (!isUmbrella) return; // single-repo: same DB the reads use, nothing to sync
     await bd(["export", "-o", ".beads/issues.jsonl"], repoDir, 30000);
     needSync = true;
@@ -371,155 +345,6 @@ export default function piBeadsLean(pi: any) {
     }
   }
 
-  // ---- in-progress widget ----
-  function widgetState() {
-    const row = (
-      id: string,
-      v: WipEntry,
-      phase: "active" | "ready" | "closed",
-    ) => ({
-      id,
-      repo: v.repo,
-      title: v.title,
-      priority: v.priority,
-      age: phase === "active" ? formatAge(v.startedAt) : "",
-      phase,
-    });
-    return {
-      entries: [
-        ...Array.from(wip, ([id, v]) => row(id, v, "active")),
-        ...Array.from(todo, ([id, v]) => row(id, v, "ready")),
-        ...Array.from(done, ([id, v]) => row(id, v, "closed")),
-      ],
-      closedCount: done.size,
-      readyCount,
-    };
-  }
-
-  function renderWip() {
-    try {
-      if (!uiRef?.setWidget) return;
-      if (wip.size === 0 && todo.size === 0 && done.size === 0) {
-        uiRef.setWidget("beads-wip", undefined);
-        return;
-      }
-      // state is read at RENDER time, so a later mutation repaints without re-registering
-      uiRef.setWidget(
-        "beads-wip",
-        (_tui: any, theme: any) => ({
-          // pi indents ARRAY widgets by one column itself (`new Text(line, 1, 0)`
-          // in interactive-mode.js) but hands a factory component the bare
-          // canvas. We take the theme from the factory, so we owe that column
-          // ourselves — otherwise this widget sits flush left while every other
-          // one is indented.
-          render: (width: number) =>
-            widgetLines(widgetState(), width - 1, uiRef?.theme ?? theme).map(
-              (l: string) => ` ${l}`,
-            ),
-          invalidate: () => {},
-        }),
-        { placement: "aboveEditor" },
-      );
-    } catch {
-      /* ui may be unavailable — never fatal */
-    }
-  }
-
-  // `bd ready` is a separate subprocess: only at session start and after writes,
-  // never on a timer. Failure => unknown, and the header segment disappears.
-  async function refreshReady(): Promise<void> {
-    // wisps are open + unblocked too — surface them so the widget's to-do list
-    // (and the header counter) match what a brainstorming session actually created.
-    const r = await bd(["ready", "--json", "--include-ephemeral", "-n", "100"], umbrella);
-    const arr = r.ok ? jparse(r.out) : null;
-    if (!Array.isArray(arr)) {
-      readyCount = null;
-      todo.clear();
-      return;
-    }
-    readyCount = arr.length;
-    todo.clear();
-    for (const i of arr) {
-      if (!i?.id) continue;
-      const dir = dirForPrefix(String(i.id));
-      todo.set(String(i.id), {
-        repo: dir ? path.basename(dir) : "",
-        title: String(i.title ?? ""),
-        priority: Number.isFinite(i.priority) ? Number(i.priority) : undefined,
-      });
-    }
-  }
-
-  async function refreshDone(): Promise<void> {
-    // closed wisps currently in the DB = the widget's done list. Wisps are
-    // per-repo-local (not in the umbrella aggregate), so in umbrella mode read
-    // each known repo and union; single-repo is one read. Failure (missing/old
-    // bd, unknown subcommand) is silent — the done list just stays as-is.
-    const dirs = isUmbrella
-      ? Array.from(new Set([...prefixToDir.values(), umbrella]))
-      : [umbrella];
-    let anyOk = false;
-    const next = new Map<string, WipEntry>();
-    for (const dir of dirs) {
-      const r = await bd(["mol", "wisp", "list", "--all", "--json"], dir);
-      if (!r.ok) continue;
-      anyOk = true;
-      for (const e of parseClosedWisps(r.out, path.basename(dir))) {
-        next.set(e.id, e);
-      }
-    }
-    // Only replace on success: if every read in this refresh failed (transient
-    // bd hiccup, or a failing repo in umbrella mode), keep the accumulated done
-    // list rather than blinking it away. A permanently-unsupported old bd never
-    // populated `done` anyway, so it still settles on the correct empty list.
-    if (anyOk) {
-      done.clear();
-      for (const [id, e] of next) done.set(id, e);
-    }
-  }
-
-  async function metaOf(
-    id: string,
-    repoDir: string,
-  ): Promise<Partial<WipEntry>> {
-    const r = await bd(["show", id, "--json"], repoDir);
-    if (!r.ok) return {};
-    const o = jparse(r.out);
-    const obj = Array.isArray(o) ? o[0] : o;
-    if (!obj) return {};
-    return {
-      title: obj.title ? String(obj.title) : "",
-      priority: Number.isFinite(obj.priority)
-        ? Number(obj.priority)
-        : undefined,
-      startedAt: obj.started_at ? String(obj.started_at) : undefined,
-    };
-  }
-
-  // one-shot pickup of already-running tasks; must never break session_start
-  async function loadWip(): Promise<void> {
-    wip.clear();
-    // no ensureFresh() here on purpose: syncing at startup just to paint a
-    // widget is not worth the delay (deliberate choice, see SPEC-ui.md)
-    const r = await bd(
-      ["list", "--status", "in_progress", "--json", "-n", "50"],
-      umbrella,
-    );
-    if (!r.ok) return;
-    const arr = jparse(r.out);
-    if (!Array.isArray(arr)) return;
-    for (const i of arr) {
-      if (!i?.id) continue;
-      const dir = dirForPrefix(String(i.id));
-      wip.set(String(i.id), {
-        repo: dir ? path.basename(dir) : "",
-        title: String(i.title ?? ""),
-        priority: Number.isFinite(i.priority) ? Number(i.priority) : undefined,
-        startedAt: i.started_at ? String(i.started_at) : undefined,
-      });
-    }
-  }
-
   // ============ lifecycle ============
   // ship our beads skill with the plugin (no hand-placed file in ~/.pi/agent/skills)
   pi.on("resources_discover", async () => ({ skillPaths: [SKILLS_DIR] }));
@@ -527,41 +352,14 @@ export default function piBeadsLean(pi: any) {
   pi.on("session_start", async (_event: any, ctx: any) => {
     try {
       activeCwd = ctx?.cwd ?? process.cwd();
-      uiRef = ctx?.ui ?? null;
       await resolveTopology();
       setStatusLine(ctx);
-      if (beadsReady) {
-        // fire-and-forget: bd must not delay session start
-        void Promise.allSettled([loadWip(), refreshReady(), refreshDone()]).then(
-          () => renderWip(),
-          () => {
-            /* bd missing/broken -> widget just stays empty */
-          },
-        );
-      } else {
-        // /reload back into an uninitialized state: drop a stale widget
-        wip.clear();
-        todo.clear();
-        done.clear();
-        renderWip();
-      }
     } catch (e: any) {
       ctx?.ui?.notify?.(
         `pi-beads-lean init failed: ${e?.message ?? e}`,
         "error",
       );
     }
-  });
-
-  pi.on("agent_start", async () => {
-    // Re-read the closed-wisp list every turn within a beads session: superpowers
-    // mutates the DB with bare `bd` calls (closes mid-phase, and ends the phase
-    // with `bd mol wisp gc --closed --force`) that never reach the beads_*
-    // tools, so the re-read stays unconditional there. Outside a beads session
-    // there is nothing to read — skip the `bd mol wisp list` spawn entirely.
-    // Fire-and-forget so this never blocks the turn.
-    if (!beadsReady) return;
-    void refreshDone().then(() => renderWip(), () => {});
   });
 
   // re-prime after compaction (matches beads' PreCompact refresh behavior)
@@ -916,24 +714,6 @@ export default function piBeadsLean(pi: any) {
       const r = await bd(args, repoDir);
       if (!r.ok) return textResult(`bd update failed: ${r.err}`);
       await afterWrite(repoDir);
-      if (params.status) {
-        const id = String(params.id);
-        todo.delete(id); // whatever the new status, it is no longer "to do"
-        if (String(params.status) === "in_progress") {
-          const meta = await metaOf(id, repoDir);
-          wip.set(id, {
-            repo: path.basename(repoDir),
-            title: String(params.title ?? "") || meta.title || "",
-            priority: Number.isFinite(params.priority)
-              ? Number(params.priority)
-              : meta.priority,
-            startedAt: meta.startedAt,
-          });
-        } else {
-          wip.delete(id);
-        }
-        renderWip();
-      }
       return textResult(r.out.trim() || "updated");
     },
   });
@@ -982,15 +762,6 @@ export default function piBeadsLean(pi: any) {
         await afterWrite(dir);
         closedIds.push(...rids);
       }
-      // drop what really got closed even on a partial failure, so a failed close
-      // never leaves the widget showing an item that is still open
-      for (const id of closedIds) {
-        wip.delete(id);
-        todo.delete(id);
-      }
-      // the DB-derived done list (incl. the just-closed wisps, titles intact) is
-      // repainted by afterWrite -> refreshDone as soon as that read lands.
-      renderWip();
       if (failure) return textResult(failure);
       return textResult(`closed ${closedIds.join(", ")}`);
     },

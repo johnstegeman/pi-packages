@@ -2,7 +2,7 @@
   "name": "@abix5/pi-beads",
   "version": "0.2.2",
   "type": "module",
-  "description": "Context-lean beads (bd) task tracking for pi: compact beads_* tools, once-per-segment lean prime, umbrella multi-repo reads with prefix-routed writes, an in-progress widget, and a bundled beads skill.",
+  "description": "Context-lean beads (bd) task tracking for pi: compact beads_* tools, once-per-segment lean prime, umbrella multi-repo reads with prefix-routed writes, and a bundled beads skill.",
   "license": "MIT",
   "author": "Dmitriy Nenashev <6427182+abix5@users.noreply.github.com>",
   "homepage": "https://github.com/abix5/pi-beads#readme",
@@ -27,7 +27,6 @@
   ],
   "files": [
     "src/index.ts",
-    "src/widget-lines.mjs",
     "skills",
     "README.md",
     "LICENSE"
@@ -38,8 +37,7 @@
     ],
     "skills": [
       "./skills"
-    ],
-    "image": "https://raw.githubusercontent.com/abix5/pi-beads/main/docs/assets/widget.png"
+    ]
   },
   "peerDependencies": {
     "@earendil-works/pi-coding-agent": "*"
@@ -50,9 +48,7 @@
   "publishConfig": {
     "access": "public"
   },
-  "scripts": {
-    "test": "node --test src/widget-lines.test.mjs"
-  },
+  "scripts": {},
   "main": "./src/index.ts",
   "exports": "./src/index.ts"
 }
