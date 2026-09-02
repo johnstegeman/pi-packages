@@ -63,23 +63,17 @@ export function formatAge(startedAt, now = Date.now()) {
   return `${Math.floor(h / 24)}d`;
 }
 
-const PHASE_MAP = {
-  explore: "Brainstorming",
-  clarify: "Brainstorming",
-  approaches: "Brainstorming",
-  design: "Brainstorming",
-  "design-approved": "Brainstorming",
-  "write-spec": "Spec",
-  "spec-review": "Spec",
-  "spec-approved": "Spec",
-  implement: "Implementing",
-  verify: "Verifying",
-  "smoke-test-approved": "Verifying",
-  finish: "Finishing",
+// ---- status markers (bd-list / R7 shape) ----
+// open ○ · in_progress ◐ · blocked ● · closed ✓ · deferred ❄ · anything else ○
+const STATUS_MARKER = {
+  open: "\u25cb",
+  in_progress: "\u25d0",
+  blocked: "\u25cf",
+  closed: "\u2713",
+  deferred: "\u2744",
 };
-function phaseOf(step) {
-  if (!step) return "Working";
-  return PHASE_MAP[step.formula_step_id] ?? "Implementing";
+function markerFor(status) {
+  return STATUS_MARKER[status] ?? "\u25cb";
 }
 
 /** Parse `bd mol current --json` output. Returns null on any malformed input. */
@@ -105,6 +99,47 @@ export function parseMoleculeCurrent(json) {
   };
 }
 
+/**
+ * Parse `bd mol show <step> --json` output into the step's child beads.
+ * Children are the `issues[]` entries reachable via a `dependencies[]` edge of
+ * type "parent-child" whose `depends_on_id` equals the graph root's id.
+ * Sorted deterministically by `created_at` (fallback "") then `id`.
+ * Returns null on any malformed input; an empty array is valid (no children).
+ */
+export function parseMoleculeShow(json) {
+  let obj;
+  try {
+    const text = typeof json === "string" ? json.trim() : json;
+    obj = typeof text === "string" ? JSON.parse(text) : text;
+  } catch {
+    return null;
+  }
+  if (!obj || !obj.root || obj.root.id == null || !Array.isArray(obj.issues) || !Array.isArray(obj.dependencies)) {
+    return null;
+  }
+  const byId = new Map(obj.issues.map((it) => [it && it.id, it]));
+  const childIds = obj.dependencies
+    .filter((d) => d && d.depends_on_id === obj.root.id && d.type === "parent-child")
+    .map((d) => d.issue_id);
+  const kids = childIds
+    .map((id) => byId.get(id))
+    .filter((it) => it && it.id != null)
+    .map((it) => ({
+      id: it.id,
+      title: it.title ?? "",
+      status: it.status ?? "open",
+      priority: it.priority,
+      issue_type: it.issue_type ?? "task",
+      created_at: it.created_at ?? "",
+    }));
+  kids.sort((a, b) => {
+    if (a.created_at !== b.created_at) return a.created_at < b.created_at ? -1 : 1;
+    return a.id < b.id ? -1 : a.id > b.id ? 1 : 0;
+  });
+  return kids;
+}
+
+
 const PLAIN_FG = (_c, t) => t;
 function themeOf(theme) {
   return theme && typeof theme.fg === "function" ? (c, t) => theme.fg(c, t) : PLAIN_FG;
@@ -115,39 +150,42 @@ export function moleculeWidgetLines(state, width, theme) {
   const fg = themeOf(theme);
   if (!state || !Array.isArray(state.steps) || state.steps.length === 0 || !(width > 0)) return [];
 
-  const phase = phaseOf(state.current_step ?? state.next_step);
+  // view B header: accent label + muted title + muted done/total suffix (no phase label)
   const header = assemble(
     [
-      { text: "\u29BF ", paint: (t) => fg("accent", t) },
-      { text: phase, paint: (t) => fg("accent", t) },
-      {
-        text: ` \u00b7 ${state.molecule_title} \u00b7 ${state.doneCount}/${state.total}`,
-        paint: (t) => fg("muted", t),
-      },
+      { text: "Superpowers:", paint: (t) => fg("accent", t) },
+      { text: ` ${state.molecule_title}`, paint: (t) => fg("muted", t) },
+      { text: ` \u00b7 ${state.doneCount}/${state.total}`, paint: (t) => fg("muted", t) },
     ],
     width,
-  );
+  ).text;
 
   const rows = [];
-  if (state.current_step) {
-    const isGate = state.current_step.issue_type === "gate";
-    const age = state.current_step.started_at ? formatAge(state.current_step.started_at) : "";
+  const current = state.current_step;
+  if (current && current.issue_type === "gate") {
+    // gate trunk: pause glyph + "Waiting on you", never a subtree
     rows.push(
       assemble(
         [
-          { text: isGate ? "\u23f8 " : "\u25d0 ", paint: (t) => fg("warning", t) },
-          { text: isGate ? "Waiting on you: " : "", paint: (t) => fg("warning", t) },
-          { text: state.current_step.title ?? "", paint: (t) => fg("text", t) },
-          { text: age ? `  ${age}` : "", paint: (t) => fg("dim", t) },
+          { text: "\u23f8 Waiting on you: ", paint: (t) => fg("warning", t) },
+          { text: current.title ?? "", paint: (t) => fg("text", t) },
         ],
         width,
       ).text,
     );
+  } else if (current) {
+    const frags = [
+      { text: `${markerFor(current.status)} `, paint: (t) => fg("warning", t) },
+      { text: `${current.id ?? ""} `, paint: (t) => fg("text", t) },
+    ];
+    if (current.priority != null) frags.push({ text: `\u25cf P${current.priority} `, paint: (t) => fg("warning", t) });
+    frags.push({ text: current.title ?? "", paint: (t) => fg("text", t) });
+    rows.push(assemble(frags, width).text);
   } else if (state.next_step) {
     rows.push(
       assemble(
         [
-          { text: "\u25e6 Next: ", paint: (t) => fg("dim", t) },
+          { text: "\u25cb Next: ", paint: (t) => fg("dim", t) },
           { text: state.next_step.title ?? "", paint: (t) => fg("text", t) },
         ],
         width,
@@ -155,8 +193,30 @@ export function moleculeWidgetLines(state, width, theme) {
     );
   }
 
-  const pendingCount = state.steps.filter((s) => s.status === "blocked" || s.status === "pending").length;
-  if (pendingCount > 0) rows.push(fg("dim", truncToWidth(`+${pendingCount} pending`, width)));
+  // children subtree: glyph rows + 15-line cap. header+trunk always win; the
+  // remaining (MAX_LINES-2) slots hold children, and when they overflow the
+  // last of those slots becomes the muted `└── +N more…` tail so the total
+  // number of lines never exceeds MAX_LINES.
+  const MAX_LINES = 15;
+  const SLOTS = MAX_LINES - 2;
+  let kids = state.children ?? [];
+  let more = 0;
+  if (current && current.issue_type !== "gate" && kids.length > SLOTS) {
+    more = kids.length - (SLOTS - 1);
+    kids = kids.slice(0, SLOTS - 1);
+  }
+  kids.forEach((kid, i) => {
+    const last = i === kids.length - 1;
+    const frags = [
+      { text: last ? "\u2514\u2500\u2500 " : "\u251c\u2500\u2500 ", paint: (t) => fg("muted", t) },
+      { text: `${markerFor(kid.status)} `, paint: (t) => fg(kid.status === "closed" ? "text" : "warning", t) },
+      { text: `${kid.id ?? ""} `, paint: (t) => fg("text", t) },
+    ];
+    if (kid.priority != null) frags.push({ text: `\u25cf P${kid.priority} `, paint: (t) => fg("warning", t) });
+    frags.push({ text: kid.title ?? "", paint: (t) => fg("text", t) });
+    rows.push(assemble(frags, width).text);
+  });
+  if (more > 0) rows.push(fg("muted", truncToWidth(`\u2514\u2500\u2500 +${more} more\u2026`, width)));
 
-  return [header.text, ...rows].filter(Boolean);
+  return [header, ...rows].filter(Boolean);
 }
