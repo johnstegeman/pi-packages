@@ -44,10 +44,6 @@ The status line shows `bd✓` when beads is ready and `bd✗` when the project h
 `.beads/` directory. There is no board drawn beside the editor — run `/beads` to see the
 ready + in-progress view, or use the `beads_*` tools.
 
-An umbrella workspace, three issues in progress and one just closed, at 80 columns — the
-information is the same as the widget's, but it appears in tool output and `/beads`, not
-on screen.
-
 ## Umbrella mode: many repositories, one list
 
 If an umbrella workspace is nearby — a directory whose `bd` aggregates several
@@ -164,4 +160,5 @@ npm carries an older `pi-beads` package by a different author, depending on the 
 
 There is no build step and no automated test suite (the widget tests were removed with
 the widget): after editing, `/reload` in pi.
+
 Licensed [MIT](https://github.com/abix5/pi-beads/blob/main/LICENSE).
