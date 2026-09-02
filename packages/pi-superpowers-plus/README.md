@@ -4,33 +4,34 @@
 
 Structured workflow skills for [pi](https://github.com/badlogic/pi-mono).
 
-Your coding agent doesn't just know the rules - it follows them. Skills teach the agent *what* to do (brainstorm before building, write tests before code, verify before claiming done). The tooling that supports that workflow — subagent dispatch and task tracking — comes from two companion packages you install alongside this one.
+Your coding agent doesn't just know the rules - it follows them. Skills teach the agent *what* to do (brainstorm before building, write tests before code, verify before claiming done). The tooling that supports that workflow — subagent dispatch and task tracking — comes from two companion packages that ship with the [pi-packages monorepo](https://github.com/johnstegeman/pi-packages) install.
 
 ## What You Get When You Install This
 
 **13 workflow skills** that guide the agent through a structured development process - from brainstorming ideas through shipping code.
 
-**Two companion packages** provide the tooling the skills reference (installed separately, see Prerequisites):
+**Two companion packages** provide the tooling the skills reference (bundled with the `pi-packages` monorepo install):
 - [`@tintinweb/pi-subagents`](https://github.com/tintinweb/pi-subagents) — registers the `Agent` / `get_subagent_result` / `steer_subagent` tools for dispatching implementation and review work to isolated in-process subagents, with a persistent widget, FleetView, mid-run steering, and session resume.
-- **forked [`pi-beads`](https://github.com/abix5/pi-beads)** — registers the `beads_create` / `beads_update` / `beads_close` / `beads_dep` / `beads_list` / `beads_show` tools for beads issue tracking — persistent issues for plan work, wisps (`ephemeral: true`) for session phase bookkeeping — with an in-progress widget. The fork is required for `ephemeral` support (upstream v0.2.2 lacks it).
+- **forked [`pi-beads`](https://github.com/abix5/pi-beads)** — registers the `beads_create` / `beads_update` / `beads_close` / `beads_dep` / `beads_list` / `beads_show` tools for beads issue tracking — persistent issues for plan work, wisps (`ephemeral: true`) for session phase bookkeeping. The fork (bundled in this monorepo) adds the `ephemeral`/wisp support that upstream v0.2.2 lacks. The live workflow display is provided by this package's own `beads-molecule-widget` extension, not by pi-beads.
 
 There's no runtime enforcement layer watching tool calls — the discipline (TDD, verification before claiming done, branch safety, etc.) lives entirely in the skill instructions the agent reads and follows.
 
 ## Prerequisites
 
-This package provides skills and agent templates only — it no longer bundles its own tools. Install the two companion packages first:
+This package provides skills and agent templates only — it no longer bundles its own tools. The two companion packages (pi-subagents and the pi-beads fork) are provided by the [pi-packages monorepo](https://github.com/johnstegeman/pi-packages) install — **no separate install is needed**:
 
 ```bash
-pi install npm:@tintinweb/pi-subagents
-pi install <forked-pi-beads-package>   # fork of @abix5/pi-beads with ephemeral support
+pi install git:github.com/johnstegeman/pi-packages
 ```
 
-The skills reference `Agent(...)` and the `beads_*` tools directly. There is **no fallback** if these packages aren't installed — the skills assume the tools are available. Beads must also be initialized in a project (a `.beads/` directory) for the tracking tools to work. Task tracking (`beads_create`/`beads_update`/`beads_close`) is persistent for plan-step work and wisp-based (`ephemeral: true`) for session phase bookkeeping. From an umbrella root, pass the owning repo explicitly to `beads_create` (`repo` is required there); otherwise it defaults to the session's repo.
+The skills reference `Agent(...)` and the `beads_*` tools directly. There is **no fallback** if the tools aren't present — the skills assume they are available (both ship in the monorepo install). Beads must also be initialized in a project (a `.beads/` directory) for the tracking tools to work. Task tracking (`beads_create`/`beads_update`/`beads_close`) is persistent for plan-step work and wisp-based (`ephemeral: true`) for session phase bookkeeping. From an umbrella root, pass the owning repo explicitly to `beads_create` (`repo` is required there); otherwise it defaults to the session's repo.
 
 ## Install
 
+This package is vendored as `packages/pi-superpowers-plus/` inside the [pi-packages monorepo](https://github.com/johnstegeman/pi-packages). The standalone repo is deprecated. Install the monorepo to get this package plus its companion packages (`pi-beads`, `pi-subagents`):
+
 ```bash
-pi install git:github.com/johnstegeman/pi-superpowers-plus
+pi install git:github.com/johnstegeman/pi-packages
 ```
 
 Then copy the agent templates into a location `pi-subagents` discovers (see its [Custom Agents](https://github.com/tintinweb/pi-subagents#custom-agents) docs):
@@ -70,12 +71,10 @@ If you're currently using [`pi-superpowers`](https://github.com/coctostan/pi-sup
 - Restored inline red flags, rationalizations, and verification checklists in several skills for more self-contained guidance
 
 ### Migration
-Replace `pi-superpowers` with `pi-superpowers-plus` in your config, and install the two companion packages (see Prerequisites):
+Replace `pi-superpowers` with `pi-superpowers-plus` in your config — the companion packages are bundled, so a single monorepo install covers everything (see Prerequisites):
 
-```json
-{
-  "packages": ["npm:pi-superpowers-plus", "npm:@tintinweb/pi-subagents", "<forked-pi-beads-package>"]
-}
+```bash
+pi install git:github.com/johnstegeman/pi-packages
 ```
 
 Notes:
@@ -85,7 +84,7 @@ Notes:
 
 `pi-superpowers-plus` uses pi's runtime capabilities alongside skill content:
 - **Three-scenario TDD** — skills, agent templates, and plan templates all use the same model: new feature (full TDD), modifying tested code (run existing tests), trivial change (use judgment).
-- The **TUI widgets** from `pi-beads` and `pi-subagents` show in-progress issues and active agents above the editor.
+- The **widgets** from `pi-subagents` (live agents / FleetView) and this package's `beads-molecule-widget` extension (active workflow step) show progress above the editor. (The old pi-beads widget was removed; beads issue/progress display now lives in this package's molecule widget.)
 - Tools like **`beads_create`/`beads_update`/`beads_close`** and **`Agent`** store execution state and run subagents outside the prompt.
 - Reference material that used to bloat a skill's `SKILL.md` was split into separate reference files in the skill's own directory (e.g. `reference/rationalizations.md`), which the agent reads on demand instead of loading everything up front.
 
@@ -128,8 +127,7 @@ poured from a formula, with human-approval gates as first-class nodes (design, s
 and smoke-test sign-off) instead of prose instructions. Plan tasks are beads with their
 full instructions in the `description` field, not a separate markdown plan file; the spec
 document remains a markdown file, linked from its bead via `--spec-id` for traceability.
-This package's own molecule widget renders the active pipeline's current/next step above
-the editor.
+This package's `beads-molecule-widget` extension renders the active pipeline's current/next step above the editor.
 
 ### Supporting Skills
 
@@ -158,7 +156,7 @@ Skills are markdown files the agent reads to learn *what* to do; discipline (TDD
 
 ## Subagent Dispatch
 
-Subagent dispatch is provided by [`@tintinweb/pi-subagents`](https://github.com/tintinweb/pi-subagents), which runs subagents **in-process** via the pi SDK — no subprocess, no stdout parsing, no hand-rolled inactivity watchdog. Install it (see Prerequisites) and the `Agent`, `get_subagent_result`, and `steer_subagent` tools become available.
+Subagent dispatch is provided by [`@tintinweb/pi-subagents`](https://github.com/tintinweb/pi-subagents), which runs subagents **in-process** via the pi SDK — no subprocess, no stdout parsing, no hand-rolled inactivity watchdog. It ships with the monorepo install (see Prerequisites); the `Agent`, `get_subagent_result`, and `steer_subagent` tools become available.
 
 ### Agent Templates
 
@@ -258,7 +256,7 @@ No compiled code or unit tests remain in this package — it ships skills and ag
 
 ## Attribution
 
-Skill content adapted from [Superpowers](https://github.com/obra/superpowers) by Jesse Vincent (MIT). This package builds on [pi-superpowers](https://github.com/coctostan/pi-superpowers). Subagent dispatch is provided by [`@tintinweb/pi-subagents`](https://github.com/tintinweb/pi-subagents) and task tracking by beads (a [`pi-beads`](https://github.com/abix5/pi-beads) fork with `ephemeral`/wisp support; installed separately).
+Skill content adapted from [Superpowers](https://github.com/obra/superpowers) by Jesse Vincent (MIT). This package builds on [pi-superpowers](https://github.com/coctostan/pi-superpowers). Subagent dispatch is provided by [`@tintinweb/pi-subagents`](https://github.com/tintinweb/pi-subagents) and task tracking by beads (a [`pi-beads`](https://github.com/abix5/pi-beads) fork with `ephemeral`/wisp support; bundled with the pi-packages monorepo install).
 
 ## License
 
