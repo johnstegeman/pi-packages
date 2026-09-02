@@ -47,7 +47,9 @@ jobs:
 
       - name: Push sync branch
         if: steps.changes.outputs.changed == 'true'
-        run: git push --force-with-lease origin bot/update-pi-subagents
+        run: |
+          git fetch origin 'refs/heads/bot/update-pi-subagents:refs/remotes/origin/bot/update-pi-subagents' || true
+          git push --force-with-lease origin bot/update-pi-subagents
 
       - name: Open pull request
         if: steps.changes.outputs.changed == 'true'
