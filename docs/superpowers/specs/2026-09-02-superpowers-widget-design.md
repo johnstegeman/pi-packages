@@ -40,10 +40,10 @@ closes — the user's R7 feature requests from the sync-hardening run.
   interactive runs). Single interval for the widget's lifetime; guard against double-registration.
 - Each tick: run the existing `bd mol current --json` fetch (`refreshMolecule`). This runs even with
   no active molecule — a single cheap call — so a fresh `bd mol pour` appears within ~5s (fixes
-  Obs #1). "Dormant" applies to the *second* call only.
-- When a molecule is active, run `bd mol show <current_step.id> --json` for the phase subtree, but
-  **only when `current_step.id` changed since the last tick** (or on invalidate) — steady state is
-  one bd call per tick. Children are cached alongside `activeMolecule`.
+  Obs #1). `bd mol show` (below) runs alongside it on the same tick.
+- When a molecule is active, run `bd mol show <current_step.id> --json` for the phase subtree
+  **every tick** so child ✓ flips land within ~5s even within a long-running step (two small
+  subprocesses per 5s; accepted per review ruling). Children are cached alongside `activeMolecule`.
 - `invalidate` becomes a real callback: force an immediate `refreshMolecule` + `mol show` (fresh
   children) + `renderMolecule`. It is the seam a future tool-initiated refresh
   (`pi-packages-48r`) will use; nothing calls it yet.

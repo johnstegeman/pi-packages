@@ -169,4 +169,16 @@ const a = moleculeWidgetLines(openChild, 80)[2];
 const b = moleculeWidgetLines(closedChild, 80)[2];
 assert.ok(a.includes("○") && b.includes("✓"), `flip ○ -> ✓ (got '${a}' -> '${b}')`);
 
+
+// theme passthrough: a custom theme transforms the accent-painted header label;
+// a null/absent theme still renders the plain text.
+const THEME = { fg: (color, t) => (color === "accent" ? t.toUpperCase() : t) };
+const themed = moleculeWidgetLines(base, 80, THEME);
+assert.ok(themed[0].includes("SUPERPOWERS:"), `theme-colored header label (got '${themed[0]}')`);
+assert.ok(!themed[0].includes("Superpowers:"), "untransformed label gone when themed");
+const plain = moleculeWidgetLines(base, 80);
+assert.ok(plain[0].includes("Superpowers:"), "absent theme renders plain label");
+const plainNull = moleculeWidgetLines(base, 80, null);
+assert.ok(plainNull[0].includes("Superpowers:"), "null theme renders plain label");
+
 console.log("beads-molecule-widget: all assertions passed");

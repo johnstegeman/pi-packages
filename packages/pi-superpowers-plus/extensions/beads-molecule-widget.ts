@@ -22,13 +22,11 @@ export default function (pi: ExtensionAPI) {
 
   // ---- live-poll state: one interval for the extension's lifetime ----
   let pollTimer: ReturnType<typeof setInterval> | null = null;
-  let lastStepId: string | null = null; // current-step id last seen by the child fetch
-  let forceChildren = false; // invalidate/refresh forces a child re-fetch even if the step is unchanged
   let timersStarted = false; // guards against double-registering the interval
 
-  // The poll head: `bd mol current --json` runs on every tick so a fresh pour
-  // appears ≤5s. `bd mol show` is heavier, so it stays in the gated
-  // refreshChildren below (steady state = one subprocess per tick).
+  // The poll head: `bd mol current --json` plus `bd mol show <step> --json` run
+  // every tick (two small subprocesses per 5s — the accepted cost), so a fresh pour
+  // appears ≤5s and a closed child bead flips to ✓ even while the step stays current.
   async function refreshMolecule(cwd: string): Promise<void> {
     const r = await pi.exec("bd", ["mol", "current", "--json"], {
       cwd,
@@ -58,14 +56,13 @@ export default function (pi: ExtensionAPI) {
     }
   }
 
-  // Gated child fetch: attaches `bd mol show <step> --json` children to the
-  // active molecule for the renderer, but only when the current step id changed
-  // or a refresh was forced. On failure it leaves the last known children in
-  // place and never throws. forceChildren is always cleared once a fetch is
-  // attempted.
+  // Always-on child fetch: attaches `bd mol show <step> --json` children to the active
+  // molecule for the renderer on every poll tick, so a child `bd close` flips to ✓ within
+  // ~5s even within a long-running step. On failure it leaves the last known
+  // children in place and never throws, matching the "failed `mol show` keeps the last
+  // children" rule in refreshMolecule.
   async function refreshChildren(cwd: string): Promise<void> {
     if (!activeMolecule || !activeMolecule.current_step?.id) return;
-    if (!forceChildren && activeMolecule.current_step.id === lastStepId) return;
     const mol = activeMolecule;
     const r = await pi.exec("bd", ["mol", "show", mol.current_step.id, "--json"], {
       cwd,
@@ -74,9 +71,7 @@ export default function (pi: ExtensionAPI) {
     if (r && r.code === 0) {
       const kids = parseMoleculeShow(r.stdout);
       if (kids) mol.children = kids; // attach for the renderer (never overwrite the whole state)
-      lastStepId = mol.current_step.id ?? null;
     }
-    forceChildren = false;
   }
 
   function renderMolecule() {
@@ -93,7 +88,6 @@ export default function (pi: ExtensionAPI) {
             moleculeWidgetLines(activeMolecule, width - 1, uiRef?.theme ?? theme).map((l: string) => ` ${l}`),
           invalidate: () => {
             if (!activeMolecule) return;
-            forceChildren = true;
             const cwd = process.cwd();
             void refreshMolecule(cwd).then(
               () => refreshChildren(cwd).then(() => renderMolecule(), () => {}),
@@ -111,8 +105,8 @@ export default function (pi: ExtensionAPI) {
   // Single guarded interval for the extension's lifetime; `timersStarted` prevents
   // double-registration if session_start fires again. Every tick bails out when
   // the TUI is gone, and the promise chain swallows rejections so the timer never
-  // throws. refreshChildren is chained before renderMolecule so a step change
-  // renders its fresh subtree within the same tick.
+  // throws. refreshChildren is chained before renderMolecule so fresh child ✓ flips
+  // render within the same tick even while the current step is unchanged.
   function startPolling(cwd: string) {
     if (timersStarted || pollTimer) return;
     timersStarted = true;
