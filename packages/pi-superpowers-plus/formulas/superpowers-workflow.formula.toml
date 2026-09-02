@@ -1,0 +1,88 @@
+formula = "superpowers-workflow"
+description = "Brainstorm -> design -> plan -> implement -> verify -> finish"
+version = 1
+type = "workflow"
+
+[vars.topic]
+description = "The feature/topic being brainstormed"
+required = true
+
+[[steps]]
+id = "explore"
+title = "Explore project context: {{topic}}"
+type = "task"
+
+[[steps]]
+id = "clarify"
+title = "Ask clarifying questions"
+type = "task"
+needs = ["explore"]
+
+[[steps]]
+id = "approaches"
+title = "Propose approaches"
+type = "task"
+needs = ["clarify"]
+
+[[steps]]
+id = "design"
+title = "Present design sections"
+type = "task"
+needs = ["approaches"]
+
+[[steps]]
+id = "design-approved"
+title = "User approves design"
+type = "task"
+needs = ["design"]
+
+[steps.gate]
+type = "human"
+
+[[steps]]
+id = "write-spec"
+title = "Write spec to docs/superpowers/specs/"
+type = "task"
+needs = ["design-approved"]
+
+[[steps]]
+id = "spec-review"
+title = "Spec self-review"
+type = "task"
+needs = ["write-spec"]
+
+[[steps]]
+id = "spec-approved"
+title = "User reviews written spec"
+type = "task"
+needs = ["spec-review"]
+
+[steps.gate]
+type = "human"
+
+[[steps]]
+id = "implement"
+title = "Implement {{topic}}"
+type = "task"
+needs = ["spec-approved"]
+
+[[steps]]
+id = "verify"
+title = "Verify"
+type = "task"
+needs = ["implement"]
+
+[[steps]]
+id = "smoke-test-approved"
+title = "Smoke test / manual QA sign-off"
+type = "task"
+needs = ["verify"]
+
+[steps.gate]
+type = "human"
+
+[[steps]]
+id = "finish"
+title = "Finish development branch"
+type = "task"
+needs = ["smoke-test-approved"]
