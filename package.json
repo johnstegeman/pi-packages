@@ -29,9 +29,10 @@
       "./packages/hashline-edit/src/index.ts",
       "./packages/langfuse/index.ts",
       "./packages/pi-beads/src/index.ts",
-      "./packages/pi-subagents/src/index.ts"
+      "./packages/pi-subagents/src/index.ts",
+      "./packages/pi-superpowers-plus/extensions"
     ],
     "themes": ["./packages/ayu/themes"],
-    "skills": ["./packages/pi-beads/skills"]
+    "skills": ["./packages/pi-beads/skills", "./packages/pi-superpowers-plus/skills"]
   }
 }
