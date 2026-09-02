@@ -28,47 +28,37 @@ jobs:
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
 
-      - name: Add upstream remote and fetch
+      - name: Run merge-onto-branch sync
+        id: sync
+        env:
+          UPSTREAM_REPO: https://github.com/tintinweb/pi-subagents.git
+          UPSTREAM_REF: master
         run: |
-          git remote add subagents https://github.com/tintinweb/pi-subagents.git
-          git fetch subagents master
+          set -euo pipefail
+          chmod +x scripts/sync/sync-subtree.sh
+          OUT="$(./scripts/sync/sync-subtree.sh)"
+          echo "$OUT"
+          echo "changed=$(echo "$OUT" | sed -n 's/^changed=//p')" >> "$GITHUB_OUTPUT"
+          echo "upstream_sha=$(echo "$OUT" | sed -n 's/^upstream_sha=//p')" >> "$GITHUB_OUTPUT"
 
-      - name: Create sync branch
-        run: git switch -c bot/update-pi-subagents
-
-      - name: Pull subtree from upstream
-        run: git subtree pull --prefix packages/pi-subagents subagents master --squash
-
-      - name: Detect whether anything changed
-        id: changes
-        run: |
-          echo "upstream_sha=$(git rev-parse --short subagents/master)" >> "$GITHUB_OUTPUT"
-          if git diff --quiet origin/main HEAD -- packages/pi-subagents; then
-            echo "changed=false" >> "$GITHUB_OUTPUT"
-            echo "No upstream changes — nothing to sync."
-          else
-            echo "changed=true" >> "$GITHUB_OUTPUT"
-          fi
-
-      - name: Push sync branch
-        if: steps.changes.outputs.changed == 'true'
-        run: |
-          git fetch origin 'refs/heads/bot/update-pi-subagents:refs/remotes/origin/bot/update-pi-subagents' || true
-          git push --force-with-lease origin bot/update-pi-subagents
-
-      - name: Open pull request
-        if: steps.changes.outputs.changed == 'true'
+      - name: Open or refresh pull request
+        if: steps.sync.outputs.changed == 'true'
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
+          set -euo pipefail
+          BODY="Automated \`git subtree pull\` of tintinweb/pi-subagents@${{ steps.sync.outputs.upstream_sha }}.
+
+          This PR was built by merging upstream onto the persistent \`bot/update-pi-subagents\` branch (never force-pushed), so any dep-mirror fix you commit here survives nightly reruns.
+
+          If this PR adds or removes runtime dependencies, mirror them into root
+          package.json \`dependencies\` (croner, nanoid, @sinclair/typebox, typebox).
+          The deps-mirror CI job gates this automatically."
           EXISTING=$(gh pr list --head bot/update-pi-subagents --state open --json number -q '.[0].number')
           if [ -z "$EXISTING" ]; then
             gh pr create --base main --head bot/update-pi-subagents \
               --title "chore: sync pi-subagents from upstream" \
-              --body "Automated \`git subtree pull\` of tintinweb/pi-subagents@${{ steps.changes.outputs.upstream_sha }}.
-
-          If this PR adds or removes runtime dependencies, mirror them into root
-          package.json \`dependencies\` (croner, nanoid, @sinclair/typebox, typebox)."
+              --body "$BODY"
           else
-            echo "PR #$EXISTING already open for bot/update-pi-subagents — branch updated in place."
+            gh pr edit "$EXISTING" --body "$BODY"
           fi
