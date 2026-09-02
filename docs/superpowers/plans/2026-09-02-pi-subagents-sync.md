@@ -235,8 +235,8 @@ jobs:
               --title "chore: sync pi-subagents from upstream" \
               --body "Automated \`git subtree pull\` of tintinweb/pi-subagents@master.
 
-If this PR adds or removes runtime dependencies, mirror them into root
-package.json \`dependencies\` (croner, nanoid, @sinclair/typebox, typebox)."
+          If this PR adds or removes runtime dependencies, mirror them into root
+          package.json \`dependencies\` (croner, nanoid, @sinclair/typebox, typebox)."
           else
             echo "PR #$EXISTING already open for bot/update-pi-subagents — branch updated in place."
           fi
