@@ -1,0 +1,67 @@
+name: Sync pi-subagents
+
+on:
+  schedule:
+    - cron: '0 4 * * *'   # nightly 04:00 UTC
+  workflow_dispatch: {}   # manual "Run workflow" button
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout main with full history
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0        # git subtree needs the full history
+          ref: main
+
+      - name: Configure git bot identity
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+
+      - name: Add upstream remote and fetch
+        run: |
+          git remote add subagents https://github.com/tintinweb/pi-subagents.git
+          git fetch subagents master
+
+      - name: Create sync branch
+        run: git switch -c bot/update-pi-subagents
+
+      - name: Pull subtree from upstream
+        run: git subtree pull --prefix packages/pi-subagents subagents master --squash
+
+      - name: Detect whether anything changed
+        id: changes
+        run: |
+          if [ "$(git rev-parse HEAD)" = "$(git rev-parse origin/main)" ]; then
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+            echo "No upstream changes — nothing to sync."
+          else
+            echo "changed=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Push sync branch
+        if: steps.changes.outputs.changed == 'true'
+        run: git push --force-with-lease origin bot/update-pi-subagents
+
+      - name: Open pull request
+        if: steps.changes.outputs.changed == 'true'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          EXISTING=$(gh pr list --head bot/update-pi-subagents --state open --json number -q '.[0].number')
+          if [ -z "$EXISTING" ]; then
+            gh pr create --base main --head bot/update-pi-subagents \
+              --title "chore: sync pi-subagents from upstream" \
+              --body "Automated \`git subtree pull\` of tintinweb/pi-subagents@master.
+
+          If this PR adds or removes runtime dependencies, mirror them into root
+          package.json \`dependencies\` (croner, nanoid, @sinclair/typebox, typebox)."
+          else
+            echo "PR #$EXISTING already open for bot/update-pi-subagents — branch updated in place."
+          fi
