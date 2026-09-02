@@ -28,7 +28,8 @@ closes — the user's R7 feature requests from the sync-hardening run.
 - User decisions (approved): **view B** — header + current-phase subtree only (view A, the whole
   molecule tree, was rejected as too tall); **refresh A** — a ~5s timer poll, dormant outside an
   interactive TUI / when no molecule is active (interpreted as: the single cheap `mol current` call
-  still runs to catch new pours; the heavier `mol show` is gated); implementation **Approach 1** —
+  still runs to catch new pours, and the deeper `mol show` runs every tick too, so child beads
+  flip to ✓ within ~5s even inside a long-running step); implementation **Approach 1** —
   augment the existing widget in place, making `invalidate` real.
 
 ## Decision
@@ -72,7 +73,7 @@ Rebuilt `moleculeWidgetLines(state, children, width, theme)` on the existing fra
 ### 3. Files
 
 - Modify: `packages/pi-superpowers-plus/extensions/beads-molecule-widget.ts` (poll + real
-  invalidate + gated child fetch; stays a thin entry).
+  invalidate + per-tick child fetch; stays a thin entry).
 - Modify: `packages/pi-superpowers-plus/extensions/beads-molecule-widget.mjs` (add
   `parseMoleculeShow`; rebuild `moleculeWidgetLines`).
 - Modify: `packages/pi-superpowers-plus/extensions/beads-molecule-widget.test.mjs` (extend).
@@ -104,5 +105,6 @@ TDD on the pure `.mjs` layer (the split is what makes the widget testable):
   an api-scheduled callback); verify before committing to the mechanism.
 - `mol show --json` graph shape is the widget's only new data dependency; if bd renames/changes the
   `parent-child` edge or the `issues` field set, `parseMoleculeShow` is the single place to adapt.
-- Re-running `bd` every 5s is a steady subprocess per tick; acceptable for an interactive TUI
-  widget, and the gated `mol show` keeps the common case to one call.
+- Re-running `bd` every 5s is two small subprocesses per tick (`mol current` + `mol show`) while
+  an interactive TUI is active; accepted cost per the review ruling that un-gated the child fetch
+  so ✓ flips land within a long-running step.
