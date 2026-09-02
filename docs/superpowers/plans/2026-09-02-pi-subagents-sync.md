@@ -222,7 +222,9 @@ jobs:
 
       - name: Push sync branch
         if: steps.changes.outputs.changed == 'true'
-        run: git push --force-with-lease origin bot/update-pi-subagents
+        run: |
+          git fetch origin 'refs/heads/bot/update-pi-subagents:refs/remotes/origin/bot/update-pi-subagents' || true
+          git push --force-with-lease origin bot/update-pi-subagents
 
       - name: Open pull request
         if: steps.changes.outputs.changed == 'true'
@@ -244,7 +246,7 @@ jobs:
 
 Notes:
 - The "Detect" step is the no-op safety: when upstream is unchanged, `git subtree pull` commits nothing, `HEAD` still equals `origin/main`, so the branch is never pushed and no PR is created.
-- `--force-with-lease` safely refreshes an already-existing `bot/update-pi-subagents` branch (e.g. an older unmerged PR) instead of erroring on a non-fast-forward push.
+- The push step first establishes a local tracking ref for `bot/update-pi-subagents` (`git fetch ... || true`), so `--force-with-lease` has a real lease in a fresh Actions checkout (which only fetches `main`). Otherwise, once the branch exists on the remote, a fresh checkout's push is rejected with "stale info" and the sync hard-fails exactly when it has work to do. If the branch does not exist yet, the tolerant fetch fails harmlessly and the push creates it.
 - The final step skips creating a duplicate PR when one is already open for that branch — the force-push above has already refreshed it.
 
 - [ ] **Step 2: Verify the workflow parses as YAML**
