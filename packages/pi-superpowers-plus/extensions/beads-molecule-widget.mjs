@@ -37,7 +37,7 @@ export function truncToWidth(s, width) {
     out += ch;
     w += cw;
   }
-  return out + "\u2026";
+  return `${out}\u2026`;
 }
 function assemble(frags, width) {
   let used = 0;
@@ -76,57 +76,53 @@ export function parseMoleculeCurrent(json) {
     return null;
   }
   const obj = Array.isArray(arr) ? arr[0] : arr;
-  if (!obj || !obj.molecule_id || !Array.isArray(obj.steps)) return null;
-  const doneCount = obj.steps.filter((s) => s.status === "done").length;
+  if (!obj?.molecule_id || !Array.isArray(obj.steps)) return null;
+  const steps = obj.steps
+    .filter((s) => s && s.issue && s.issue.id != null)
+    .map((s) => ({
+      id: s.issue.id,
+      title: s.issue.title ?? "",
+      priority: s.issue.priority,
+      issue_type: s.issue.issue_type ?? "task",
+      status: s.issue.status ?? "open",
+      created_at: s.issue.created_at ?? "",
+      step_status: s.status ?? "pending",
+      is_current: !!s.is_current,
+    }));
+  const doneCount = steps.filter((s) => s.step_status === "done").length;
   return {
     molecule_id: obj.molecule_id,
     molecule_title: obj.molecule_title ?? "",
     current_step: obj.current_step ?? null,
     next_step: obj.next_step ?? null,
-    steps: obj.steps,
+    steps,
     doneCount,
     total: obj.steps.length,
   };
 }
 
-/**
- * Parse `bd mol show <step> --json` output into the step's child beads.
- * Children are the `issues[]` entries reachable via a `dependencies[]` edge of
- * type "parent-child" whose `depends_on_id` equals the graph root's id.
- * Sorted deterministically by `created_at` (fallback "") then `id`.
- * Returns null on any malformed input; an empty array is valid (no children).
- */
-export function parseMoleculeShow(json) {
-  let obj;
-  try {
-    const text = typeof json === "string" ? json.trim() : json;
-    obj = typeof text === "string" ? JSON.parse(text) : text;
-  } catch {
-    return null;
+const EXPLORE_PREFIX = "Explore project context: ";
+
+// ---- topic + phase helpers (superpowers-workflow formula coupling) ----
+// The widget and the formula ship in the same package; these key off the
+// formula's step titles (spec 2026-09-03-superpowers-widget-phase-views-design.md).
+export function topicFor(state) {
+  if (!state || !Array.isArray(state.steps)) return "";
+  const explore = state.steps.find((s) => s.title?.startsWith(EXPLORE_PREFIX));
+  if (explore) {
+    const t = explore.title.slice(EXPLORE_PREFIX.length).trim();
+    if (t) return t;
   }
-  if (!obj || !obj.root || obj.root.id == null || !Array.isArray(obj.issues) || !Array.isArray(obj.dependencies)) {
-    return null;
-  }
-  const byId = new Map(obj.issues.map((it) => [it && it.id, it]));
-  const childIds = obj.dependencies
-    .filter((d) => d && d.depends_on_id === obj.root.id && d.type === "parent-child")
-    .map((d) => d.issue_id);
-  const kids = childIds
-    .map((id) => byId.get(id))
-    .filter((it) => it && it.id != null)
-    .map((it) => ({
-      id: it.id,
-      title: it.title ?? "",
-      status: it.status ?? "open",
-      priority: it.priority,
-      issue_type: it.issue_type ?? "task",
-      created_at: it.created_at ?? "",
-    }));
-  kids.sort((a, b) => {
-    if (a.created_at !== b.created_at) return a.created_at < b.created_at ? -1 : 1;
-    return a.id < b.id ? -1 : a.id > b.id ? 1 : 0;
-  });
-  return kids;
+  return state.molecule_title ?? "";
+}
+
+export function phaseFor(state) {
+  if (!state || !Array.isArray(state.steps)) return "brainstorming";
+  const impl = state.steps.find((s) => /^Implement( |$)/.test(s.title ?? ""));
+  if (!impl) return "brainstorming";
+  if (impl.step_status === "done") return "finishing";
+  if (impl.step_status === "ready" || impl.step_status === "current") return "implementing";
+  return "brainstorming";
 }
 
 /**
@@ -169,80 +165,150 @@ function themeOf(theme) {
   return theme && typeof theme.fg === "function" ? (c, t) => theme.fg(c, t) : PLAIN_FG;
 }
 
-/** Render the molecule widget. Returns [] when there's nothing to draw. */
+// ---- phase views (canonical formula-step titles) ----
+const BRAINSTORM_VIEW = [
+  { label: "Explore project context", test: (t) => t.startsWith(EXPLORE_PREFIX) },
+  { label: "Ask clarifying questions", test: (t) => t === "Ask clarifying questions" },
+  { label: "Propose approaches", test: (t) => t === "Propose approaches" },
+  { label: "Present design sections", test: (t) => t === "Present design sections" },
+  { label: "User approves design", test: (t) => t === "User approves design" },
+  { label: "Write spec to docs/superpowers/specs/", test: (t) => t.startsWith("Write spec") },
+  { label: "Spec self-review", test: (t) => t === "Spec self-review" },
+  { label: "User reviews written spec", test: (t) => t === "User reviews written spec" },
+];
+
+const FINISH_VIEW = [
+  { label: "Verify", test: (t) => t === "Verify" },
+  { label: "Smoke test / manual QA sign-off", test: (t) => t === "Smoke test / manual QA sign-off" },
+  { label: "Finish development branch", test: (t) => t === "Finish development branch" },
+];
+
+const PHASE_LABEL = {
+  brainstorming: "Brainstorming",
+  implementing: "Implementing",
+  finishing: "Finishing",
+};
+
+const MAX_LINES = 15;
+
+/** Resolve the canonical view rows against the molecule's steps (missing -> null). */
+function resolveRows(steps, view) {
+  return view
+    .map((v) => {
+      const s = steps.find((x) => v.test(x.title));
+      if (!s) return null;
+      return { label: v.label, step: s };
+    })
+    .filter(Boolean);
+}
+
+/** Keep ≤ justUnder slots, closed rows last; tail `+N more` counts the overflow. */
+function fitRows(rows) {
+  const noTailSlots = MAX_LINES - 1; // content rows without a tail line
+  if (rows.length <= noTailSlots) return { kept: rows, more: 0 };
+  // Over flow: reserve the last line for "+N more", so only MAX_LINES-2 fit.
+  const budget = MAX_LINES - 2;
+  const pinned = rows.filter((r) => r.pinned);
+  const others = rows.filter((r) => !r.pinned);
+  const open = others.filter((r) => !r.closed);
+  const closed = others.filter((r) => r.closed);
+  const avail = Math.max(0, budget - pinned.length);
+  const kept = [...pinned];
+  if (open.length <= avail) {
+    kept.push(...open);
+    const rem = avail - open.length;
+    kept.push(...closed.slice(0, rem));
+  } else {
+    kept.push(...open.slice(0, avail));
+  }
+  return { kept, more: rows.length - kept.length };
+}
+
+/** Render the molecule widget: header + one phase-specific view. Returns [] when there's nothing to draw. */
 export function moleculeWidgetLines(state, width, theme) {
   const fg = themeOf(theme);
   if (!state || !Array.isArray(state.steps) || state.steps.length === 0 || !(width > 0)) return [];
 
-  // view B header: accent label + muted title + muted done/total suffix (no phase label)
+  const topic = topicFor(state);
+  const phase = phaseFor(state);
+  const allDone = state.steps.every((s) => s.step_status === "done");
+
+  if (allDone) {
+    return [
+      assemble(
+        [
+          { text: "\u2713 Superpowers: ", paint: (t) => fg("accent", t) },
+          { text: `${topic} \u2014 finished`, paint: (t) => fg("text", t) },
+        ],
+        width,
+      ).text,
+    ];
+  }
+
   const header = assemble(
     [
       { text: "Superpowers:", paint: (t) => fg("accent", t) },
-      { text: ` ${state.molecule_title}`, paint: (t) => fg("muted", t) },
+      { text: ` ${topic}`, paint: (t) => fg("text", t) },
+      { text: ` \u00b7 ${PHASE_LABEL[phase]}`, paint: (t) => fg("muted", t) },
       { text: ` \u00b7 ${state.doneCount}/${state.total}`, paint: (t) => fg("muted", t) },
     ],
     width,
   ).text;
 
   const rows = [];
-  const current = state.current_step;
-  if (current && current.issue_type === "gate") {
-    // gate trunk: pause glyph + "Waiting on you", never a subtree
-    rows.push(
-      assemble(
+
+  // A gate as the current step is always shown, pinned, as the waiting line.
+  if (state.current_step && state.current_step.issue_type === "gate") {
+    rows.push({
+      text: assemble(
         [
           { text: "\u23f8 Waiting on you: ", paint: (t) => fg("warning", t) },
-          { text: current.title ?? "", paint: (t) => fg("text", t) },
+          { text: state.current_step.title ?? "", paint: (t) => fg("text", t) },
         ],
         width,
       ).text,
-    );
-  } else if (current) {
-    const frags = [
-      { text: `${markerFor(current.status)} `, paint: (t) => fg("warning", t) },
-      { text: `${current.id ?? ""} `, paint: (t) => fg("text", t) },
-    ];
-    if (current.priority != null) frags.push({ text: `\u25cf P${current.priority} `, paint: (t) => fg("warning", t) });
-    frags.push({ text: current.title ?? "", paint: (t) => fg("text", t) });
-    rows.push(assemble(frags, width).text);
-  } else if (state.next_step) {
-    rows.push(
-      assemble(
-        [
-          { text: "\u25cb Next: ", paint: (t) => fg("dim", t) },
-          { text: state.next_step.title ?? "", paint: (t) => fg("text", t) },
-        ],
-        width,
-      ).text,
-    );
-  }
-
-  // children subtree: glyph rows + 15-line cap. header+trunk always win; the
-  // remaining (MAX_LINES-2) slots hold children, and when they overflow the
-  // last of those slots becomes the muted `└── +N more…` tail so the total
-  // number of lines never exceeds MAX_LINES.
-  const MAX_LINES = 15;
-  const SLOTS = MAX_LINES - 2;
-  if (current && current.issue_type !== "gate") {
-    let kids = state.children ?? [];
-    let more = 0;
-    if (kids.length > SLOTS) {
-      more = kids.length - (SLOTS - 1);
-      kids = kids.slice(0, SLOTS - 1);
-    }
-    kids.forEach((kid, i) => {
-      const last = i === kids.length - 1;
-      const frags = [
-        { text: last ? "\u2514\u2500\u2500 " : "\u251c\u2500\u2500 ", paint: (t) => fg("muted", t) },
-        { text: `${markerFor(kid.status)} `, paint: (t) => fg(kid.status === "closed" ? "text" : "warning", t) },
-        { text: `${kid.id ?? ""} `, paint: (t) => fg("text", t) },
-      ];
-      if (kid.priority != null) frags.push({ text: `\u25cf P${kid.priority} `, paint: (t) => fg("warning", t) });
-      frags.push({ text: kid.title ?? "", paint: (t) => fg("text", t) });
-      rows.push(assemble(frags, width).text);
+      closed: false,
+      pinned: true,
     });
-    if (more > 0) rows.push(fg("muted", truncToWidth(`\u2514\u2500\u2500 +${more} more\u2026`, width)));
   }
 
-  return [header, ...rows].filter(Boolean);
+  const stepRow = (step, label) => ({
+    text: assemble(
+      [
+        { text: `${markerFor(step.status)} `, paint: (t) => fg(step.status === "closed" ? "text" : "warning", t) },
+        { text: label ?? step.title ?? "", paint: (t) => fg(step.status === "closed" ? "muted" : "text", t) },
+      ],
+      width,
+    ).text,
+    closed: step.status === "closed",
+    pinned: !!step.is_current,
+  });
+
+  if (phase === "brainstorming") {
+    for (const s of resolveRows(state.steps, BRAINSTORM_VIEW)) rows.push(stepRow(s.step, s.label));
+  } else if (phase === "implementing") {
+    const impl = state.steps.find((s) => /^Implement( |$)/.test(s.title ?? ""));
+    if (impl) rows.push(stepRow(impl));
+    const kids = state.steps
+      .filter((s) => impl && s.id.startsWith(`${impl.id}.`))
+      .sort((a, b) =>
+        (a.created_at ?? "") < (b.created_at ?? "")
+          ? -1
+          : (a.created_at ?? "") > (b.created_at ?? "")
+            ? 1
+            : a.id < b.id
+              ? -1
+              : a.id > b.id
+                ? 1
+                : 0,
+      );
+    for (const kid of kids) rows.push(stepRow(kid));
+  } else if (phase === "finishing") {
+    for (const s of resolveRows(state.steps, FINISH_VIEW)) rows.push(stepRow(s.step, s.label));
+  }
+
+  const { kept, more } = fitRows(rows);
+  const lines = [header, ...kept.map((r) => r.text)];
+  if (more > 0) lines.push(fg("muted", truncToWidth(`\u2514\u2500\u2500 +${more} more\u2026`, width)));
+  return lines.filter(Boolean);
 }

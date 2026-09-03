@@ -1,6 +1,6 @@
+import { existsSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { existsSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { FORMULA_FILENAME, seedFormula } from "./formula-seed.mjs";
 

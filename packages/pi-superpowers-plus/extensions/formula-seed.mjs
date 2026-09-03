@@ -1,6 +1,6 @@
 // formula-seed.mjs — pure, dependency-free seeding of a workflow formula into a target dir.
 // Never throws; every failure maps to a "skipped-*" action.
-import { mkdir, symlink, readlink, lstat, realpath } from "node:fs/promises";
+import { lstat, mkdir, readlink, realpath, symlink } from "node:fs/promises";
 import { join } from "node:path";
 
 export const FORMULA_FILENAME = "superpowers-workflow.formula.toml";
@@ -31,7 +31,7 @@ export async function seedFormula(sourcePath, targetDir) {
     }
     // it IS a symlink: check where it points
     const currentLink = await readlink(target);
-    const currentTarget = (await realpath(target).catch(() => null)); // resolves only if not dangling
+    const currentTarget = await realpath(target).catch(() => null); // resolves only if not dangling
     if (currentTarget !== null) {
       const sourceReal = await realpath(sourcePath); // source exists (checked above)
       if (currentTarget === sourceReal) return { action: "already-linked", target };

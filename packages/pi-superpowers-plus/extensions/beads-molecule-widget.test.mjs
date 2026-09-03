@@ -4,7 +4,8 @@ import {
   displayWidth,
   moleculeWidgetLines,
   parseMoleculeCurrent,
-  parseMoleculeShow,
+  phaseFor,
+  topicFor,
 } from "./beads-molecule-widget.mjs";
 
 // ---------- parser: malformed input never throws ----------
@@ -12,7 +13,7 @@ assert.deepEqual(parseMoleculeCurrent(""), null);
 assert.deepEqual(parseMoleculeCurrent("not json"), null);
 assert.deepEqual(parseMoleculeCurrent("[]"), null);
 
-// ---------- parser: happy path ----------
+// ---------- parser: keeps full step data (title/status/is_current/created_at) ----------
 const RAW = JSON.stringify([
   {
     molecule_id: "bd-mol-g0z",
@@ -24,16 +25,33 @@ const RAW = JSON.stringify([
       issue_type: "task",
       started_at: "2026-09-02T15:34:18Z",
     },
-    next_step: {
-      id: "bd-mol-8y2",
-      title: "Gate: human",
-      issue_type: "gate",
-    },
+    next_step: { id: "bd-mol-8y2", title: "Gate: human", issue_type: "gate" },
     steps: [
-      { issue: { id: "bd-mol-meq", issue_type: "task" }, status: "done" },
-      { issue: { id: "bd-mol-1vz", issue_type: "task" }, status: "current" },
-      { issue: { id: "bd-mol-8y2", issue_type: "gate" }, status: "ready" },
-      { issue: { id: "bd-mol-9ev", issue_type: "task" }, status: "pending" },
+      {
+        issue: {
+          id: "bd-mol-meq",
+          title: "Explore project context: Superpowers widget changes",
+          issue_type: "task",
+          status: "closed",
+        },
+        status: "done",
+        is_current: false,
+      },
+      {
+        issue: { id: "bd-mol-1vz", title: "Ask clarifying questions", issue_type: "task", status: "in_progress" },
+        status: "current",
+        is_current: true,
+      },
+      {
+        issue: { id: "bd-mol-8y2", title: "Gate: human", issue_type: "gate", status: "open" },
+        status: "ready",
+        is_current: false,
+      },
+      {
+        issue: { id: "bd-mol-9ev", title: "Implement", issue_type: "task", status: "open" },
+        status: "pending",
+        is_current: false,
+      },
     ],
   },
 ]);
@@ -41,197 +59,394 @@ const parsed = parseMoleculeCurrent(RAW);
 assert.equal(parsed.molecule_id, "bd-mol-g0z");
 assert.equal(parsed.doneCount, 1);
 assert.equal(parsed.total, 4);
-assert.equal(parsed.current_step.title, "Ask clarifying questions");
+assert.equal(parsed.steps[0].title, "Explore project context: Superpowers widget changes");
+assert.equal(parsed.steps[1].step_status, "current");
+assert.equal(parsed.steps[1].is_current, true);
+assert.equal(parsed.steps[0].created_at, "");
+
+// ---------- topic + phase helpers ----------
+assert.equal(topicFor(parsed), "Superpowers widget changes");
+assert.equal(
+  topicFor({ ...parsed, steps: parsed.steps.filter((s) => !s.title.startsWith("Explore")) }),
+  "superpowers-workflow",
+);
+assert.equal(topicFor(null), "");
+assert.equal(phaseFor(parsed), "brainstorming"); // implement pending
+assert.equal(
+  phaseFor({
+    ...parsed,
+    steps: parsed.steps.map((s) => (s.title === "Implement" ? { ...s, step_status: "current" } : s)),
+  }),
+  "implementing",
+);
+assert.equal(
+  phaseFor({
+    ...parsed,
+    steps: parsed.steps.map((s) => (s.title === "Implement" ? { ...s, step_status: "done" } : s)),
+  }),
+  "finishing",
+);
 
 // ---------- render: nothing to draw ----------
 assert.deepEqual(moleculeWidgetLines(null, 80), []);
 assert.deepEqual(moleculeWidgetLines(parsed, 0), []);
 
-// ---------- render: header + current step ----------
-const lines = moleculeWidgetLines(parsed, 80);
-assert.ok(lines[0].includes("superpowers-workflow"));
-assert.ok(lines[0].includes("1/4"));
-assert.ok(lines.some((l) => l.includes("Ask clarifying questions")));
-
-// ---------- render: gate-as-current gets the waiting glyph ----------
-const gateCurrent = {
-  ...parsed,
-  current_step: { id: "bd-mol-8y2", title: "Gate: human", issue_type: "gate" },
-};
-const gateLines = moleculeWidgetLines(gateCurrent, 80);
-assert.ok(gateLines.some((l) => l.includes("Waiting on you")));
-
-// ---------- render: view B header replaces the phase label ----------
-const explorePhase = {
-  ...parsed,
-  current_step: {
-    id: "bd-mol-meq",
-    title: "Explore project context: x",
-    issue_type: "task",
-    formula_step_id: "explore",
-  },
-};
-const phaseLines = moleculeWidgetLines(explorePhase, 80);
-assert.ok(phaseLines[0].includes("Superpowers:") && phaseLines[1].includes("Explore project context: x"));
-assert.ok(!phaseLines[0].includes("Brainstorming"), "phase label removed from header");
-
-// ---------- parseMoleculeShow ----------
-assert.deepEqual(parseMoleculeShow(""), null);
-assert.deepEqual(parseMoleculeShow("not json"), null);
-assert.deepEqual(parseMoleculeShow("[]"), null);
-
-const SHOW = JSON.stringify({
-  root: { id: "mol-9", title: "Implement X", priority: 2, status: "in_progress", issue_type: "task" },
-  issues: [
-    { id: "mol-9", title: "Implement X", priority: 2, status: "in_progress", issue_type: "task" },
+// ---------- full brainstorming fixture: all 8 pre-impl tasks + 2 gates + implement ----------
+const bstate = {
+  molecule_id: "bd-mol-g0z",
+  molecule_title: "superpowers-workflow",
+  current_step: { id: "bd-mol-1vz", title: "Ask clarifying questions", status: "in_progress", issue_type: "task" },
+  next_step: null,
+  doneCount: 4,
+  total: 12,
+  steps: [
     {
-      id: "mol-9.1",
-      title: "Task 1",
-      priority: 2,
-      status: "open",
-      issue_type: "task",
-      created_at: "2026-09-02T10:00:01Z",
-    },
-    {
-      id: "mol-9.2",
-      title: "Task 2",
-      priority: 2,
-      status: "in_progress",
-      issue_type: "task",
-      created_at: "2026-09-02T10:00:00Z",
-    },
-    {
-      id: "mol-9.3",
-      title: "Task 3",
-      priority: 2,
+      id: "s1",
+      title: "Explore project context: Superpowers widget changes",
       status: "closed",
       issue_type: "task",
-      created_at: "2026-09-02T10:00:02Z",
+      created_at: "",
+      step_status: "done",
+      is_current: false,
     },
     {
-      id: "other",
-      title: "Some other bead",
-      priority: 1,
+      id: "s2",
+      title: "Ask clarifying questions",
+      status: "in_progress",
+      issue_type: "task",
+      created_at: "",
+      step_status: "current",
+      is_current: true,
+    },
+    {
+      id: "s3",
+      title: "Propose approaches",
       status: "open",
       issue_type: "task",
-      created_at: "2026-09-02T09:00:00Z",
+      created_at: "",
+      step_status: "ready",
+      is_current: false,
+    },
+    {
+      id: "s4",
+      title: "Present design sections",
+      status: "open",
+      issue_type: "task",
+      created_at: "",
+      step_status: "pending",
+      is_current: false,
+    },
+    {
+      id: "s5",
+      title: "User approves design",
+      status: "open",
+      issue_type: "task",
+      created_at: "",
+      step_status: "pending",
+      is_current: false,
+    },
+    {
+      id: "g1",
+      title: "Gate: human",
+      status: "open",
+      issue_type: "gate",
+      created_at: "",
+      step_status: "pending",
+      is_current: false,
+    },
+    {
+      id: "s6",
+      title: "Write spec to docs/superpowers/specs/",
+      status: "open",
+      issue_type: "task",
+      created_at: "",
+      step_status: "pending",
+      is_current: false,
+    },
+    {
+      id: "s7",
+      title: "Spec self-review",
+      status: "open",
+      issue_type: "task",
+      created_at: "",
+      step_status: "pending",
+      is_current: false,
+    },
+    {
+      id: "s8",
+      title: "User reviews written spec",
+      status: "open",
+      issue_type: "task",
+      created_at: "",
+      step_status: "pending",
+      is_current: false,
+    },
+    {
+      id: "g2",
+      title: "Gate: human",
+      status: "open",
+      issue_type: "gate",
+      created_at: "",
+      step_status: "pending",
+      is_current: false,
+    },
+    {
+      id: "s9",
+      title: "Implement Superpowers widget changes",
+      status: "open",
+      issue_type: "task",
+      created_at: "",
+      step_status: "pending",
+      is_current: false,
+    },
+    {
+      id: "s10",
+      title: "Verify",
+      status: "open",
+      issue_type: "task",
+      created_at: "",
+      step_status: "pending",
+      is_current: false,
     },
   ],
-  dependencies: [
-    { issue_id: "mol-9.1", depends_on_id: "mol-9", type: "parent-child" },
-    { issue_id: "mol-9.2", depends_on_id: "mol-9", type: "parent-child" },
-    { issue_id: "mol-9.3", depends_on_id: "mol-9", type: "parent-child" },
-    { issue_id: "other", depends_on_id: "mol-9", type: "blocks" },
-    { issue_id: "mol-9.2", depends_on_id: "mol-9.1", type: "blocks" },
-  ],
-});
-const children = parseMoleculeShow(SHOW);
-// sorted by created_at then id => mol-9.2, mol-9.1, mol-9.3
-assert.deepEqual(
-  children.map((c) => c.id),
-  ["mol-9.2", "mol-9.1", "mol-9.3"],
+};
+
+// ---------- header: topic (not formula name) + phase label + done/total ----------
+const headerLines = moleculeWidgetLines(bstate, 120);
+assert.ok(
+  headerLines[0].includes("Superpowers:") && headerLines[0].includes("Superpowers widget changes"),
+  headerLines[0],
 );
-assert.equal(children[0].status, "in_progress");
-assert.equal(children[1].priority, 2);
-// a blocks-only relationship produces no child
-const NO_CHILD = JSON.stringify({
-  root: { id: "r" },
-  issues: [{ id: "r" }, { id: "b" }],
-  dependencies: [{ issue_id: "b", depends_on_id: "r", type: "blocks" }],
-});
-assert.deepEqual(parseMoleculeShow(NO_CHILD), []);
+assert.ok(headerLines[0].includes("Brainstorming"), headerLines[0]);
+assert.ok(headerLines[0].includes("4/12"), headerLines[0]);
+assert.ok(!headerLines[0].includes("superpowers-workflow"), "formula name not in header");
 
-// ---------- renderer: view B ----------
-const base = {
+// ---------- brainstorming: all 8 tasks incl. done, formula order, markers ----------
+assert.ok(headerLines.length <= 15);
+const labelAt = (label) => headerLines.findIndex((l) => l.includes(label));
+const order = [
+  "Explore project context",
+  "Ask clarifying questions",
+  "Propose approaches",
+  "Present design sections",
+  "User approves design",
+  "Write spec",
+  "Spec self-review",
+  "User reviews written spec",
+].map(labelAt);
+for (let i = 1; i < order.length; i++) {
+  assert.ok(order[i - 1] !== -1 && order[i] > order[i - 1], `${i} out of order: ${order}`);
+}
+assert.ok(headerLines[order[0]].includes("✓"), "done explore row: ✓");
+assert.ok(headerLines[order[1]].includes("◐"), "current clarify row: ◐");
+
+// ---------- gate as current => waiting line, checklist still shown ----------
+const gateCurrent = { ...bstate, current_step: { id: "g", title: "Gate: human", issue_type: "gate" } };
+const gLines = moleculeWidgetLines(gateCurrent, 120);
+assert.ok(gLines.some((l) => l.includes("Waiting on you:") && l.includes("Gate: human")));
+assert.ok(gLines.some((l) => l.includes("Ask clarifying questions")));
+
+// ---------- implementing: head row + plan gate first + task beads, current pinned ----------
+const implState = {
   molecule_id: "mol-9",
-  molecule_title: "Superpowers widget upgrade",
-  current_step: { id: "mol-9", title: "Implement the widget", status: "in_progress", priority: 2, issue_type: "task" },
+  molecule_title: "superpowers-workflow",
+  current_step: { id: "mol-9.i.2", title: "Task 2: build it", status: "in_progress", issue_type: "task" },
   next_step: null,
-  steps: [{ issue: { id: "mol-9" }, status: "current" }],
-  doneCount: 1,
-  total: 4,
-  children: [
-    { id: "mol-9.2", title: "Task 2 (done)", status: "closed", priority: 2, issue_type: "task" },
-    { id: "mol-9.1", title: "Task 1 (open)", status: "open", priority: 2, issue_type: "task" },
-    { id: "mol-9.3", title: "Task 3 (last)", status: "in_progress", priority: 2, issue_type: "task" },
+  doneCount: 10,
+  total: 13,
+  steps: [
+    {
+      id: "mol-9.i",
+      title: "Implement Superpowers widget changes",
+      status: "in_progress",
+      issue_type: "task",
+      created_at: "t0",
+      step_status: "current",
+      is_current: false,
+    },
+    {
+      id: "mol-9.i.1",
+      title: "Plan reviewed / ready to execute",
+      status: "open",
+      issue_type: "task",
+      created_at: "t1",
+      step_status: "ready",
+      is_current: false,
+    },
+    {
+      id: "mol-9.i.2",
+      title: "Task 2: build it",
+      status: "in_progress",
+      issue_type: "task",
+      created_at: "t3",
+      step_status: "current",
+      is_current: true,
+    },
+    {
+      id: "mol-9.i.3",
+      title: "Task 1: setup",
+      status: "closed",
+      issue_type: "task",
+      created_at: "t2",
+      step_status: "done",
+      is_current: false,
+    },
+    {
+      id: "mol-9.u.1",
+      title: "Finish development branch",
+      status: "open",
+      issue_type: "task",
+      created_at: "t9",
+      step_status: "pending",
+      is_current: false,
+    },
   ],
 };
+const iLines = moleculeWidgetLines(implState, 120);
+assert.ok(iLines[0].includes("Superpowers:") && iLines[0].includes("Implementing"), iLines[0]);
+const iHead = iLines.findIndex((l) => l.includes("Implement Superpowers widget changes"));
+const iGate = iLines.findIndex((l) => l.includes("Plan reviewed / ready to execute"));
+const iTask2 = iLines.findIndex((l) => l.includes("Task 2: build it"));
+const iTask1 = iLines.findIndex((l) => l.includes("Task 1: setup"));
+assert.ok(iHead !== -1 && iGate !== -1 && iTask2 !== -1 && iTask1 !== -1);
+assert.ok(iGate > iHead, "plan gate after implement head");
+assert.ok(iLines[iTask2].includes("◐"), "current task marker ◐");
+assert.ok(iLines[iTask1].includes("✓"), "closed task marker ✓");
+assert.ok(!iLines.some((l) => l.includes("Finish development branch")), "finishing steps hidden during implementing");
 
-// header
-const out = moleculeWidgetLines(base, 80);
-assert.ok(out[0].includes("Superpowers:") && out[0].includes("Superpowers widget upgrade"));
-assert.ok(out[0].includes("· 1/4"), "header shows done/total");
-// trunk
-assert.ok(out[1].includes("◐") && out[1].includes("mol-9") && out[1].includes("P2"));
-// children glyphs: first two ├── , last └── ; markers: ✓ for closed child, ○ for open
-assert.ok(out[2].includes("├──") && out[2].includes("✓") && out[2].includes("mol-9.2"));
-assert.ok(out[3].includes("├──") && out[3].includes("○") && out[3].includes("mol-9.1"));
-assert.ok(out[4].includes("└──") && out[4].includes("mol-9.3"));
-
-// no children => no glyph rows
-const noKids = { ...base, children: [] };
-const out2 = moleculeWidgetLines(noKids, 80);
-assert.equal(out2.length, 2); // header + trunk
-assert.ok(!out2.some((l) => l.includes("├──") || l.includes("└──")));
-
-// gate trunk => "Waiting on you", no subtree
-const gate = {
-  ...base,
-  current_step: { id: "g", title: "Gate: human", status: "open", priority: 2, issue_type: "gate" },
-  children: [],
+// ---------- finishing: verify/smoke/finish rows only ----------
+const finState = {
+  molecule_id: "mol-9",
+  molecule_title: "superpowers-workflow",
+  current_step: { id: "f1", title: "Verify", status: "in_progress", issue_type: "task" },
+  next_step: null,
+  doneCount: 11,
+  total: 13,
+  steps: [
+    {
+      id: "m1",
+      title: "Explore project context: Superpowers widget changes",
+      status: "closed",
+      issue_type: "task",
+      created_at: "",
+      step_status: "done",
+      is_current: false,
+    },
+    {
+      id: "m2",
+      title: "Implement Superpowers widget changes",
+      status: "closed",
+      issue_type: "task",
+      created_at: "",
+      step_status: "done",
+      is_current: false,
+    },
+    {
+      id: "f1",
+      title: "Verify",
+      status: "in_progress",
+      issue_type: "task",
+      created_at: "",
+      step_status: "current",
+      is_current: true,
+    },
+    {
+      id: "f2",
+      title: "Smoke test / manual QA sign-off",
+      status: "open",
+      issue_type: "task",
+      created_at: "",
+      step_status: "ready",
+      is_current: false,
+    },
+    {
+      id: "f3",
+      title: "Finish development branch",
+      status: "open",
+      issue_type: "task",
+      created_at: "",
+      step_status: "pending",
+      is_current: false,
+    },
+  ],
 };
-const out3 = moleculeWidgetLines(gate, 80);
-assert.ok(out3[1].includes("Waiting on you:") && out3[1].includes("Gate: human"));
-assert.equal(out3.length, 2);
+const fLines = moleculeWidgetLines(finState, 120);
+assert.ok(fLines[0].includes("Finishing"), fLines[0]);
+const vIdx = fLines.findIndex((l) => l.includes("Verify"));
+const sIdx = fLines.findIndex((l) => l.includes("Smoke test / manual QA sign-off"));
+const fIdx = fLines.findIndex((l) => l.includes("Finish development branch"));
+assert.ok(vIdx !== -1 && sIdx !== -1 && fIdx !== -1);
+assert.ok(vIdx < sIdx && sIdx < fIdx, "finish rows in formula order");
+assert.ok(fLines[vIdx].includes("◐"), "verify current");
+assert.ok(!fLines.some((l) => l.includes("Explore project context")), "brainstorming hidden during finishing");
 
-// gate with non-empty children still never renders a subtree (and never bypasses the cap)
-const gateKids = { ...gate, children: [{ id: "g1", title: "x", status: "open", priority: 2, issue_type: "task" }] };
-const out3k = moleculeWidgetLines(gateKids, 80);
-assert.equal(out3k.length, 2, `gate renders exactly [header, trunk], got ${out3k.length} lines`);
-assert.ok(!out3k.some((l) => l.includes("├──") || l.includes("└──")), "gate output has no glyph rows");
-assert.ok(!out3k.some((l) => l.includes("g1")), "gate output contains no child id");
-assert.ok(out3k[1].includes("Waiting on you:") && out3k[1].includes("Gate: human"));
-
-// next fallback when no current step
-const next = { ...base, current_step: null, next_step: { id: "n", title: "Gate: human" }, children: [] };
-const out4 = moleculeWidgetLines(next, 80);
-assert.ok(out4[1].includes("Next:") && out4[1].includes("Gate: human"));
-
-// 15-line cap with +N more tail (wide width so only the cap matters)
-const many = {
-  ...base,
-  children: Array.from({ length: 30 }, (_, i) => ({
-    id: `c${i}`,
-    title: `child ${i}`,
-    status: "open",
-    priority: 2,
-    issue_type: "task",
-  })),
+// ---------- fully complete: single finished line ----------
+const doneState = {
+  ...finState,
+  current_step: null,
+  steps: finState.steps.map((s) => ({ ...s, status: "closed", step_status: "done" })),
+  doneCount: 5,
+  total: 5,
 };
-const out5 = moleculeWidgetLines(many, 300);
-assert.equal(out5.length, 15, `capped at 15 lines, got ${out5.length}`);
-assert.ok(out5[out5.length - 1].includes(" more"), "overflow tail present");
+const doneLines = moleculeWidgetLines(doneState, 120);
+assert.equal(doneLines.length, 1);
+assert.ok(doneLines[0].includes("Superpowers widget changes") && doneLines[0].includes("finished"), doneLines[0]);
 
-// width truncation still enforced: each line's plain-text width <= given width
-for (const line of out5) assert.ok(displayWidth(line) <= 300);
+// ---------- cap + open-preference: closed dropped before open, <= 15 lines ----------
+const manyTasks = {
+  ...implState,
+  current_step: { id: "m.i.6", title: "Task 6: item 5", status: "in_progress", issue_type: "task" },
+  steps: [
+    {
+      id: "m",
+      title: "Implement Superpowers widget changes",
+      status: "in_progress",
+      issue_type: "task",
+      created_at: "t0",
+      step_status: "current",
+      is_current: false,
+    },
+    ...Array.from({ length: 20 }, (_, i) => ({
+      id: `m.i.${i + 1}`,
+      title: `Task ${i + 1}: item ${i}`,
+      status: i % 2 === 0 ? "open" : "closed",
+      issue_type: "task",
+      created_at: `t${i + 1}`,
+      step_status: i === 5 ? "current" : i % 2 === 0 ? "ready" : "done",
+      is_current: i === 5,
+    })),
+    {
+      id: "m.done",
+      title: "Finish development branch",
+      status: "open",
+      issue_type: "task",
+      created_at: "t99",
+      step_status: "pending",
+      is_current: false,
+    },
+  ],
+};
+const manyLines = moleculeWidgetLines(manyTasks, 300);
+assert.equal(manyLines.length, 15, `capped at 15 lines, got ${manyLines.length}`);
+assert.ok(
+  manyLines.some((l) => l.includes("Task 6: item 5")),
+  "pinned current task survives overflow",
+);
+const closedCount = manyLines.filter((l) => l.includes("✓")).length;
+const openCount = manyLines.filter((l) => l.includes("◐") || l.includes("○")).length;
+assert.ok(openCount > closedCount, `open preferred over closed: open=${openCount} closed=${closedCount}`);
+assert.ok(manyLines[manyLines.length - 1].includes(" more"), "overflow tail present");
+for (const line of manyLines) assert.ok(displayWidth(line) <= 300);
 
-// ✓ closed flip: same child open -> closed across two states
-const openChild = { ...base, children: [{ id: "c", title: "t", status: "open", priority: 2, issue_type: "task" }] };
-const closedChild = { ...base, children: [{ id: "c", title: "t", status: "closed", priority: 2, issue_type: "task" }] };
-const a = moleculeWidgetLines(openChild, 80)[2];
-const b = moleculeWidgetLines(closedChild, 80)[2];
-assert.ok(a.includes("○") && b.includes("✓"), `flip ○ -> ✓ (got '${a}' -> '${b}')`);
+// width truncation still enforced at narrow width
+for (const line of moleculeWidgetLines(implState, 30)) assert.ok(displayWidth(line) <= 30);
 
-// theme passthrough: a custom theme transforms the accent-painted header label;
-// a null/absent theme still renders the plain text.
+// ---------- theme passthrough ----------
 const THEME = { fg: (color, t) => (color === "accent" ? t.toUpperCase() : t) };
-const themed = moleculeWidgetLines(base, 80, THEME);
+const themed = moleculeWidgetLines(bstate, 120, THEME);
 assert.ok(themed[0].includes("SUPERPOWERS:"), `theme-colored header label (got '${themed[0]}')`);
-assert.ok(!themed[0].includes("Superpowers:"), "untransformed label gone when themed");
-const plain = moleculeWidgetLines(base, 80);
+const plain = moleculeWidgetLines(bstate, 120);
 assert.ok(plain[0].includes("Superpowers:"), "absent theme renders plain label");
-const plainNull = moleculeWidgetLines(base, 80, null);
-assert.ok(plainNull[0].includes("Superpowers:"), "null theme renders plain label");
 
 // ---------- createChangeCoalescer: leading-edge fire, single trailing timer ----------
 {
