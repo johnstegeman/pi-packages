@@ -5,6 +5,8 @@ import {
   moleculeWidgetLines,
   parseMoleculeCurrent,
   parseMoleculeShow,
+  phaseFor,
+  topicFor,
 } from "./beads-molecule-widget.mjs";
 
 // ---------- parser: malformed input never throws ----------
@@ -42,6 +44,35 @@ assert.equal(parsed.molecule_id, "bd-mol-g0z");
 assert.equal(parsed.doneCount, 1);
 assert.equal(parsed.total, 4);
 assert.equal(parsed.current_step.title, "Ask clarifying questions");
+
+// ---------- parser: keeps full step data (title/status/is_current/created_at) ----------
+const RAW2 = JSON.stringify([
+  {
+    molecule_id: "bd-mol-g0z",
+    molecule_title: "superpowers-workflow",
+    current_step: { id: "bd-mol-1vz", title: "Ask clarifying questions", status: "in_progress", issue_type: "task" },
+    next_step: { id: "bd-mol-8y2", title: "Gate: human", issue_type: "gate" },
+    steps: [
+      { issue: { id: "bd-mol-meq", title: "Explore project context: Superpowers widget changes", issue_type: "task", status: "closed" }, status: "done", is_current: false },
+      { issue: { id: "bd-mol-1vz", title: "Ask clarifying questions", issue_type: "task", status: "in_progress" }, status: "current", is_current: true },
+      { issue: { id: "bd-mol-8y2", title: "Gate: human", issue_type: "gate", status: "open" }, status: "ready", is_current: false },
+      { issue: { id: "bd-mol-9ev", title: "Implement", issue_type: "task", status: "open" }, status: "pending", is_current: false },
+    ],
+  },
+]);
+const p2 = parseMoleculeCurrent(RAW2);
+assert.equal(p2.steps[0].title, "Explore project context: Superpowers widget changes");
+assert.equal(p2.steps[1].step_status, "current");
+assert.equal(p2.steps[1].is_current, true);
+assert.equal(p2.steps[0].created_at, "");
+
+// ---------- topic + phase helpers ----------
+assert.equal(topicFor(p2), "Superpowers widget changes");
+assert.equal(topicFor({ ...p2, steps: p2.steps.filter((s) => !s.title.startsWith("Explore")) }), "superpowers-workflow");
+assert.equal(topicFor(null), "");
+assert.equal(phaseFor(p2), "brainstorming"); // implement pending
+assert.equal(phaseFor({ ...p2, steps: p2.steps.map((s) => (s.title === "Implement" ? { ...s, step_status: "current" } : s)) }), "implementing");
+assert.equal(phaseFor({ ...p2, steps: p2.steps.map((s) => (s.title === "Implement" ? { ...s, step_status: "done" } : s)) }), "finishing");
 
 // ---------- render: nothing to draw ----------
 assert.deepEqual(moleculeWidgetLines(null, 80), []);

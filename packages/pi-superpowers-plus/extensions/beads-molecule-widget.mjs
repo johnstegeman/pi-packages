@@ -77,16 +77,52 @@ export function parseMoleculeCurrent(json) {
   }
   const obj = Array.isArray(arr) ? arr[0] : arr;
   if (!obj || !obj.molecule_id || !Array.isArray(obj.steps)) return null;
-  const doneCount = obj.steps.filter((s) => s.status === "done").length;
+  const steps = obj.steps
+    .filter((s) => s && s.issue && s.issue.id != null)
+    .map((s) => ({
+      id: s.issue.id,
+      title: s.issue.title ?? "",
+      priority: s.issue.priority,
+      issue_type: s.issue.issue_type ?? "task",
+      status: s.issue.status ?? "open",
+      created_at: s.issue.created_at ?? "",
+      step_status: s.status ?? "pending",
+      is_current: !!s.is_current,
+    }));
+  const doneCount = steps.filter((s) => s.step_status === "done").length;
   return {
     molecule_id: obj.molecule_id,
     molecule_title: obj.molecule_title ?? "",
     current_step: obj.current_step ?? null,
     next_step: obj.next_step ?? null,
-    steps: obj.steps,
+    steps,
     doneCount,
     total: obj.steps.length,
   };
+}
+
+const EXPLORE_PREFIX = "Explore project context: ";
+
+// ---- topic + phase helpers (superpowers-workflow formula coupling) ----
+// The widget and the formula ship in the same package; these key off the
+// formula's step titles (spec 2026-09-03-superpowers-widget-phase-views-design.md).
+export function topicFor(state) {
+  if (!state || !Array.isArray(state.steps)) return "";
+  const explore = state.steps.find((s) => s.title && s.title.startsWith(EXPLORE_PREFIX));
+  if (explore) {
+    const t = explore.title.slice(EXPLORE_PREFIX.length).trim();
+    if (t) return t;
+  }
+  return state.molecule_title ?? "";
+}
+
+export function phaseFor(state) {
+  if (!state || !Array.isArray(state.steps)) return "brainstorming";
+  const impl = state.steps.find((s) => /^Implement( |$)/.test(s.title ?? ""));
+  if (!impl) return "brainstorming";
+  if (impl.step_status === "done") return "finishing";
+  if (impl.step_status === "ready" || impl.step_status === "current") return "implementing";
+  return "brainstorming";
 }
 
 /**
