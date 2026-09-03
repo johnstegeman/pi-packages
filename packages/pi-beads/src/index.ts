@@ -59,6 +59,7 @@ const TOOL = {
   molPour: "beads_mol_pour",
   molShow: "beads_mol_show",
   molCurrent: "beads_mol_current",
+  molReady: "beads_mol_ready",
 };
 
 // Type allowlists, enforced before the value reaches bd (a typo must not
@@ -273,6 +274,24 @@ export default function piBeadsLean(pi: any) {
         return `${i.id} P${i.priority} [${i.status}] ${trunc(i.title ?? "")}${dep}${labels}`;
       })
       .join("\n");
+  }
+
+  function fmtMolReady(obj: any): string {
+    const mo = Array.isArray(obj) ? obj[0] : obj;
+    if (!mo || typeof mo !== "object") return "(not found)";
+    const total = mo.total_steps ?? mo.steps?.length ?? 0;
+    const ready = mo.ready_steps ?? 0;
+    const header = `molecule: ${mo.molecule_id ?? "?"} — ${trunc(mo.molecule_title ?? "")} · ${ready}/${total} ready`;
+    const rows = (Array.isArray(mo.steps) ? mo.steps : [])
+      .map((st: any) => {
+        const i = st?.issue ?? st;
+        if (!i?.id) return "";
+        const dep = i.dependency_count ? ` dep:${i.dependency_count}` : "";
+        return `${i.id} P${i.priority} [${i.status}] ${trunc(i.title ?? "")}${dep}`;
+      })
+      .filter(Boolean);
+    if (ready > 0) return [header, ...rows].join("\n");
+    return `${header}\nno ready steps (all blocked or completed)`;
   }
 
   function fmtShow(
@@ -973,6 +992,31 @@ export default function piBeadsLean(pi: any) {
       const r = await bd(["mol", "current", String(params.id), "--json"], umbrella);
       if (!r.ok) return textResult(`bd mol current failed: ${r.err}`);
       return textResult(r.out.trim());
+    },
+  });
+
+  pi.registerTool({
+    name: TOOL.molReady,
+    label: "Beads molecule ready",
+    description:
+      "Show the ready frontier of one molecule's steps (bd ready --mol <id>): which steps/tasks are unblocked right now. Accepts a molecule id or a step id (e.g. the implement step with task children). Read-only; aggregate-aware; id prefix shows the owning project.",
+    parameters: {
+      type: "object",
+      properties: {
+        id: { type: "string", description: "Molecule or step id, e.g. the implement step id" },
+        limit: { type: "number", description: "Max steps shown (optional)" },
+      },
+      required: ["id"],
+    },
+    async execute(_id: string, params: any) {
+      if (!params?.id) return textResult("id is required");
+      await ensureFresh();
+      const args = ["ready", "--mol", String(params.id), "--json"];
+      if (params?.limit) args.push("-n", String(params.limit));
+      const r = await bd(args, umbrella);
+      if (!r.ok) return textResult(`bd ready --mol failed: ${r.err}`);
+      const o = jparse(r.out);
+      return textResult(o ? fmtMolReady(o) : r.out.trim());
     },
   });
 

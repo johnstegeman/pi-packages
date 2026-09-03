@@ -1,6 +1,6 @@
 {
   "name": "@abix5/pi-beads",
-  "version": "0.2.2",
+  "version": "0.3.0",
   "type": "module",
   "description": "Context-lean beads (bd) task tracking for pi: compact beads_* tools, once-per-segment lean prime, umbrella multi-repo reads with prefix-routed writes, and a bundled beads skill.",
   "license": "MIT",
