@@ -24,8 +24,12 @@ if [ $# -ne 1 ]; then
 fi
 
 slug=$1
-[ -n "$slug" ] && [ "$slug" != "." ] && [ "$slug" != ".." ] \
-  || { echo "invalid slug: $slug" >&2; exit 2; }
+case "$slug" in
+    "" | "." | ".." | */* | *\\* | _*)
+      echo "invalid slug: $slug" >&2
+      exit 2
+      ;;
+  esac
 
 root=$(git rev-parse --show-toplevel)
 base="$root/.superpowers/sdd"
