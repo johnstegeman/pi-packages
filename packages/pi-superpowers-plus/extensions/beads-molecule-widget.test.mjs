@@ -313,6 +313,14 @@ assert.ok(iGate > iHead, "plan gate after implement head");
 assert.ok(iLines[iTask2].includes("◐"), "current task marker ◐");
 assert.ok(iLines[iTask1].includes("✓"), "closed task marker ✓");
 assert.ok(!iLines.some((l) => l.includes("Finish development branch")), "finishing steps hidden during implementing");
+// ---------- implementing = tree: impl head, then ├──/└── task rows ----------
+const iC1 = iLines.findIndex((l) => l.includes("├──"));
+const iC2 = iLines.findIndex((l) => l.includes("└──"));
+assert.ok(iHead < iC1 && iC1 < iC2, `tree rows after impl head: ${iLines.join(" | ")}`);
+assert.ok(iLines[iC1].includes("├──"), "first child connector ├──");
+assert.ok(iLines[iC2].includes("└──"), "last child connector └──");
+assert.ok(iLines[iTask2].includes("◐"), "current child keeps ◐ marker");
+assert.ok(iLines[iTask1].includes("✓"), "closed child keeps ✓ marker");
 
 // ---------- finishing: verify/smoke/finish rows only ----------
 const finState = {

@@ -302,7 +302,21 @@ export function moleculeWidgetLines(state, width, theme) {
                 ? 1
                 : 0,
       );
-    for (const kid of kids) rows.push(stepRow(kid));
+    kids.forEach((kid, i) => {
+      const last = i === kids.length - 1;
+      rows.push({
+        text: assemble(
+          [
+            { text: last ? "\u2514\u2500\u2500 " : "\u251c\u2500\u2500 ", paint: (t) => fg("muted", t) },
+            { text: `${markerFor(kid.status)} `, paint: (t) => fg(kid.status === "closed" ? "text" : "warning", t) },
+            { text: kid.title ?? "", paint: (t) => fg(kid.status === "closed" ? "muted" : "text", t) },
+          ],
+          width,
+        ).text,
+        closed: kid.status === "closed",
+        pinned: !!kid.is_current,
+      });
+    });
   } else if (phase === "finishing") {
     for (const s of resolveRows(state.steps, FINISH_VIEW)) rows.push(stepRow(s.step, s.label));
   }
