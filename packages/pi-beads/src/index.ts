@@ -850,6 +850,29 @@ export default function piBeadsLean(pi: any) {
     },
   });
 
+  /**
+   * After closing childId, decide whether its parent step should close too.
+   * Returns the parent's id to close, or null. Rules: parent must be a task step
+   * (never molecule root, never a gate); it closes only when no open task-child
+   * remains (the just-closed child excluded). Walks one level per call.
+   */
+  async function parentStepToClose(childId: string, repoDir: string): Promise<string | null> {
+    const r = await bd(["dep", "list", childId, "--direction", "down", "--json"], repoDir);
+    const blockers = Array.isArray(jparse(r.out)) ? (jparse(r.out) as any[]) : [];
+    const parent = blockers.find(
+      (b: any) =>
+        b && b.dependency_type === "parent-child" && b.issue_type === "task" && b.status !== "closed",
+    );
+    if (!parent) return null;
+    const k = await bd(["dep", "list", String(parent.id), "--direction", "up", "--json"], repoDir);
+    const children = Array.isArray(jparse(k.out)) ? (jparse(k.out) as any[]) : [];
+    const openTaskChildren = children.filter(
+      (c: any) =>
+        c && c.dependency_type === "parent-child" && c.issue_type === "task" && c.status !== "closed" && c.id !== childId,
+    );
+    return openTaskChildren.length === 0 ? String(parent.id) : null;
+  }
+
   pi.registerTool({
     name: TOOL.close,
     label: "Beads close",
@@ -893,6 +916,18 @@ export default function piBeadsLean(pi: any) {
         }
         await afterWrite(dir);
         closedIds.push(...rids);
+        // cascade: closing a task may close its parent step once no open task-children remain
+        for (const cid of rids) {
+          let nxt = await parentStepToClose(cid, dir);
+          while (nxt) {
+            const rc = await bd(["close", nxt], dir);
+            if (!rc.ok) break; // defensively stop: another worker may have closed it
+            await afterWrite(dir);
+            closedIds.push(nxt);
+            const prev = nxt;
+            nxt = await parentStepToClose(prev, dir);
+          }
+        }
       }
       if (failure) return textResult(failure);
       return textResult(`closed ${closedIds.join(", ")}`);

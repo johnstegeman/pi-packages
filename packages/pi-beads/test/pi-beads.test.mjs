@@ -153,6 +153,35 @@ case "$1" in
       printf '%s\n' '[{"id":"proj-apr","title":"User approves design","issue_type":"task","status":"open","dependency_type":"blocks"}]'
       exit 0
     fi
+    # cascade fixtures (Task 2): proj-imp has children proj-t1, proj-t2
+    if [ "$3" = "proj-t1" ] && [ "$5" = "down" ]; then
+      printf '%s\n' '[{"id":"proj-imp","title":"Implement","issue_type":"task","status":"open","dependency_type":"parent-child"}]'
+      exit 0
+    fi
+    if [ "$3" = "proj-t2" ] && [ "$5" = "down" ]; then
+      printf '%s\n' '[{"id":"proj-imp","title":"Implement","issue_type":"task","status":"open","dependency_type":"parent-child"}]'
+      exit 0
+    fi
+    if [ "$3" = "proj-imp" ] && [ "$5" = "up" ]; then
+      printf '%s\n' '[{"id":"proj-t1","title":"Task 1","issue_type":"task","status":"open","dependency_type":"parent-child"},{"id":"proj-t2","title":"Task 2","issue_type":"task","status":"open","dependency_type":"parent-child"}]'
+      exit 0
+    fi
+    if [ "$3" = "proj-imp" ] && [ "$5" = "down" ]; then
+      printf '%s\n' '[{"id":"proj-m1","title":"m1","issue_type":"molecule","status":"open","dependency_type":"parent-child"}]'
+      exit 0
+    fi
+    if [ "$3" = "proj-t9" ] && [ "$5" = "down" ]; then
+      printf '%s\n' '[{"id":"proj-imp2","title":"Implement 2","issue_type":"task","status":"open","dependency_type":"parent-child"}]'
+      exit 0
+    fi
+    if [ "$3" = "proj-imp2" ] && [ "$5" = "up" ]; then
+      printf '%s\n' '[{"id":"proj-t9","title":"Task 9","issue_type":"task","status":"open","dependency_type":"parent-child"}]'
+      exit 0
+    fi
+    if [ "$3" = "proj-imp2" ] && [ "$5" = "down" ]; then
+      printf '%s\n' '[{"id":"proj-m1","title":"m1","issue_type":"molecule","status":"open","dependency_type":"parent-child"}]'
+      exit 0
+    fi
     if [ "$3" = "proj-g2" ] && [ "$5" = "up" ]; then
       printf '%s\n' '[{"id":"proj-sap","title":"User reviews written spec","issue_type":"task","status":"open","dependency_type":"blocks"}]'
       exit 0
@@ -390,6 +419,33 @@ test("single-repo: beads_gate_resolve resolves gate then closes its gated step (
   // bd 1.2.2 gate resolve already closes the gate -> no separate close on the gate id
   assert.ok(!invs.some((iv) => iv[0] === "close" && iv[1] === "proj-g2"), "no redundant close of the gate");
   assert.equal(s.emitted.length, 2, "emits after gate resolve AND after closing the gated step");
+});
+
+test("single-repo: beads_close does NOT cascade while a sibling task is open", async () => {
+  const s = await openSession("single", repoDir);
+  resetLog();
+  const r = await s.byName.get("beads_close").execute("c", { ids: "proj-t1", reason: "done" });
+  assert.ok(okResult(r), JSON.stringify(r));
+  const invs = invocations();
+  findInvocation(["close", "proj-t1", "-r", "done"]);
+  assert.ok(!invs.some((iv) => iv[0] === "close" && iv[1] === "proj-imp"), "no cascade while sibling open");
+});
+
+test("single-repo: beads_close cascades to close the parent step when its last child closes", async () => {
+  const s = await openSession("single", repoDir);
+  resetLog();
+  // proj-t9 is the only child of proj-imp2 -> closing it closes proj-imp2, but NOT the root
+  const r = await s.byName.get("beads_close").execute("c", { ids: "proj-t9", reason: "done" });
+  assert.ok(okResult(r), JSON.stringify(r));
+  const invs = invocations();
+  findInvocation(["close", "proj-t9", "-r", "done"]);
+  findInvocation(["close", "proj-imp2"]);
+  assert.ok(!invs.some((iv) => iv[0] === "close" && iv[1] === "proj-m1"), "never closes the molecule root");
+  assert.ok(
+    invs.findIndex((iv) => iv[0] === "close" && iv[1] === "proj-imp2") >
+      invs.findIndex((iv) => iv[0] === "close" && iv[1] === "proj-t9"),
+    "parent closed after child",
+  );
 });
 
 test("single-repo: beads_mol_pour builds argv (--var split) and emits", async () => {
