@@ -349,9 +349,9 @@ export default function piBeadsLean(pi: any) {
       if (hits.length !== 1) return null; // missing or ambiguous -> hard fail
       result.set(key, hits[0].id);
     }
-    let gates = 0;
-    for (const i of issues) {
-      if (i.issue_type !== "gate") continue;
+    const gateIssues = issues.filter((i: any) => i.issue_type === "gate");
+    if (gateIssues.length === 0) return null;
+    for (const i of gateIssues) {
       const blocked = deps
         .filter((e: any) => e.type === "blocks" && e.depends_on_id === i.id)
         .map((e: any) => byId.get(e.issue_id))
@@ -362,9 +362,8 @@ export default function piBeadsLean(pi: any) {
       const gateKey = stepKey ? stepToGate.get(stepKey) : undefined;
       if (!gateKey) return null;
       result.set(gateKey, i.id);
-      gates++;
     }
-    if (gates === 0) return null;
+    if (result.size !== steps.length + gateIssues.length) return null;
     return result;
   }
 
@@ -563,7 +562,7 @@ export default function piBeadsLean(pi: any) {
         mol: {
           type: "string",
           description:
-            "Optional molecule root id — scope results to that molecule's steps/gates (bd list --parent + --include-gates)",
+            "Optional molecule root id — scope results to that molecule's steps/gates, including closed (bd list --all --parent + --include-gates)",
         },
       },
     },
@@ -1035,19 +1034,22 @@ export default function piBeadsLean(pi: any) {
       if (!r.ok) return textResult(`bd mol pour failed: ${r.err}`);
       await afterWrite(repoDir);
       const rootMatch = r.out.match(/Root issue:\s*(\S+)/);
-      if (rootMatch) {
-        const root = rootMatch[1];
-        const map = await molKeyToId(String(params.proto), varPairs, root, repoDir);
-        if (!map)
-          return textResult(
-            `bd mol pour created ${String(params.proto)} but could not stamp step labels (dry-run/map incomplete) — root ${root} is UNLABELED; do not use`,
-          );
-        for (const [key, id] of map) {
-          const u = await bd(["update", id, "--add-label", `step:${key}`], repoDir);
-          if (!u.ok)
-            return textResult(`bd mol pour failed: step:${key} on ${id}: ${u.err}`);
-        }
+      if (!rootMatch)
+        return textResult(
+          `bd mol pour created ${String(params.proto)} but could not determine the molecule root — pour is UNLABELED; do not use`,
+        );
+      const root = rootMatch[1];
+      const map = await molKeyToId(String(params.proto), varPairs, root, repoDir);
+      if (!map)
+        return textResult(
+          `bd mol pour created ${String(params.proto)} but could not stamp step labels (dry-run/map incomplete) — root ${root} is UNLABELED; do not use`,
+        );
+      for (const [key, id] of map) {
+        const u = await bd(["update", id, "--add-label", `step:${key}`], repoDir);
+        if (!u.ok)
+          return textResult(`bd mol pour failed: step:${key} on ${id}: ${u.err}`);
       }
+      await afterWrite(repoDir);
       return textResult(r.out.trim() || "poured");
     },
   });

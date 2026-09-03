@@ -68,13 +68,14 @@ so the mechanism is generic (tested against `superpowers-workflow`).
 ## Part 2 — Molecule-scoped lookup via native flags (`beads_list` / `beads_ready`)
 
 - **`beads_list`** gains optional **`mol`** (a root id): maps to
-  `bd list --parent <root> --include-gates` (+ any `--label`/`--labelAny`/status).
+  `bd list --all --parent <root> --include-gates` (+ any `--label`/`--labelAny`/status).
   `--parent` is a native server-side filter returning the molecule's immediate
   children (steps **and** gates — gates are hidden by default, hence
-  `--include-gates`). No client-side `mol show` + filter loop.
-- **`beads_ready`** gains optional **`mol`**: maps to native `bd ready --mol <root>`
-  (accepts a molecule root **or** a step id — e.g. an implement step → ready task
-  frontier). `beads_mol_ready` remains the compact digest, unchanged.
+  `--include-gates`); `--all` includes closed steps/gates. No client-side
+  `mol show` + filter loop.
+- **`beads_ready` `mol` param: adjudicated out** — `bd ready --mol <root>`
+  returns a digest (aggregate counts), not rows, so a label filter has nothing
+  to key on; `beads_mol_ready` remains the compact digest, unchanged.
 - **Concurrency:** two molecules in the same repo may both carry `step:<key>`;
   the `mol` param pins the lookup to one molecule's children.
 - Impl nit: `bd list --parent <root>` alone returns `{"issues":[...],"meta":…}`
@@ -92,7 +93,6 @@ titles" to a one-hop label lookup:
 
 ```
 beads_list({ label: "step:<key>", mol: "<root-id>" })   # → runtime id
-beads_ready({ label: "step:<key>", mol: "<root-id>" })  # → ready keyed steps of the molecule
 ```
 
 **Files** (all `packages/pi-superpowers-plus`):
@@ -142,6 +142,6 @@ From `packages/pi-beads` (TDD via the existing fixture-`bd` harness):
 - Tests: 15 labels land (one per key, none on root); `--var` fidelity between real
   and dry-run pours; hard-fail for missing step and for ambiguous title; two-molecule
   same-repo isolation via `mol`-scoped `beads_list`; `mol` param plumbing for
-  `beads_ready`.
+  `beads_list` (only `beads_list` gained the param — `beads_ready` did not).
 - Skills grep: no remaining `beads_mol_current`-based step-id *addressing* (the
   `next_step`/gate-find prose moves to `beads_list({label, mol})`).
