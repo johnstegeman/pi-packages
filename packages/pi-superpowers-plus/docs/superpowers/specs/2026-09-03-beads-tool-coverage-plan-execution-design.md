@@ -60,16 +60,16 @@ Routing: run against the **umbrella aggregate** (`umbrella`), identical to every
 
 ### 3.3 Formatter — `fmtMolReady`
 
-`bd ready --mol <id> --json` returns an object:
+`bd ready --mol <id> --json` returns an object where `steps[]` already contains **only the ready steps** (each with `parallel_info.is_ready: true` and `issue.status: "open"`); `total_steps` is the full step count:
 ```
-{ molecule_id, molecule_title, ready_steps, total_steps, steps: [ { status, issue: { id, priority, status, title, issue_type, ... } }, ... ] }
+{ molecule_id, molecule_title, ready_steps, total_steps, steps: [ { parallel_info: { is_ready: true, step_id, ... }, issue: { id, priority, status, title, issue_type, ... } }, ... ] }
 ```
 
-Output shape (compact, `fmtRows` style):
+Output shape (compact, `fmtRows` style — map directly over the already-filtered `steps[]`):
 
 ```
 molecule: <molecule_id> — <molecule_title> · <ready_steps>/<total_steps> ready
-<ID> P<n> [status] <title>            # one line per step whose status === "ready"
+<ID> P<n> [status] <title>            # one line per step in steps[] ({issue.id} {issue.status} {issue.title})
 ```
 
 Empty case (must be unambiguous — `executing-plans` Step 5 depends on it):
