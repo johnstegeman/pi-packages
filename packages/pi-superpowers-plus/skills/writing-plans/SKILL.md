@@ -23,7 +23,7 @@ beads are created under.
 
 **Context:** If working in an isolated worktree, it should have been created via the `/skill:using-git-worktrees` skill at execution time.
 
-**Plan output:** dynamic task beads under the molecule's `implement` step (see "Creating Tasks as Beads" below) — no markdown plan file is written.
+**Plan output:** dynamic task beads under the molecule's `implement` step (see "Creating Tasks as Beads" below) — the plan output is the task beads, not a separate document.
 
 ## Boundaries
 - Read code and docs: yes
@@ -169,14 +169,20 @@ bd dep add $TASK2_ID $TASK1_ID   # only if the plan actually orders Task 2 after
 
 Each task bead's `-d`/`--description` is the task's **entire** body from the plan
 document — every step, every code block, exactly as written. This bead is what
-`executing-plans`/`subagent-driven-development` read during execution; the plan.md
-document itself is no longer read at execution time (see Task 4/5).
+`executing-plans`/`subagent-driven-development` read during execution —
+`bd show <task-id>`. It is the requirements at execution time; there is no plan.md.
 
 **Recording the plan-approval verdict** (same revise/recheck pattern as brainstorming's
 `design-approved`/`spec-approved` gates, Task 2 Step 3): when presenting the plan for
 review, don't just wait silently on the gate.
 - Approved: `bd update $GATE_ID --set-metadata review.verdict=done`, then
   `bd gate resolve <the-gate-id-bd-gate-create-returned>`.
+  Then close the plan-approval gate bead explicitly:
+  `bd close $GATE_ID --reason "plan approved"` — resolving the human gate unblocks
+  dependents but does NOT close the gate task bead itself; without this close, every
+  dependent task bead's `bd close` later fails with "blocked by open issues [..]".
+  Step closes are order-enforced: a blocked `bd close` means a prerequisite step/gate
+  is still open — close/resolve it first; the error is the signal, not a mistake.
 - Changes requested: `bd update $GATE_ID --set-metadata review.verdict=iterate`, write
   a specific revision summary (`bd comment $GATE_ID "<what needs to change>"`), revise
   the affected task beads' descriptions in place (`bd update <task-id> --description
@@ -190,7 +196,7 @@ review, don't just wait silently on the gate.
 Each task MUST end with an unfenced `---` (three or more hyphens) on its own
 line, immediately followed (after optional blank lines) by the next task's
 `### Task N` heading or a non-task trailing section. An extractor named by
-one task number (e.g. a task-brief script) needs a definite end-of-task
+one task number (e.g. a task-bead extractor) needs a definite end-of-task
 delimiter, so the rule is absolute:
 
 - Between consecutive tasks: `---`, blank line, `### Task N+1`.
@@ -240,6 +246,10 @@ step's own claim is left open on purpose — it stays `in_progress`, representin
 whole implementation phase, until every task bead under it closes (see `executing-plans`
 Step 3, "Rewrite Complete Development"). Nothing further to close here; the plan is now
 the bead graph itself.
+
+Hand execution the **implement step id** — `subagent-driven-development` /
+`executing-plans` read task beads directly (`bd show <task-id>`); no plan file is
+written or required.
 
 If planning stops early for any reason (blocked, redirected, session stopped), leave
 `implement` and any partially-created task beads as-is — the next session resumes by
