@@ -1,5 +1,10 @@
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
-import { moleculeWidgetLines, parseMoleculeCurrent, parseMoleculeShow } from "./beads-molecule-widget.mjs";
+import {
+  createChangeCoalescer,
+  moleculeWidgetLines,
+  parseMoleculeCurrent,
+  parseMoleculeShow,
+} from "./beads-molecule-widget.mjs";
 
 /** A child bead of the current step, as produced by `parseMoleculeShow`. */
 type ChildBead = {
@@ -20,13 +25,19 @@ export default function (pi: ExtensionAPI) {
   let uiRef: any = null;
   let activeMolecule: MoleculeState | null = null;
 
-  // ---- live-poll state: one interval for the extension's lifetime ----
-  let pollTimer: ReturnType<typeof setInterval> | null = null;
-  let timersStarted = false; // guards against double-registering the interval
+  // ---- event-driven refresh: fires on every beads:changed, coalesced ----
+  let coalescer: ReturnType<typeof createChangeCoalescer> | null = null;
+  let lastCwd = process.cwd();
 
-  // The poll head: `bd mol current --json` plus `bd mol show <step> --json` run
-  // every tick (two small subprocesses per 5s — the accepted cost), so a fresh pour
-  // appears ≤5s and a closed child bead flips to ✓ even while the step stays current.
+  function doRefresh() {
+    const cwd = lastCwd;
+    void refreshMolecule(cwd)
+      .then(() => refreshChildren(cwd))
+      .then(
+        () => renderMolecule(),
+        () => {},
+      );
+  }
   async function refreshMolecule(cwd: string): Promise<void> {
     const r = await pi.exec("bd", ["mol", "current", "--json"], {
       cwd,
@@ -45,11 +56,7 @@ export default function (pi: ExtensionAPI) {
       // when the current step is unchanged (children are cached alongside
       // activeMolecule), so a steady tick never blanks it and a failed `mol show`
       // can't erase the last known children.
-      if (
-        activeMolecule &&
-        activeMolecule.children &&
-        parsed.current_step?.id === activeMolecule.current_step?.id
-      ) {
+      if (activeMolecule && activeMolecule.children && parsed.current_step?.id === activeMolecule.current_step?.id) {
         parsed.children = activeMolecule.children;
       }
       activeMolecule = parsed;
@@ -90,7 +97,11 @@ export default function (pi: ExtensionAPI) {
             if (!activeMolecule) return;
             const cwd = process.cwd();
             void refreshMolecule(cwd).then(
-              () => refreshChildren(cwd).then(() => renderMolecule(), () => {}),
+              () =>
+                refreshChildren(cwd).then(
+                  () => renderMolecule(),
+                  () => {},
+                ),
               () => {},
             );
           },
@@ -102,28 +113,20 @@ export default function (pi: ExtensionAPI) {
     }
   }
 
-  // Single guarded interval for the extension's lifetime; `timersStarted` prevents
-  // double-registration if session_start fires again. Every tick bails out when
-  // the TUI is gone, and the promise chain swallows rejections so the timer never
-  // throws. refreshChildren is chained before renderMolecule so fresh child ✓ flips
-  // render within the same tick even while the current step is unchanged.
-  function startPolling(cwd: string) {
-    if (timersStarted || pollTimer) return;
-    timersStarted = true;
-    pollTimer = setInterval(() => {
-      if (!uiRef?.setWidget) return; // dormant outside interactive TUI
-      void refreshMolecule(cwd)
-        .then(() => refreshChildren(cwd))
-        .then(() => renderMolecule(), () => {});
-    }, 5000);
-  }
-
   pi.on("session_start", async (_event: any, ctx: any) => {
     uiRef = ctx?.ui ?? null;
     const cwd = ctx?.cwd ?? process.cwd();
-    startPolling(cwd);
+    lastCwd = cwd;
+    if (!coalescer) {
+      coalescer = createChangeCoalescer(doRefresh, 10000);
+      pi.events.on("beads:changed", () => coalescer!.trigger());
+    }
     void refreshMolecule(cwd).then(
-      () => refreshChildren(cwd).then(() => renderMolecule(), () => {}),
+      () =>
+        refreshChildren(cwd).then(
+          () => renderMolecule(),
+          () => {},
+        ),
       () => {
         /* bd missing/broken -> widget just stays empty */
       },
@@ -133,8 +136,12 @@ export default function (pi: ExtensionAPI) {
   // a fresh turn always re-syncs both the current step and its children
   pi.on("agent_start", async (_event: any, ctx: any) => {
     const cwd = ctx?.cwd ?? process.cwd();
+    lastCwd = cwd;
     void refreshMolecule(cwd)
       .then(() => refreshChildren(cwd))
-      .then(() => renderMolecule(), () => {});
+      .then(
+        () => renderMolecule(),
+        () => {},
+      );
   });
 }
