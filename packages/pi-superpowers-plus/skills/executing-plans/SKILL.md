@@ -25,7 +25,8 @@ Call `set_phase({ phase: "development" })`.
 ## The Process
 
 ### Step 1: Load and Review Plan
-1. Load the molecule: `beads_mol_current({ id: "<implement-step-id>" })` — this returns every
+1. Resolve the implement step id via `beads_list({ label: "step:implement", mol: "<root-id>" })`,
+   then load the molecule: `beads_mol_current({ id: "<implement-step-id>" })` — this returns every
    task bead's status and the current/next step.
 2. Review critically — read each task bead's full description
    (`beads_show({ id: "<task-id>" })`) and identify any questions or concerns about the plan.

@@ -131,6 +131,11 @@ Conversation memory does not survive compaction. In real sessions,
 controllers that lost their place have re-dispatched entire completed task
 sequences — the single most expensive failure observed. Track progress in
 a ledger file, not only in todos.
+Resolve the implement step id once, at the top of Setup, via
+`beads_list({ label: "step:implement", mol: "<root-id>" })` — the `<root-id>` is the molecule
+root returned by `beads_mol_pour` at the top of the flow. Every use below runs against that
+resolved id: `scripts/sdd-workspace <implement-step-id>` (below), `beads_mol_current({ id: "<implement-step-id>" })`,
+and `beads_mol_show({ id: "<implement-step-id>" })` for reading the task beads under it.
 
 - Each plan owns a workspace: at skill start, run this skill's
   `scripts/sdd-workspace <implement-step-id>` — it prints the plan's git-ignored
