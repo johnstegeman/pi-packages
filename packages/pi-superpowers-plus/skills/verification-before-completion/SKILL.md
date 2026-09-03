@@ -19,7 +19,7 @@ disable-model-invocation: true
 - Read code and output: yes
 - Edit source code: no
 
-When verification begins, claim the molecule's `verify` step: `bd update <verify-step-id> --claim`.
+When verification begins, claim the molecule's `verify` step: `beads_update({ id: "<verify-step-id>", claim: true })`.
 
 ## The Iron Law
 
@@ -132,9 +132,9 @@ Skip any step = lying, not verifying
 
 Before running `git commit`, `git push`, or `gh pr create`, check for yourself: has a passing test suite run since your last source file edit? If not, run it first — don't rely on tooling to catch this for you.
 
-When all verification passes, close the `verify` step (`bd close <verify-step-id> --reason "verification passed"`), which unblocks `smoke-test-approved`. That gate needs a human to actually run/confirm the smoke test before resolving it (`bd gate resolve <smoke-test-approved-gate-id>`) — announce this to the user rather than resolving it yourself. Once resolved, claim and work `finish` (`bd update <finish-step-id> --claim`), handing off to `/skill:finishing-a-development-branch` as today.
+When all verification passes, close the `verify` step (`beads_close({ ids: "<verify-step-id>", reason: "verification passed" })`), which unblocks `smoke-test-approved`. That gate needs a human to actually run/confirm the smoke test before resolving it (`beads_gate_resolve({ id: "<smoke-test-approved-gate-id>" })`) — announce this to the user rather than resolving it yourself. Once resolved, claim and work `finish` (`beads_update({ id: "<finish-step-id>", claim: true })`), handing off to `/skill:finishing-a-development-branch` as today.
 
 If verification does not complete for any reason (blocked, redirected, stopped early),
 do not close the `verify` step — leave it `in_progress` for the next session to resume,
-or mark it `blocked` (`bd update <verify-step-id> --status blocked` with a `bd comment`
-explaining why) if you're certain it can't proceed as-is.
+or mark it `blocked` (`beads_update({ id: "<verify-step-id>", status: "blocked" })` with a `beads_comment({ id: "<verify-step-id>", text: "<why>" })`
+) if you're certain it can't proceed as-is.
