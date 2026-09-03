@@ -152,10 +152,12 @@ a ledger file, not only in todos.
 - `git clean -fdx` will destroy the workspace (it's git-ignored scratch); if
   that happens, recover from `git log`.
 
-Read the molecule once (`beads_mol_current({ id: "<implement-step-id>" })`), note its context
-and Global Constraints from each task bead's description, and confirm the
-`plan-approved` gate is closed (`beads_show({ id: "<plan-approved-gate-id>" })`) before dispatching any
-subagent. Task ids and their `needs` ordering already exist as real dependency edges —
+Read the molecule once (`beads_mol_current({ id: "<implement-step-id>" })`), note its context, and
+confirm the `plan-approved` gate is closed (`beads_show({ id: "<plan-approved-gate-id>" })`) before
+dispatching any subagent — the plan's canonical Global Constraints live in that gate bead's
+description (`beads_show({ id: "<plan-approved-gate-id>", full: true })`) and are the single source handed
+to reviewers (task beads still inline the constraints for implementers). Task ids and their
+`needs` ordering already exist as real dependency edges —
 no `TaskCreate`-equivalent step is needed here; `writing-plans` already created them
 (see its Task Structure section).
 
@@ -250,13 +252,13 @@ needed.
 - **Reviewer inputs:** the task reviewer gets three paths — the same task
   bead id, the report file, and the review package — plus the global
   constraints that bind the task.
-- The global-constraints block you hand the reviewer is its attention
-  lens. Copy the binding requirements verbatim from the plan's Global
-  Constraints section or the spec: exact values, exact formats, and the
-  stated relationships between components ("same layout as X", "matches
-  Y"). The reviewer's template already carries the process rules (YAGNI,
-  test hygiene, review method) — the constraints block is for what THIS
-  project's spec demands.
+- The Global Constraints block is the reviewer's attention lens. Read it
+  once from the plan-approval gate bead's description
+  (`beads_show({ id: "<plan-approved-gate-id>", full: true })`, populated by `writing-plans`) and pass that
+  gate id to the reviewer dispatch — the reviewer template carries the read instruction itself,
+  so the constraints are byte-identical across every task review. The reviewer's template
+  already carries the process rules (YAGNI, test hygiene, review method) — the constraints are
+  for what THIS project's spec demands.
 - Do not add open-ended directives like "check all uses" or "run race tests
   if useful" without a concrete, task-specific reason
 - Do not ask a reviewer to re-run tests the implementer already ran on the

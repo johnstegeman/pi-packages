@@ -154,7 +154,12 @@ lifecycle-duplicate check (Self-Review item 4), mirror it into real beads under 
 ```
 # One gate, every real task depends on it — nothing executes until the human approves
 # the plan shape.
-GATE_ID = beads_create({ title: "Plan reviewed / ready to execute", parent: "<implement-step-id>", type: "task" })
+GATE_ID = beads_create({
+  title: "Plan reviewed / ready to execute",
+  parent: "<implement-step-id>",
+  type: "task",
+  description: "## Global Constraints\n<constraints block verbatim from the plan header>",
+})
 beads_gate_create({ blocks: GATE_ID, type: "human", reason: "Plan approval" })
 
 # One bead per task, in order, each depending on the gate and on its plan-declared
@@ -166,6 +171,12 @@ TASK2_ID = beads_create({ title: "Task 2: <name>", parent: "<implement-step-id>"
 beads_dep({ issue: TASK2_ID, blocker: GATE_ID })
 beads_dep({ issue: TASK2_ID, blocker: TASK1_ID })   # only if the plan actually orders Task 2 after Task 1
 ```
+
+The gate bead's `description` is the plan's **canonical Global Constraints artifact**: copy the plan's
+`## Global Constraints` section verbatim (exact values, exact formats, stated component
+relationships) into it. It stays readable after the gate is resolved/closed, and
+`subagent-driven-development` hands this bead's id to task reviewers, who read the constraints from
+it directly.
 
 Each task bead's `-d`/`--description` is the task's **entire** body from the plan
 document — every step, every code block, exactly as written. This bead is what
