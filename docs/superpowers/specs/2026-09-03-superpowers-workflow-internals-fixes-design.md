@@ -87,6 +87,9 @@ behavior changes only add closes that the skill currently has to do by hand.
   `depends_on_id` is the parent we want). Equivalent: find the parent whose child list
   includes `<id>`.
 - If the parent is a **task step** (`issue_type !== "molecule"` and `issue_type !== "gate"`),
+  check whether it still has any **open** children (other `parent-child` children that are
+  open). If none remain, close the parent too (`bd close <parent>`), then recurse upward
+  with the same rule.
   check whether it still has any **open** children (other open `parent-child` children,
   excluding its own gates). If none remain, close the parent too (`bd close <parent>`),
   then recurse upward with the same rule.
