@@ -59,7 +59,15 @@ widget internals.
 
 - `beads_reopen` — wraps `bd reopen <ids...> [--reason]`.
 - `beads_gate_create` — wraps `bd gate create --type=<type> --blocks <id> --reason <reason>`.
-- `beads_gate_resolve` — wraps `bd gate resolve <gate-id>`.
+- `beads_gate_resolve` — wraps `bd gate resolve <gate-id>` **and then `bd close
+  <gate-id>`** as a single atomic tool call. Per the brainstorming/writing-plans
+  skill docs, resolving a human gate only unblocks its dependents; the gate
+  bead itself stays open until explicitly closed, and a later dependent's
+  `bd close` fails ("blocked by open issues") if that second close is skipped.
+  Folding both steps into one tool call removes this footgun instead of relying
+  on skill authors to remember the follow-up close. If `bd close` fails after a
+  successful resolve, the tool reports the resolve succeeded and surfaces the
+  close error so the caller can retry just the close.
 - `beads_mol_pour` — wraps `bd mol pour <formula> --var k=v ...`, returns the
   root issue id. Mutates → emits.
 - `beads_mol_show` / `beads_mol_current` — wrap `bd mol show`/`bd mol current
@@ -120,7 +128,7 @@ progress is visible to the event-driven widget:
 | `bd update <step> --claim` | `beads_update` with `claim: true` |
 | `bd close <step> --reason ...` | `beads_close` (already a tool) |
 | `bd update <id> --set-metadata review.verdict=...` | `beads_update` with `setMetadata` |
-| `bd gate resolve <gate-id>` | `beads_gate_resolve` |
+| `bd gate resolve <gate-id>` followed by `bd close <gate-id>` | `beads_gate_resolve` (does both in one call, see §1) |
 | `bd mol current <root> --json` / `bd mol show <root>` | `beads_mol_current` / `beads_mol_show` |
 | `bd dep add <root> <issue> --type discovered-from` | `beads_dep` with `type: "discovered-from"` |
 | `bd comment <id> "..."` | `beads_comment` (already a tool) |
