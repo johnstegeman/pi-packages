@@ -60,7 +60,8 @@ Based on feedback:
 
 ### Step 5: Complete Development
 
-After all tasks complete and verified — confirm with `beads_mol_ready({ id: "<implement-step-id>" })` returning no ready steps — close the `implement` step itself
+After all tasks complete and verified — confirm with `beads_mol_ready({ id: "<implement-step-id>" })`
+  returning no ready steps — close the `implement` step itself
 (`beads_close({ ids: "<implement-step-id>", reason: "all tasks complete" })`), which unblocks `verify`.
 Claim `verify` (`beads_update({ id: "<verify-step-id>", claim: true })`) and proceed to that work before the
 finishing-a-development-branch handoff below.

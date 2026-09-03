@@ -76,7 +76,7 @@ case "$1" in
       MOLP="proj"; [ "$MODE" = "umbrella" ] && MOLP="umb"
       case "$3" in
         *empty*)
-          printf '{"molecule_id":"%s-m0","molecule_title":"Empty Mol","ready_steps":0,"total_steps":3,"steps":[]}\n' "$MOLP" ;;
+          printf '{"molecule_id":"%s-m0","molecule_title":"Empty Mol","ready_steps":0,"total_steps":3,"steps":null}\n' "$MOLP" ;;
         *)
           printf '{"molecule_id":"%s-m0","molecule_title":"Demo Mol","ready_steps":2,"total_steps":4,"steps":[{"parallel_info":{"is_ready":true,"step_id":"%s-t1"},"issue":{"id":"%s-t1","priority":1,"status":"open","title":"Task one"}},{"parallel_info":{"is_ready":true,"step_id":"%s-t2"},"issue":{"id":"%s-t2","priority":2,"status":"open","title":"Task two"}}]}\n' "$MOLP" "$MOLP" "$MOLP" "$MOLP" "$MOLP" ;;
       esac
@@ -382,6 +382,16 @@ test("single-repo: beads_mol_ready digest (ready + empty) without emitting", asy
   assert.equal(s.emitted.length, 0);
 });
 
+test("single-repo: beads_mol_ready limit truncates the step rows client-side", async () => {
+  const s = await openSession("single", repoDir);
+  resetLog();
+  const r = await s.byName.get("beads_mol_ready").execute("c", { id: "proj-m1", limit: 1 });
+  const t = r?.content?.[0]?.text ?? "";
+  assert.match(t, /molecule: proj-m0 — Demo Mol · 2\/4 ready/); // header still reports full counts
+  assert.match(t, /proj-t1 P1 \[open\] Task one/);
+  assert.ok(!/proj-t2 P2 \[open\] Task two/.test(t), "limit=1 must hide the second ready step row");
+  assert.equal(s.emitted.length, 0);
+});
 // ---------------------------------------------------------------------------
 // 2. type allowlists rejected (Imp #3): error text, no bd call, no emit
 // ---------------------------------------------------------------------------

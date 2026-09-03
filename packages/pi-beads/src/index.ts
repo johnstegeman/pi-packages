@@ -276,13 +276,14 @@ export default function piBeadsLean(pi: any) {
       .join("\n");
   }
 
-  function fmtMolReady(obj: any): string {
+  function fmtMolReady(obj: any, limit?: number): string {
     const mo = Array.isArray(obj) ? obj[0] : obj;
     if (!mo || typeof mo !== "object") return "(not found)";
     const total = mo.total_steps ?? mo.steps?.length ?? 0;
     const ready = mo.ready_steps ?? 0;
     const header = `molecule: ${mo.molecule_id ?? "?"} — ${trunc(mo.molecule_title ?? "")} · ${ready}/${total} ready`;
     const rows = (Array.isArray(mo.steps) ? mo.steps : [])
+      .slice(0, limit)
       .map((st: any) => {
         const i = st?.issue ?? st;
         if (!i?.id) return "";
@@ -1011,12 +1012,13 @@ export default function piBeadsLean(pi: any) {
     async execute(_id: string, params: any) {
       if (!params?.id) return textResult("id is required");
       await ensureFresh();
+      // Unlike beads_ready, beads_mol_ready intentionally omits --include-ephemeral (durable molecule steps; matches molShow/molCurrent).
       const args = ["ready", "--mol", String(params.id), "--json"];
       if (params?.limit) args.push("-n", String(params.limit));
       const r = await bd(args, umbrella);
       if (!r.ok) return textResult(`bd ready --mol failed: ${r.err}`);
       const o = jparse(r.out);
-      return textResult(o ? fmtMolReady(o) : r.out.trim());
+      return textResult(o ? fmtMolReady(o, params?.limit) : r.out.trim());
     },
   });
 

@@ -250,8 +250,8 @@ needed.
   never `HEAD~1`, which silently truncates multi-commit tasks. Never
   dispatch a task reviewer without a diff file.
 - **Reviewer inputs:** the task reviewer gets three paths — the same task
-  bead id, the report file, and the review package — plus the global
-  constraints that bind the task.
+  bead id, the report file, and the review package — plus the gate bead
+  id holding the plan's canonical Global Constraints.
 - The Global Constraints block is the reviewer's attention lens. Read it
   once from the plan-approval gate bead's description
   (`beads_show({ id: "<plan-approved-gate-id>", full: true })`, populated by `writing-plans`) and pass that
