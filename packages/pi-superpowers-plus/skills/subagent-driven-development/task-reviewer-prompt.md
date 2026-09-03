@@ -18,8 +18,7 @@ Dispatch a subagent with this prompt:
     ## What Was Requested
 
     call set_phase({ phase: "brainstorming" }).
-    Read your task bead: bd show <TASK_ID>
-    (or bd show <TASK_ID> --json for the raw body).
+    Read your task bead: beads_show({ id: "<TASK_ID>", full: true }).
     It contains the exact, full text of the task.
 
     Global constraints from the spec/design that bind this task:
@@ -167,7 +166,7 @@ Dispatch a subagent with this prompt:
 ```
 
 **Placeholders:**
-- `[TASK_ID]` — REQUIRED: the task bead id (from `bd mol show <implement-step-id>`);
+- `[TASK_ID]` — REQUIRED: the task bead id (from `beads_mol_show({ id: "<implement-step-id>" })`);
   the same task the implementer worked from
 - `[GLOBAL_CONSTRAINTS]` — the binding requirements copied verbatim from
   the plan's Global Constraints section or the spec: exact values, formats,

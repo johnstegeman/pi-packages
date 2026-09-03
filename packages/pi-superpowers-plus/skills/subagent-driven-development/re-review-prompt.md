@@ -17,8 +17,7 @@ Dispatch a subagent with this prompt:
     ## The Task
 
     call set_phase({ phase: "development" }).
-    Read your task bead: bd show <TASK_ID>
-    (or bd show <TASK_ID> --json for the raw body).
+    Read your task bead: beads_show({ id: "<TASK_ID>", full: true }).
     It contains the exact, full text of the task.
 
     ## The Findings Under Verification
