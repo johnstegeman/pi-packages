@@ -37,14 +37,14 @@ Call `set_phase({ phase: "development" })`.
 ### Step 2: Execute Batch
 **Default: First 3 tasks**
 
-For each task, working the ready frontier (`bd ready --mol <implement-step-id>` shows
+For each task, working the ready frontier (`beads_mol_ready({ id: "<implement-step-id>" })` shows
 what's unblocked right now):
 1. Claim it: `beads_update({ id: "<task-id>", claim: true })` (atomically sets assignee + `in_progress`).
 2. Follow the task bead's full description exactly (it holds the same bite-sized steps that used to live in a plan file — now they live in the
    task bead's description).
 3. Run verifications as specified in the description.
 4. Close it: `beads_close({ ids: "<task-id>", reason: "<what was done>" })` — this unblocks whatever
-   depended on it; re-run `bd ready --mol <implement-step-id>` to see the next batch.
+   depended on it; re-run `beads_mol_ready({ id: "<implement-step-id>" })` to see the next batch.
 
 ### Step 3: Report
 When batch complete:
@@ -60,8 +60,8 @@ Based on feedback:
 
 ### Step 5: Complete Development
 
-After all tasks complete and verified — confirm with `bd ready --mol
-<implement-step-id>` returning empty — close the `implement` step itself
+After all tasks complete and verified — confirm with `beads_mol_ready({ id: "<implement-step-id>" })`
+  returning no ready steps — close the `implement` step itself
 (`beads_close({ ids: "<implement-step-id>", reason: "all tasks complete" })`), which unblocks `verify`.
 Claim `verify` (`beads_update({ id: "<verify-step-id>", claim: true })`) and proceed to that work before the
 finishing-a-development-branch handoff below.

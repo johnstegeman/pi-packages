@@ -71,6 +71,19 @@ case "$1" in
     exit 0
     ;;
   info) echo "bd 1.2.2 (fixture)"; exit 0 ;;
+  ready)
+    if [ "$2" = "--mol" ]; then
+      MOLP="proj"; [ "$MODE" = "umbrella" ] && MOLP="umb"
+      case "$3" in
+        *empty*)
+          printf '{"molecule_id":"%s-m0","molecule_title":"Empty Mol","ready_steps":0,"total_steps":3,"steps":null}\n' "$MOLP" ;;
+        *)
+          printf '{"molecule_id":"%s-m0","molecule_title":"Demo Mol","ready_steps":2,"total_steps":4,"steps":[{"parallel_info":{"is_ready":true,"step_id":"%s-t1"},"issue":{"id":"%s-t1","priority":1,"status":"open","title":"Task one"}},{"parallel_info":{"is_ready":true,"step_id":"%s-t2"},"issue":{"id":"%s-t2","priority":2,"status":"open","title":"Task two"}}]}\n' "$MOLP" "$MOLP" "$MOLP" "$MOLP" "$MOLP" ;;
+      esac
+      exit 0
+    fi
+    echo "ok"; exit 0
+    ;;
   list)
     # bd list --all -n 1 --json (prefix sampling): a representative issue id per mode
     if [ "$MODE" = "umbrella" ]; then
@@ -181,7 +194,7 @@ const okResult = (r) => r && Array.isArray(r.content) && r.content[0]?.type === 
 // ---------------------------------------------------------------------------
 // 0. module surface: the new tools are registered and the type allowlists export
 // ---------------------------------------------------------------------------
-test("registers all 16 tools, including the six new ones", async () => {
+test("registers all 17 tools, including the seven new ones", async () => {
   const { tools } = makePi();
   const names = tools.map((t) => t.name).sort();
   assert.deepEqual(names, [
@@ -195,6 +208,7 @@ test("registers all 16 tools, including the six new ones", async () => {
     "beads_list",
     "beads_mol_current",
     "beads_mol_pour",
+    "beads_mol_ready",
     "beads_mol_show",
     "beads_ready",
     "beads_reopen",
@@ -222,7 +236,7 @@ test("type allowlists are exactly the bd-verified sets", async () => {
 test("single-repo: session_start resolves, registers tools, emits nothing", async () => {
   const s = await openSession("single", repoDir);
   assert.equal(s.emitted.length, 0, "session_start must not emit beads:changed");
-  assert.equal(s.tools.length, 16);
+  assert.equal(s.tools.length, 17);
 });
 
 test("single-repo: beads_create builds argv and emits beads:changed", async () => {
@@ -340,6 +354,8 @@ test("single-repo: read tools never emit beads:changed", async () => {
     ["beads_deps", { ids: "proj-1a2" }, ["dep", "tree", "proj-1a2", "--direction", "down", "--json"]],
     ["beads_mol_show", { id: "proj-m1" }, ["mol", "show", "proj-m1", "--json"]],
     ["beads_mol_current", { id: "proj-m1" }, ["mol", "current", "proj-m1", "--json"]],
+    ["beads_mol_ready", { id: "proj-m1" }, ["ready", "--mol", "proj-m1", "--json"]],
+    ["beads_mol_ready", { id: "proj-m1", limit: 2 }, ["ready", "--mol", "proj-m1", "--json", "-n", "2"]],
   ];
   for (const [name, params, argv] of reads) {
     resetLog();
@@ -350,6 +366,32 @@ test("single-repo: read tools never emit beads:changed", async () => {
   }
 });
 
+test("single-repo: beads_mol_ready digest (ready + empty) without emitting", async () => {
+  const s = await openSession("single", repoDir);
+  resetLog();
+  const r1 = await s.byName.get("beads_mol_ready").execute("c", { id: "proj-m1" });
+  const t1 = r1?.content?.[0]?.text ?? "";
+  assert.match(t1, /molecule: proj-m0 — Demo Mol · 2\/4 ready/);
+  assert.match(t1, /proj-t1 P1 \[open\] Task one/);
+  assert.match(t1, /proj-t2 P2 \[open\] Task two/);
+  resetLog();
+  const r2 = await s.byName.get("beads_mol_ready").execute("c", { id: "proj-empty-m0" });
+  const t2 = r2?.content?.[0]?.text ?? "";
+  assert.match(t2, /molecule: proj-m0 — Empty Mol · 0\/3 ready/);
+  assert.match(t2, /no ready steps \(all blocked or completed\)/);
+  assert.equal(s.emitted.length, 0);
+});
+
+test("single-repo: beads_mol_ready limit truncates the step rows client-side", async () => {
+  const s = await openSession("single", repoDir);
+  resetLog();
+  const r = await s.byName.get("beads_mol_ready").execute("c", { id: "proj-m1", limit: 1 });
+  const t = r?.content?.[0]?.text ?? "";
+  assert.match(t, /molecule: proj-m0 — Demo Mol · 2\/4 ready/); // header still reports full counts
+  assert.match(t, /proj-t1 P1 \[open\] Task one/);
+  assert.ok(!/proj-t2 P2 \[open\] Task two/.test(t), "limit=1 must hide the second ready step row");
+  assert.equal(s.emitted.length, 0);
+});
 // ---------------------------------------------------------------------------
 // 2. type allowlists rejected (Imp #3): error text, no bd call, no emit
 // ---------------------------------------------------------------------------
@@ -495,6 +537,7 @@ test("umbrella: read tools never emit beads:changed", async () => {
     ["beads_deps", { ids: "crmback-1a2" }],
     ["beads_mol_show", { id: "crmback-m1" }],
     ["beads_mol_current", { id: "crmback-m1" }],
+    ["beads_mol_ready", { id: "crmback-m1" }],
   ];
   for (const [name, params] of names) {
     resetLog();

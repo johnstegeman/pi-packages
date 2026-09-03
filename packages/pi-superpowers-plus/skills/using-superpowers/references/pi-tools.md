@@ -21,8 +21,9 @@ There is **no fallback** if the tools aren't present (they ship in the monorepo 
 - **Repo routing:** omit `repo` on `beads_create` to target the session cwd's repo; from an umbrella root, pass the owning repo explicitly (`repo` is required there). Skills never hardcode a repo name.
 - **Structural workflow:** brainstorm → design → plan → implement → verify → finish is
   modeled as a beads molecule poured from the bundled `superpowers-workflow` formula
-  (`bd cook`/`bd mol pour`), not tracked via ad hoc wisps. Skills advance it with bare
-  `bd` calls (`bd update --claim`, `bd close`, `bd gate resolve`, `bd ready --mol`) —
+  (`bd cook`/`bd mol pour`), not tracked via ad hoc wisps. Skills advance it with the
+  beads_* tools (`beads_mol_current`, `beads_mol_ready`, `beads_gate_resolve`,
+  `beads_close`, `beads_update`); bare `bd` is reserved for formula prep (`bd cook`) —
   see `docs/superpowers/specs/2026-09-02-beads-as-persistence-layer-design.md` for the
   full step graph.
 - `pi-beads` registers its own `beads` skill — see it for the full tool reference rather than re-documenting the API here.

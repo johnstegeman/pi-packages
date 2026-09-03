@@ -21,8 +21,10 @@ Dispatch a subagent with this prompt:
     Read your task bead: beads_show({ id: "<TASK_ID>", full: true }).
     It contains the exact, full text of the task.
 
-    Global constraints from the spec/design that bind this task:
-    [GLOBAL_CONSTRAINTS]
+    The canonical Global Constraints for this plan live in the plan-approval
+    gate bead's description (writing-plans populated it). Read it now:
+    beads_show({ id: "[GATE_ID]", full: true }).
+    Those constraints bind the task under review.
 
     ## What the Implementer Claims They Built
 
@@ -168,10 +170,10 @@ Dispatch a subagent with this prompt:
 **Placeholders:**
 - `[TASK_ID]` — REQUIRED: the task bead id (from `beads_mol_show({ id: "<implement-step-id>" })`);
   the same task the implementer worked from
-- `[GLOBAL_CONSTRAINTS]` — the binding requirements copied verbatim from
-  the plan's Global Constraints section or the spec: exact values, formats,
-  and stated relationships between components (not process rules — those
-  are already in this template)
+- `[GATE_ID]` — REQUIRED: the plan-approval gate bead id; its description
+  holds the plan's canonical Global Constraints (written by writing-plans).
+  The reviewer reads it via beads_show and applies those constraints to the
+  task under review.
 - `[REPORT_FILE]` — REQUIRED: the file the implementer wrote its detailed
   report to
 - `[BASE_SHA]` — commit before this task
