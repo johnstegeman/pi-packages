@@ -25,7 +25,7 @@ batch runs), catching up only at the next `agent_start`.
 
 ## Scope
 
-Convert the **11 raw `bd` references** in the four skills above to the equivalent
+Convert the **11 raw `bd` call sites (15 tokens)** in the four skills above to the equivalent
 `beads_*` tool calls, using the same mapping table as Task 3. Two small consistency
 nits are included (below). No tooling, CI, or test changes — this is a docs-only
 conversion, verified by a one-off grep.
