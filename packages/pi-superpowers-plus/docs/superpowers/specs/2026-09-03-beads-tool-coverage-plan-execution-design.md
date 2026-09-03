@@ -175,11 +175,12 @@ Two spots currently point elsewhere for constraint sourcing:
 
 ## 6. Part 4 — Verification
 
-**pi-beads (`packages/pi-beads`)** — no automated test suite in this repo. Verify by manual smoke after building/loading the extension:
-1. `beads_mol_ready({ id: "<live-molecule-root>" })` on a molecule with ready work (e.g. the current brainstorm molecule root) → header `N/M ready` plus the ready frontier lines.
-2. `beads_mol_ready({ id: "<fully-blocked-molecule>" })` (e.g. `pi-packages-mol-0lj`) → header `0/N ready` and the `no ready steps (all blocked or completed)` line.
-3. `beads_mol_ready({ id: "<implement-step-id>" })` on a molecule whose implement step has task children → returns the ready *task* frontier (the id can be a step, not just the root).
-4. Confirm output is lean (no raw `bd` JSON dump).
+**pi-beads (`packages/pi-beads`)** — extends the existing `node:assert` harness `test/pi-beads.test.mjs` (no framework; a fixture `bd` on PATH shadows the real binary, logs every argv, and serves canned topology/molecule JSON). TDD:
+1. Failing tests added first: tool-registration count 16→17 (add `beads_mol_ready` to the sorted list); the read-tools `never emit beads:changed` table gains `beads_mol_ready` (argv `["ready", "--mol", <id>, "--json"]`); new digest tests for header + ready frontier and for the empty `no ready steps (all blocked or completed)` case; `limit` plumbing (`-n <N>`); the fixture stub gains a `ready --mol` case serving canned JSON (keyed on the molecule id containing `empty` for the 0-ready case).
+2. Run `npm test` → fail (tool not registered).
+3. Implement `beads_mol_ready` + `fmtMolReady` in `src/index.ts`.
+4. `npm test` → all pass.
+5. Manual smoke against the real database (in an interactive pi session, not the fixture): `beads_mol_ready({ id: "<live-molecule-root>" })` on a molecule with ready work → header `N/M ready` + frontier; on a fully-blocked molecule (e.g. `pi-packages-mol-0lj`) → `0/N ready` + `no ready steps (all blocked or completed)`; on an `implement`-step id with task children → the ready *task* frontier; confirm output is lean (no raw `bd` JSON dump).
 
 **pi-superpowers-plus (`packages/pi-superpowers-plus`)** — grep checks:
 - `grep -rn "bd ready --mol" skills/` → zero matches (only historical `docs/superpowers/specs|plans/*` may retain the string).
@@ -196,7 +197,7 @@ Two spots currently point elsewhere for constraint sourcing:
 - **No behavior change** to `beads_ready`, `beads_mol_show`, `beads_mol_current`, `beads_gate_resolve`, or the beads-molecule-widget extension.
 - **No new task bead** ("Global Constraints") and **no dependency edge changes**.
 - **Task beads keep inlining** constraints verbatim (explicit user decision) — the gate bead is the *canonical*, not the *only*, copy.
-- **No test-suite work** in pi-beads (none exists; verification is manual smoke per §6).
+- **Test-suite work IS in scope** in pi-beads: the existing `test/pi-beads.test.mjs` harness is extended with `beads_mol_ready` coverage (fixture + argv + digest) per §6. No new framework or runner is added.
 
 ---
 
@@ -212,5 +213,5 @@ Two spots currently point elsewhere for constraint sourcing:
 
 Two tasks under one `implement` step:
 
-1. **Task 1 — `beads_mol_ready` tool.** Add tool + `fmtMolReady` + `TOOL` map entry in `packages/pi-beads/src/index.ts`; minor version bump. Verification: local smoke per §6.
+1. **Task 1 — `beads_mol_ready` tool.** TDD in `packages/pi-beads`: extend `test/pi-beads.test.mjs` (fixture `ready --mol` canned JSON, registration count, read-argv table, digest tests), then implement the tool + `fmtMolReady` + `TOOL` map entry in `src/index.ts`; minor version bump 0.2.2 → 0.3.0. Verification: `npm test` + manual smoke per §6.
 2. **Task 2 — skill prose conversions.** `executing-plans/SKILL.md` (3 calls), `using-superpowers/references/pi-tools.md` (stale raw-`bd` mention), `writing-plans/SKILL.md` (gate bead description), `subagent-driven-development/SKILL.md` (2 spots), `subagent-driven-development/task-reviewer-prompt.md` (`[GATE_ID]` + read instruction). Verification: grep checks per §6.
