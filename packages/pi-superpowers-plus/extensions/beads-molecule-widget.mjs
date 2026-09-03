@@ -37,7 +37,7 @@ export function truncToWidth(s, width) {
     out += ch;
     w += cw;
   }
-  return out + "\u2026";
+  return `${out}\u2026`;
 }
 function assemble(frags, width) {
   let used = 0;
@@ -76,7 +76,7 @@ export function parseMoleculeCurrent(json) {
     return null;
   }
   const obj = Array.isArray(arr) ? arr[0] : arr;
-  if (!obj || !obj.molecule_id || !Array.isArray(obj.steps)) return null;
+  if (!obj?.molecule_id || !Array.isArray(obj.steps)) return null;
   const steps = obj.steps
     .filter((s) => s && s.issue && s.issue.id != null)
     .map((s) => ({
@@ -108,7 +108,7 @@ const EXPLORE_PREFIX = "Explore project context: ";
 // formula's step titles (spec 2026-09-03-superpowers-widget-phase-views-design.md).
 export function topicFor(state) {
   if (!state || !Array.isArray(state.steps)) return "";
-  const explore = state.steps.find((s) => s.title && s.title.startsWith(EXPLORE_PREFIX));
+  const explore = state.steps.find((s) => s.title?.startsWith(EXPLORE_PREFIX));
   if (explore) {
     const t = explore.title.slice(EXPLORE_PREFIX.length).trim();
     if (t) return t;
