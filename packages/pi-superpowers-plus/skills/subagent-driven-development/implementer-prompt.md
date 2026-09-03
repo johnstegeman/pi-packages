@@ -142,7 +142,8 @@ Dispatch a subagent with this prompt:
 ```
 
 **Placeholders:**
-- `[TASK_ID]` — REQUIRED: the task bead id (from `beads_mol_show({ id: "<implement-step-id>" })`)
+- `[TASK_ID]` — REQUIRED: the task bead id (from `beads_mol_show({ id: "<implement-step-id>" })`);
+  the implement step id resolves via `beads_list({ label: "step:implement", mol: "<root-id>" })`
 - `[REPORT_FILE]` — REQUIRED: the file the implementer writes its full report to
   (name by task id: `<workspace>/<task-id>-report.md`)
 - `[task name]`, `[Context …]`, `[directory]` — fill per task

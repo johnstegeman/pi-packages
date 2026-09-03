@@ -84,9 +84,63 @@ case "$1" in
     fi
     echo "ok"; exit 0
     ;;
+  mol)
+    if [ "$2" = "pour" ]; then
+      DRYRUN=0
+      for a in "$@"; do [ "$a" = "--dry-run" ] && DRYRUN=1; done
+      if [ "$DRYRUN" = "1" ]; then
+        printf -- "- superpowers-workflow (from superpowers-workflow)\n"
+        printf -- "- Explore project context: FIXEDTOPIC (from superpowers-workflow.explore)\n"
+        printf -- "- Ask clarifying questions (from superpowers-workflow.clarify)\n"
+        printf -- "- Propose approaches (from superpowers-workflow.approaches)\n"
+        printf -- "- Present design sections (from superpowers-workflow.design)\n"
+        printf -- "- User approves design (from superpowers-workflow.design-approved)\n"
+        printf -- "- Gate: human (from superpowers-workflow.gate-design-approved)\n"
+        printf -- "- Write spec to docs/superpowers/specs/ (from superpowers-workflow.write-spec)\n"
+        printf -- "- Spec self-review (from superpowers-workflow.spec-review)\n"
+        printf -- "- User reviews written spec (from superpowers-workflow.spec-approved)\n"
+        printf -- "- Gate: human (from superpowers-workflow.gate-spec-approved)\n"
+        printf -- "- Implement FIXEDTOPIC (from superpowers-workflow.implement)\n"
+        printf -- "- Verify (from superpowers-workflow.verify)\n"
+        printf -- "- Smoke test / manual QA sign-off (from superpowers-workflow.smoke-test-approved)\n"
+        printf -- "- Gate: human (from superpowers-workflow.gate-smoke-test-approved)\n"
+        printf -- "- Finish development branch (from superpowers-workflow.finish)\n"
+        if [ "$3" = "broken" ]; then
+          printf -- "- Ghost step (from superpowers-workflow.ghost)\n"
+        fi
+      else
+        case "$3" in
+          f)   printf 'ok\n' ;;
+          dup) printf '✓ Poured mol: created 16 issues\n  Root issue: proj-dup\n  Phase: liquid (persistent in .beads/)\n' ;;
+          *)   printf '✓ Poured mol: created 16 issues\n  Root issue: proj-m1\n  Phase: liquid (persistent in .beads/)\n' ;;
+        esac
+      fi
+      exit 0
+    fi
+    if [ "$2" = "show" ]; then
+      case "$3" in
+        *dup*)
+          printf '%s\n' '{"issues":[{"id":"proj-xpl","title":"Explore project context: FIXEDTOPIC","issue_type":"task"},{"id":"proj-c1","title":"Ask clarifying questions","issue_type":"task"},{"id":"proj-c2","title":"Ask clarifying questions","issue_type":"task"},{"id":"proj-app","title":"Propose approaches","issue_type":"task"},{"id":"proj-des","title":"Present design sections","issue_type":"task"},{"id":"proj-apr","title":"User approves design","issue_type":"task"},{"id":"proj-g1","title":"Gate: human","issue_type":"gate"},{"id":"proj-wsp","title":"Write spec to docs/superpowers/specs/","issue_type":"task"},{"id":"proj-srv","title":"Spec self-review","issue_type":"task"},{"id":"proj-sap","title":"User reviews written spec","issue_type":"task"},{"id":"proj-g2","title":"Gate: human","issue_type":"gate"},{"id":"proj-imp","title":"Implement FIXEDTOPIC","issue_type":"task"},{"id":"proj-ver","title":"Verify","issue_type":"task"},{"id":"proj-smt","title":"Smoke test / manual QA sign-off","issue_type":"task"},{"id":"proj-g3","title":"Gate: human","issue_type":"gate"},{"id":"proj-fin","title":"Finish development branch","issue_type":"task"}],"dependencies":[{"depends_on_id":"proj-g1","issue_id":"proj-apr","type":"blocks"},{"depends_on_id":"proj-g2","issue_id":"proj-sap","type":"blocks"},{"depends_on_id":"proj-g3","issue_id":"proj-smt","type":"blocks"}]}'
+          exit 0 ;;
+      esac
+      printf '%s\n' '{"issues":[{"id":"proj-xpl","title":"Explore project context: FIXEDTOPIC","issue_type":"task"},{"id":"proj-clr","title":"Ask clarifying questions","issue_type":"task"},{"id":"proj-app","title":"Propose approaches","issue_type":"task"},{"id":"proj-des","title":"Present design sections","issue_type":"task"},{"id":"proj-apr","title":"User approves design","issue_type":"task"},{"id":"proj-g1","title":"Gate: human","issue_type":"gate"},{"id":"proj-wsp","title":"Write spec to docs/superpowers/specs/","issue_type":"task"},{"id":"proj-srv","title":"Spec self-review","issue_type":"task"},{"id":"proj-sap","title":"User reviews written spec","issue_type":"task"},{"id":"proj-g2","title":"Gate: human","issue_type":"gate"},{"id":"proj-imp","title":"Implement FIXEDTOPIC","issue_type":"task"},{"id":"proj-ver","title":"Verify","issue_type":"task"},{"id":"proj-smt","title":"Smoke test / manual QA sign-off","issue_type":"task"},{"id":"proj-g3","title":"Gate: human","issue_type":"gate"},{"id":"proj-fin","title":"Finish development branch","issue_type":"task"}],"dependencies":[{"depends_on_id":"proj-g1","issue_id":"proj-apr","type":"blocks"},{"depends_on_id":"proj-g2","issue_id":"proj-sap","type":"blocks"},{"depends_on_id":"proj-g3","issue_id":"proj-smt","type":"blocks"}]}'
+      exit 0
+    fi
+    echo "ok"; exit 0
+    ;;
   list)
-    # bd list --all -n 1 --json (prefix sampling): a representative issue id per mode
-    if [ "$MODE" = "umbrella" ]; then
+    P=""
+    prev=""
+    for a in "$@"; do
+      [ "$prev" = "--parent" ] && P="$a"
+      prev="$a"
+    done
+    if [ -n "$P" ]; then
+      case "$P" in
+        *2*) printf '{"issues":[{"id":"proj-m2-imp","title":"Implement T2","status":"open","priority":2,"labels":["step:implement"]}],"meta":{"count":1}}' ;;
+        *)   printf '{"issues":[{"id":"proj-m1-imp","title":"Implement T1","status":"open","priority":2,"labels":["step:implement"]},{"id":"proj-m1-done","title":"Explore done","status":"closed","priority":2,"labels":["step:implement"]}],"meta":{"count":2}}' ;;
+      esac
+    elif [ "$MODE" = "umbrella" ]; then
       echo '[{"id": "crmback-1a2", "title": "sample"}]'
     else
       echo '[{"id": "proj-1a2", "title": "sample"}]'
@@ -342,7 +396,54 @@ test("single-repo: beads_mol_pour builds argv (--var split) and emits", async ()
     "--var",
     "owner=bar",
   ]);
-  assert.equal(s.emitted.length, before + 1);
+  assert.equal(s.emitted.length, before + 2);
+});
+
+test("single-repo: beads_mol_pour stamps step:<key> on every step and gate", async () => {
+  const s = await openSession("single", repoDir);
+  resetLog();
+  const r = await s.byName.get("beads_mol_pour").execute("c", { proto: "superpowers-workflow", vars: "topic=whatever" });
+  assert.ok(okResult(r), JSON.stringify(r));
+  assert.match(r.content[0].text, /Root issue: proj-m1/);
+  const expect = [
+    ["proj-xpl", "step:explore"],
+    ["proj-clr", "step:clarify"],
+    ["proj-app", "step:approaches"],
+    ["proj-des", "step:design"],
+    ["proj-apr", "step:design-approved"],
+    ["proj-g1", "step:gate-design-approved"],
+    ["proj-wsp", "step:write-spec"],
+    ["proj-srv", "step:spec-review"],
+    ["proj-sap", "step:spec-approved"],
+    ["proj-g2", "step:gate-spec-approved"],
+    ["proj-imp", "step:implement"],
+    ["proj-ver", "step:verify"],
+    ["proj-smt", "step:smoke-test-approved"],
+    ["proj-g3", "step:gate-smoke-test-approved"],
+    ["proj-fin", "step:finish"],
+  ];
+  for (const [id, lbl] of expect) findInvocation(["update", id, "--add-label", lbl]);
+  assertNoInvocation(["update", "proj-m1", "--add-label", "step:superpowers-workflow"]);
+  findInvocation(["mol", "pour", "superpowers-workflow", "--var", "topic=whatever", "--dry-run"]);
+  assert.equal(invocations().filter((inv) => inv[0] === "update").length, 15);
+});
+
+test("single-repo: beads_mol_pour fails loudly when the step map is incomplete", async () => {
+  const s = await openSession("single", repoDir);
+  resetLog();
+  const r = await s.byName.get("beads_mol_pour").execute("c", { proto: "broken" });
+  assert.ok(okResult(r), JSON.stringify(r));
+  assert.match(r.content[0].text, /could not stamp step labels/);
+  assert.equal(invocations().filter((inv) => inv[0] === "update").length, 0);
+});
+
+test("single-repo: beads_mol_pour hard-fails on an ambiguous step title (no partial labels)", async () => {
+  const s = await openSession("single", repoDir);
+  resetLog();
+  const r = await s.byName.get("beads_mol_pour").execute("c", { proto: "dup" });
+  assert.ok(okResult(r), JSON.stringify(r));
+  assert.match(r.content[0].text, /could not stamp step labels/);
+  assert.equal(invocations().filter((inv) => inv[0] === "update").length, 0);
 });
 
 test("single-repo: read tools never emit beads:changed", async () => {
@@ -350,6 +451,8 @@ test("single-repo: read tools never emit beads:changed", async () => {
   const reads = [
     ["beads_ready", { limit: 5 }, ["ready", "--json", "--include-ephemeral", "-n", "5"]],
     ["beads_list", { status: "open,in_progress", limit: 7 }, ["list", "--json", "-n", "7", "--status", "open,in_progress"]],
+    ["beads_list", { label: "step:implement", mol: "proj-m1" }, ["list", "--json", "-n", "30", "--label", "step:implement", "--all", "--parent", "proj-m1", "--include-gates"]],
+    ["beads_list", { mol: "proj-m1" }, ["list", "--json", "-n", "30", "--all", "--parent", "proj-m1", "--include-gates"]],
     ["beads_show", { id: "proj-1a2" }, ["show", "proj-1a2", "--json"]],
     ["beads_deps", { ids: "proj-1a2" }, ["dep", "tree", "proj-1a2", "--direction", "down", "--json"]],
     ["beads_mol_show", { id: "proj-m1" }, ["mol", "show", "proj-m1", "--json"]],
@@ -364,6 +467,36 @@ test("single-repo: read tools never emit beads:changed", async () => {
     findInvocation(argv); // the read really went to bd with the right argv
     assert.equal(s.emitted.length, 0, `${name} must not emit beads:changed`);
   }
+});
+
+test("single-repo: beads_list mol scope isolates the same step:implement label across two molecules", async () => {
+  const s = await openSession("single", repoDir);
+  resetLog();
+  const r1 = await s.byName.get("beads_list").execute("c", { label: "step:implement", mol: "proj-m1" });
+  assert.match(r1.content[0].text, /proj-m1-imp/);
+  assert.doesNotMatch(r1.content[0].text, /proj-m2-imp/);
+  resetLog();
+  const r2 = await s.byName.get("beads_list").execute("c", { label: "step:implement", mol: "proj-m2" });
+  assert.match(r2.content[0].text, /proj-m2-imp/);
+  assert.doesNotMatch(r2.content[0].text, /proj-m1-imp/);
+  findInvocation(["list", "--json", "-n", "30", "--label", "step:implement", "--all", "--parent", "proj-m2", "--include-gates"]);
+});
+
+test("single-repo: beads_list formats object-shape --parent output (normalizes {issues,meta})", async () => {
+  const s = await openSession("single", repoDir);
+  resetLog();
+  const r = await s.byName.get("beads_list").execute("c", { mol: "proj-m1" });
+  assert.ok(okResult(r), JSON.stringify(r));
+  assert.match(r.content[0].text, /proj-m1-imp/);
+});
+
+test("single-repo: beads_list mol resolves closed labeled steps too (--all)", async () => {
+  const s = await openSession("single", repoDir);
+  resetLog();
+  const r = await s.byName.get("beads_list").execute("c", { label: "step:implement", mol: "proj-m1" });
+  assert.ok(okResult(r), JSON.stringify(r));
+  assert.match(r.content[0].text, /proj-m1-done/); // closed step still resolves
+  findInvocation(["list", "--json", "-n", "30", "--label", "step:implement", "--all", "--parent", "proj-m1", "--include-gates"]);
 });
 
 test("single-repo: beads_mol_ready digest (ready + empty) without emitting", async () => {

@@ -17,8 +17,9 @@ Assume they are a skilled developer, but know almost nothing about our toolset o
 **Announce at start:** "I'm using the writing-plans skill to create the implementation plan."
 Call `set_phase({ phase: "writing plan" })`
 
-At the start of planning, claim the `implement` step of the molecule brainstorming
-poured: `beads_update({ id: "<implement-step-id>", claim: true })`. This is the container all real task
+At the start of planning, resolve the implement step id via
+`beads_list({ label: "step:implement", mol: "<root-id>" })`, then claim it:
+`beads_update({ id: "<implement-step-id>", claim: true })`. This is the container all real task
 beads are created under.
 
 **Context:** If working in an isolated worktree, it should have been created via the `/skill:using-git-worktrees` skill at execution time.
@@ -256,7 +257,8 @@ whole implementation phase, until every task bead under it closes (see `executin
 Step 5, "Complete Development"). Nothing further to close here; the plan is now
 the bead graph itself.
 
-Hand the **implement step id** over to execution — `subagent-driven-development` /
+Hand the **implement step id** over to execution — it's resolved via
+`beads_list({ label: "step:implement", mol: "<root-id>" })`. `subagent-driven-development` /
 `executing-plans` read task beads directly (`beads_show({ id: "<task-id>" })`); no plan file is
 written or required.
 

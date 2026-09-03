@@ -68,7 +68,10 @@ it (`beads_update({ id: "<step-id>", claim: true })`), work it, and close it (`b
 the hard-gate above) — never close several in a row within the same turn. Step ids in
 this molecule: `explore`, `clarify`, `approaches`, `design`, `design-approved` (a gate —
 see After the Design below), then `write-spec`/`spec-review`/`spec-approved` continue
-into spec work, handed off to `writing-plans` at `implement`.
+into spec work, handed off to `writing-plans` at `implement`. Resolve each step id at
+runtime via `beads_list({ label: "step:<key>", mol: "<root-id>" })` — e.g. `step:explore`,
+`step:clarify`, `step:design`, `step:write-spec`; gates are `step:gate-<key>` (e.g.
+`step:gate-design-approved`).
 
 1. **Explore project context** (`beads_update({ id: "<explore-step-id>", claim: true })`) — check files, docs, recent commits in the **user's current working directory** (not the skill's install directory — see `using-superpowers` → Working Directory). Close with `beads_close({ ids: "<explore-step-id>" })` once done.
 2. **Ask clarifying questions** (`beads_update({ id: "<clarify-step-id>", claim: true })`) — one at a time, across as many turns as it takes, waiting for the user's actual reply each time, until you understand purpose/constraints/success criteria. Do not close this step after a single question.
@@ -160,8 +163,7 @@ digraph brainstorming {
   - Approved: `beads_update({ id: "<design-approved-id>", setMetadata: "review.verdict=done" })`,
     then resolve the gate so `write-spec` becomes ready:
     `beads_gate_resolve({ id: "<design-approved-gate-id>" })` (find the gate id via
-    `beads_mol_current({ id: "<root-id>" })` — it's the `next_step` when `design` is closed
-    and the gate hasn't resolved yet).
+    `beads_list({ label: "step:gate-design-approved", mol: "<root-id>" })`).
   - Changes requested: `beads_update({ id: "<design-approved-id>", setMetadata: "review.verdict=iterate" })`, then write a specific revision summary naming exactly
     which sections/assumptions/questions need another pass:
     `beads_comment({ id: "<design-approved-id>", text: "<what needs to change>" })`. Re-claim `design`

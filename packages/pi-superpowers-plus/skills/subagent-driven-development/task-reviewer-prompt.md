@@ -169,6 +169,7 @@ Dispatch a subagent with this prompt:
 
 **Placeholders:**
 - `[TASK_ID]` — REQUIRED: the task bead id (from `beads_mol_show({ id: "<implement-step-id>" })`);
+  the implement step id resolves via `beads_list({ label: "step:implement", mol: "<root-id>" })`;
   the same task the implementer worked from
 - `[GATE_ID]` — REQUIRED: the plan-approval gate bead id; its description
   holds the plan's canonical Global Constraints (written by writing-plans).

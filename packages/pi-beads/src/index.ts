@@ -260,6 +260,7 @@ export default function piBeadsLean(pi: any) {
     let arr: any[];
     try {
       arr = JSON.parse(json);
+      if (arr && !Array.isArray(arr) && Array.isArray(arr.issues)) arr = arr.issues;
     } catch {
       return json.trim();
     }
@@ -293,6 +294,77 @@ export default function piBeadsLean(pi: any) {
       .filter(Boolean);
     if (ready > 0) return [header, ...rows].join("\n");
     return `${header}\nno ready steps (all blocked or completed)`;
+  }
+
+  // Parse `bd mol pour <proto> --dry-run` output: ordered (title, key) steps plus
+  // a preceding-step -> gate-key map (bd generates the gate-* keys at dry-run).
+  function parseDryRun(out: string): {
+    steps: Array<[string, string]>;
+    stepToGate: Map<string, string>;
+  } {
+    const steps: Array<[string, string]> = [];
+    const stepToGate = new Map<string, string>();
+    let lastStep: string | null = null;
+    for (const ln of out.split("\n")) {
+      const m = ln.match(/^\s*-\s+(.*?)\s+\(from\s+\S+\.([^)]+)\)\s*$/);
+      if (!m) continue;
+      const title = m[1];
+      const key = m[2];
+      if (key.startsWith("gate-")) {
+        if (lastStep) stepToGate.set(lastStep, key);
+      } else {
+        steps.push([title, key]);
+        lastStep = key;
+      }
+    }
+    return { steps, stepToGate };
+  }
+
+  // Resolve formula step/gate keys -> runtime ids AFTER a pour. All reads run against the
+  // owning repo `dir` (freshest data, avoids umbrella aggregation staleness). Returns null
+  // whenever the map is incomplete — the caller then hard-fails WITHOUT partial labels.
+  async function molKeyToId(
+    proto: string,
+    vars: string[],
+    root: string,
+    dir: string,
+  ): Promise<Map<string, string> | null> {
+    const dryArgs = ["mol", "pour", proto];
+    for (const v of vars) dryArgs.push("--var", v);
+    dryArgs.push("--dry-run");
+    const dry = await bd(dryArgs, dir);
+    if (!dry.ok) return null;
+    const { steps, stepToGate } = parseDryRun(dry.out);
+    if (steps.length === 0) return null;
+    const show = await bd(["mol", "show", root, "--json"], dir);
+    if (!show.ok) return null;
+    const o = jparse(show.out);
+    if (!o) return null;
+    const issues: any[] = Array.isArray(o) ? o : o.issues ?? [];
+    const deps: any[] = Array.isArray(o) ? [] : o.dependencies ?? [];
+    const byId = new Map<string, any>(issues.map((i: any) => [i.id, i]));
+    const result = new Map<string, string>();
+    for (const [title, key] of steps) {
+      const hits = issues.filter((i: any) => i.issue_type !== "gate" && i.title === title);
+      if (hits.length !== 1) return null; // missing or ambiguous -> hard fail
+      result.set(key, hits[0].id);
+    }
+    const gateIssues = issues.filter((i: any) => i.issue_type === "gate");
+    if (gateIssues.length === 0) return null;
+    for (const i of gateIssues) {
+      const blocked = deps
+        .filter((e: any) => e.type === "blocks" && e.depends_on_id === i.id)
+        .map((e: any) => byId.get(e.issue_id))
+        .filter(Boolean);
+      const stepKey = blocked
+        .map((b: any) => [...result.entries()].find(([, id]) => id === b.id)?.[0])
+        .find(Boolean);
+      const gateKey = stepKey ? stepToGate.get(stepKey) : undefined;
+      if (!gateKey) return null;
+      result.set(gateKey, i.id);
+    }
+    if (result.size !== steps.length + gateIssues.length) return null;
+    return result;
   }
 
   function fmtShow(
@@ -487,6 +559,11 @@ export default function piBeadsLean(pi: any) {
           description:
             "Require AT LEAST ONE of these labels (comma-separated, bd --label-any semantics)",
         },
+        mol: {
+          type: "string",
+          description:
+            "Optional molecule root id — scope results to that molecule's steps/gates, including closed (bd list --all --parent + --include-gates)",
+        },
       },
     },
     async execute(_id: string, params: any) {
@@ -500,6 +577,8 @@ export default function piBeadsLean(pi: any) {
       if (params?.status) args.push("--status", String(params.status));
       if (params?.label) args.push("--label", String(params.label));
       if (params?.labelAny) args.push("--label-any", String(params.labelAny));
+      if (params?.mol)
+        args.push("--all", "--parent", String(params.mol), "--include-gates");
       const r = await bd(args, scoped ?? umbrella);
       if (!r.ok) return textResult(`bd list failed: ${r.err}`);
       return textResult(fmtRows(r.out));
@@ -947,14 +1026,29 @@ export default function piBeadsLean(pi: any) {
       const repoDir = resolveCreateTarget(params?.repo);
       if (!repoDir)
         return textResult(`specify repo (one of: ${knownRepos()}) — cannot pour in the umbrella aggregate`);
+      const varPairs = String(params.vars ?? "")
+        .split(",").map((s: string) => s.trim()).filter(Boolean);
       const args = ["mol", "pour", String(params.proto)];
-      if (params.vars) {
-        for (const pair of String(params.vars).split(",").map((s: string) => s.trim()).filter(Boolean)) {
-          args.push("--var", pair);
-        }
-      }
+      for (const pair of varPairs) args.push("--var", pair);
       const r = await bd(args, repoDir);
       if (!r.ok) return textResult(`bd mol pour failed: ${r.err}`);
+      await afterWrite(repoDir);
+      const rootMatch = r.out.match(/Root issue:\s*(\S+)/);
+      if (!rootMatch)
+        return textResult(
+          `bd mol pour created ${String(params.proto)} but could not determine the molecule root — pour is UNLABELED; do not use`,
+        );
+      const root = rootMatch[1];
+      const map = await molKeyToId(String(params.proto), varPairs, root, repoDir);
+      if (!map)
+        return textResult(
+          `bd mol pour created ${String(params.proto)} but could not stamp step labels (dry-run/map incomplete) — root ${root} is UNLABELED; do not use`,
+        );
+      for (const [key, id] of map) {
+        const u = await bd(["update", id, "--add-label", `step:${key}`], repoDir);
+        if (!u.ok)
+          return textResult(`bd mol pour failed: step:${key} on ${id}: ${u.err}`);
+      }
       await afterWrite(repoDir);
       return textResult(r.out.trim() || "poured");
     },
