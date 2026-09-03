@@ -1,5 +1,11 @@
 import assert from "node:assert/strict";
-import { displayWidth, moleculeWidgetLines, parseMoleculeCurrent, parseMoleculeShow } from "./beads-molecule-widget.mjs";
+import {
+  createChangeCoalescer,
+  displayWidth,
+  moleculeWidgetLines,
+  parseMoleculeCurrent,
+  parseMoleculeShow,
+} from "./beads-molecule-widget.mjs";
 
 // ---------- parser: malformed input never throws ----------
 assert.deepEqual(parseMoleculeCurrent(""), null);
@@ -55,7 +61,6 @@ const gateCurrent = {
 const gateLines = moleculeWidgetLines(gateCurrent, 80);
 assert.ok(gateLines.some((l) => l.includes("Waiting on you")));
 
-
 // ---------- render: view B header replaces the phase label ----------
 const explorePhase = {
   ...parsed,
@@ -79,10 +84,38 @@ const SHOW = JSON.stringify({
   root: { id: "mol-9", title: "Implement X", priority: 2, status: "in_progress", issue_type: "task" },
   issues: [
     { id: "mol-9", title: "Implement X", priority: 2, status: "in_progress", issue_type: "task" },
-    { id: "mol-9.1", title: "Task 1", priority: 2, status: "open", issue_type: "task", created_at: "2026-09-02T10:00:01Z" },
-    { id: "mol-9.2", title: "Task 2", priority: 2, status: "in_progress", issue_type: "task", created_at: "2026-09-02T10:00:00Z" },
-    { id: "mol-9.3", title: "Task 3", priority: 2, status: "closed", issue_type: "task", created_at: "2026-09-02T10:00:02Z" },
-    { id: "other", title: "Some other bead", priority: 1, status: "open", issue_type: "task", created_at: "2026-09-02T09:00:00Z" },
+    {
+      id: "mol-9.1",
+      title: "Task 1",
+      priority: 2,
+      status: "open",
+      issue_type: "task",
+      created_at: "2026-09-02T10:00:01Z",
+    },
+    {
+      id: "mol-9.2",
+      title: "Task 2",
+      priority: 2,
+      status: "in_progress",
+      issue_type: "task",
+      created_at: "2026-09-02T10:00:00Z",
+    },
+    {
+      id: "mol-9.3",
+      title: "Task 3",
+      priority: 2,
+      status: "closed",
+      issue_type: "task",
+      created_at: "2026-09-02T10:00:02Z",
+    },
+    {
+      id: "other",
+      title: "Some other bead",
+      priority: 1,
+      status: "open",
+      issue_type: "task",
+      created_at: "2026-09-02T09:00:00Z",
+    },
   ],
   dependencies: [
     { issue_id: "mol-9.1", depends_on_id: "mol-9", type: "parent-child" },
@@ -94,11 +127,18 @@ const SHOW = JSON.stringify({
 });
 const children = parseMoleculeShow(SHOW);
 // sorted by created_at then id => mol-9.2, mol-9.1, mol-9.3
-assert.deepEqual(children.map((c) => c.id), ["mol-9.2", "mol-9.1", "mol-9.3"]);
+assert.deepEqual(
+  children.map((c) => c.id),
+  ["mol-9.2", "mol-9.1", "mol-9.3"],
+);
 assert.equal(children[0].status, "in_progress");
 assert.equal(children[1].priority, 2);
 // a blocks-only relationship produces no child
-const NO_CHILD = JSON.stringify({ root: { id: "r" }, issues: [{ id: "r" }, { id: "b" }], dependencies: [{ issue_id: "b", depends_on_id: "r", type: "blocks" }] });
+const NO_CHILD = JSON.stringify({
+  root: { id: "r" },
+  issues: [{ id: "r" }, { id: "b" }],
+  dependencies: [{ issue_id: "b", depends_on_id: "r", type: "blocks" }],
+});
 assert.deepEqual(parseMoleculeShow(NO_CHILD), []);
 
 // ---------- renderer: view B ----------
@@ -135,7 +175,11 @@ assert.equal(out2.length, 2); // header + trunk
 assert.ok(!out2.some((l) => l.includes("├──") || l.includes("└──")));
 
 // gate trunk => "Waiting on you", no subtree
-const gate = { ...base, current_step: { id: "g", title: "Gate: human", status: "open", priority: 2, issue_type: "gate" }, children: [] };
+const gate = {
+  ...base,
+  current_step: { id: "g", title: "Gate: human", status: "open", priority: 2, issue_type: "gate" },
+  children: [],
+};
 const out3 = moleculeWidgetLines(gate, 80);
 assert.ok(out3[1].includes("Waiting on you:") && out3[1].includes("Gate: human"));
 assert.equal(out3.length, 2);
@@ -154,7 +198,16 @@ const out4 = moleculeWidgetLines(next, 80);
 assert.ok(out4[1].includes("Next:") && out4[1].includes("Gate: human"));
 
 // 15-line cap with +N more tail (wide width so only the cap matters)
-const many = { ...base, children: Array.from({ length: 30 }, (_, i) => ({ id: `c${i}`, title: `child ${i}`, status: "open", priority: 2, issue_type: "task" })) };
+const many = {
+  ...base,
+  children: Array.from({ length: 30 }, (_, i) => ({
+    id: `c${i}`,
+    title: `child ${i}`,
+    status: "open",
+    priority: 2,
+    issue_type: "task",
+  })),
+};
 const out5 = moleculeWidgetLines(many, 300);
 assert.equal(out5.length, 15, `capped at 15 lines, got ${out5.length}`);
 assert.ok(out5[out5.length - 1].includes(" more"), "overflow tail present");
@@ -169,7 +222,6 @@ const a = moleculeWidgetLines(openChild, 80)[2];
 const b = moleculeWidgetLines(closedChild, 80)[2];
 assert.ok(a.includes("○") && b.includes("✓"), `flip ○ -> ✓ (got '${a}' -> '${b}')`);
 
-
 // theme passthrough: a custom theme transforms the accent-painted header label;
 // a null/absent theme still renders the plain text.
 const THEME = { fg: (color, t) => (color === "accent" ? t.toUpperCase() : t) };
@@ -180,5 +232,42 @@ const plain = moleculeWidgetLines(base, 80);
 assert.ok(plain[0].includes("Superpowers:"), "absent theme renders plain label");
 const plainNull = moleculeWidgetLines(base, 80, null);
 assert.ok(plainNull[0].includes("Superpowers:"), "null theme renders plain label");
+
+// ---------- createChangeCoalescer: leading-edge fire, single trailing timer ----------
+{
+  let scheduled = null; // { cb, ms }
+  const fakeTimers = {
+    setTimeout: (cb, ms) => {
+      scheduled = { cb, ms };
+      return scheduled;
+    },
+    clearTimeout: (t) => {
+      if (t === scheduled) scheduled = null;
+    },
+  };
+  const fires = [];
+  const c = createChangeCoalescer(() => fires.push(1), 10000, fakeTimers);
+
+  c.trigger();
+  assert.equal(fires.length, 1, "leading-edge trigger fires immediately");
+  assert.ok(scheduled && scheduled.ms === 10000, "10s trailing timer started");
+
+  c.trigger();
+  c.trigger();
+  assert.equal(fires.length, 1, "triggers during the window are coalesced, not fired");
+
+  const timerCb = scheduled.cb;
+  timerCb();
+  assert.equal(fires.length, 2, "one trailing render after coalescing a burst");
+  assert.ok(scheduled && scheduled.ms === 10000, "timer restarts after a dirty trailing fire");
+
+  const timerCb2 = scheduled.cb;
+  timerCb2();
+  assert.equal(fires.length, 2, "no render when nothing changed during the window");
+  assert.equal(scheduled, null, "timer cleared when idle");
+
+  c.trigger();
+  assert.equal(fires.length, 3, "trigger after idle is a fresh leading edge");
+}
 
 console.log("beads-molecule-widget: all assertions passed");

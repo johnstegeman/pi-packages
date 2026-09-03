@@ -44,7 +44,7 @@ this brainstorming session works against:
 
 ```bash
 bd cook superpowers-workflow --var topic="<topic>" --persist
-bd mol pour superpowers-workflow --var topic="<topic>"
+beads_mol_pour({ proto: "superpowers-workflow", vars: "topic=<topic>" })
 ```
 
 Note the returned root issue id (the `Root issue:` line) — this is the molecule you work
@@ -54,8 +54,8 @@ against for the rest of this skill and for `writing-plans`/`executing-plans` aft
 above, seeding `--var topic="<existing issue's title>"`, then link the new root to the
 existing issue without mutating it:
 
-```bash
-bd dep add <new-root-id> <existing-issue-id> --type discovered-from
+```
+beads_dep({ issue: "<new-root-id>", blocker: "<existing-issue-id>", type: "discovered-from" })
 ```
 
 If `discovered-from` is rejected by your `bd` version, use `--type related` instead — both
@@ -63,17 +63,17 @@ are non-blocking link types; do not use `blocks` here. Never change the existing
 type, parent, or status — it stays exactly what it was.
 
 Each checklist item below corresponds to one formula step. Claim the step when you begin
-it (`bd update <step-id> --claim`), work it, and close it (`bd close <step-id> --reason
-"<one-line summary>"`) only once its real output actually exists in the conversation (see
+it (`beads_update({ id: "<step-id>", claim: true })`), work it, and close it (`beads_close({ ids: "<step-id>", reason:
+"<one-line summary>" })`) only once its real output actually exists in the conversation (see
 the hard-gate above) — never close several in a row within the same turn. Step ids in
 this molecule: `explore`, `clarify`, `approaches`, `design`, `design-approved` (a gate —
 see After the Design below), then `write-spec`/`spec-review`/`spec-approved` continue
 into spec work, handed off to `writing-plans` at `implement`.
 
-1. **Explore project context** (`bd update <explore-step-id> --claim`) — check files, docs, recent commits in the **user's current working directory** (not the skill's install directory — see `using-superpowers` → Working Directory). Close with `bd close <explore-step-id>` once done.
-2. **Ask clarifying questions** (`bd update <clarify-step-id> --claim`) — one at a time, across as many turns as it takes, waiting for the user's actual reply each time, until you understand purpose/constraints/success criteria. Do not close this step after a single question.
-3. **Propose 2-3 approaches** (`bd update <approaches-step-id> --claim`) — with trade-offs and your recommendation
-4. **Present design** (`bd update <design-step-id> --claim`) — in sections scaled to their complexity, get user approval after each section
+1. **Explore project context** (`beads_update({ id: "<explore-step-id>", claim: true })`) — check files, docs, recent commits in the **user's current working directory** (not the skill's install directory — see `using-superpowers` → Working Directory). Close with `beads_close({ ids: "<explore-step-id>" })` once done.
+2. **Ask clarifying questions** (`beads_update({ id: "<clarify-step-id>", claim: true })`) — one at a time, across as many turns as it takes, waiting for the user's actual reply each time, until you understand purpose/constraints/success criteria. Do not close this step after a single question.
+3. **Propose 2-3 approaches** (`beads_update({ id: "<approaches-step-id>", claim: true })`) — with trade-offs and your recommendation
+4. **Present design** (`beads_update({ id: "<design-step-id>", claim: true })`) — in sections scaled to their complexity, get user approval after each section
 5. **Write design doc** — save to `docs/superpowers/specs/YYYY-MM-DD-<topic>-design.md` and commit
 6. **Spec self-review** — quick inline check for placeholders, contradictions, ambiguity, scope (see below)
 7. **User reviews written spec** — ask user to review the spec file before proceeding
@@ -157,22 +157,21 @@ digraph brainstorming {
 - Commit the design document to git
 - After presenting the design, record the verdict on the `design-approved` step so a
   resumed session or the widget can see it without replaying the conversation:
-  - Approved: `bd update <design-approved-id> --set-metadata review.verdict=done`,
+  - Approved: `beads_update({ id: "<design-approved-id>", setMetadata: "review.verdict=done" })`,
     then resolve the gate so `write-spec` becomes ready:
-    `bd gate resolve <design-approved-gate-id>` (find the gate id via
-    `bd mol current <root-id> --json` — it's the `next_step` when `design` is closed
+    `beads_gate_resolve({ id: "<design-approved-gate-id>" })` (find the gate id via
+    `beads_mol_current({ id: "<root-id>" })` — it's the `next_step` when `design` is closed
     and the gate hasn't resolved yet).
-  - Changes requested: `bd update <design-approved-id> --set-metadata
-    review.verdict=iterate`, then write a specific revision summary naming exactly
+  - Changes requested: `beads_update({ id: "<design-approved-id>", setMetadata: "review.verdict=iterate" })`, then write a specific revision summary naming exactly
     which sections/assumptions/questions need another pass:
-    `bd comment <design-approved-id> "<what needs to change>"`. Re-claim `design`
-    (`bd update <design-step-id> --claim`) and loop back into Step 2's design-
+    `beads_comment({ id: "<design-approved-id>", text: "<what needs to change>" })`. Re-claim `design`
+    (`beads_update({ id: "<design-step-id>", claim: true })`) and loop back into Step 2's design-
     presentation work — do NOT resolve the gate. Never treat "changes requested" as
     an unstructured do-over: the revision summary is what the next pass reads before
     touching the design again.
   - On resume (new session, or picking this back up after a gap): read the design
-    content already written (`bd show <design-step-id>`) plus the latest verdict and
-    revision summary (`bd show <design-approved-id>`) before continuing — revise the
+    content already written (`beads_show({ id: "<design-step-id>" })`) plus the latest verdict and
+    revision summary (`beads_show({ id: "<design-approved-id>" })`) before continuing — revise the
     existing design in place; never discard earlier answered questions, approach
     trade-offs, or already-approved sections.
   - Only `review.verdict=done` permits resolving the gate. If brainstorming stops
@@ -180,11 +179,11 @@ digraph brainstorming {
     recorded, leave the current step's status as-is (open or in_progress) for the next
     session to resume — do not close steps whose real output doesn't exist yet.
 
-Closing steps is order-enforced: `bd close <step>` fails ("blocked by open issues
-[..]") until the prerequisite step is closed and its gate resolved. `bd gate resolve`
-unblocks the dependent step but does not close the gate task bead itself — e.g. after
-`writing-plans` reveals the plan, close the plan-approval gate bead explicitly
-(`bd close <id>`) after resolving.
+Closing steps is order-enforced: `beads_close({ ids: "<step>" })` fails ("blocked by open issues
+[..]") until the prerequisite step is closed and its gate resolved. `beads_gate_resolve`
+unblocks the dependent step and closes the gate bead itself in one call — e.g. after
+`writing-plans` reveals the plan, a single `beads_gate_resolve` on the plan-approval gate
+handles both resolve and close, so no separate close is needed.
 
 **Spec Self-Review:**
 After writing the spec document, look at it with fresh eyes:

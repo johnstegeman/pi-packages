@@ -129,6 +129,40 @@ export function parseMoleculeShow(json) {
   return kids;
 }
 
+/**
+ * Leading-edge + single-trailing-timer coalescer for a burst of change events.
+ * First trigger() in an idle period fires immediately. Further trigger()s while
+ * a window is open just mark "dirty"; when the window elapses, one more fire
+ * happens if dirty, and a new window starts — otherwise the timer clears and
+ * the next trigger() is a fresh leading edge. Caps fires to at most one per
+ * windowMs during a sustained burst without ever delaying the first one.
+ */
+export function createChangeCoalescer(onFire, windowMs = 10000, timers = { setTimeout, clearTimeout }) {
+  let timer = null;
+  let dirty = false;
+  function scheduleTick() {
+    timer = timers.setTimeout(() => {
+      if (dirty) {
+        dirty = false;
+        onFire();
+        scheduleTick();
+      } else {
+        timers.clearTimeout(timer);
+        timer = null;
+      }
+    }, windowMs);
+  }
+  return {
+    trigger() {
+      if (timer === null) {
+        onFire();
+        scheduleTick();
+      } else {
+        dirty = true;
+      }
+    },
+  };
+}
 
 const PLAIN_FG = (_c, t) => t;
 function themeOf(theme) {

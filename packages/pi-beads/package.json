@@ -48,7 +48,9 @@
   "publishConfig": {
     "access": "public"
   },
-  "scripts": {},
+  "scripts": {
+    "test": "node test/pi-beads.test.mjs"
+  },
   "main": "./src/index.ts",
   "exports": "./src/index.ts"
 }

@@ -18,7 +18,7 @@ Assume they are a skilled developer, but know almost nothing about our toolset o
 Call `set_phase({ phase: "writing plan" })`
 
 At the start of planning, claim the `implement` step of the molecule brainstorming
-poured: `bd update <implement-step-id> --claim`. This is the container all real task
+poured: `beads_update({ id: "<implement-step-id>", claim: true })`. This is the container all real task
 beads are created under.
 
 **Context:** If working in an isolated worktree, it should have been created via the `/skill:using-git-worktrees` skill at execution time.
@@ -151,44 +151,42 @@ Once the task breakdown above is written out in the plan document and has passed
 lifecycle-duplicate check (Self-Review item 4), mirror it into real beads under the
 `implement` step:
 
-```bash
+```
 # One gate, every real task depends on it — nothing executes until the human approves
 # the plan shape.
-GATE_ID=$(bd create "Plan reviewed / ready to execute" --parent <implement-step-id> -t task --json | python3 -c "import json,sys;print(json.load(sys.stdin)['id'])")
-bd gate create --type=human --blocks $GATE_ID --reason "Plan approval"
+GATE_ID = beads_create({ title: "Plan reviewed / ready to execute", parent: "<implement-step-id>", type: "task" })
+beads_gate_create({ blocks: GATE_ID, type: "human", reason: "Plan approval" })
 
 # One bead per task, in order, each depending on the gate and on its plan-declared
 # predecessor:
-TASK1_ID=$(bd create "Task 1: <name>" --parent <implement-step-id> -t task -d "<full step-by-step instructions from the plan's Task 1 body>" --json | python3 -c "import json,sys;print(json.load(sys.stdin)['id'])")
-bd dep add $TASK1_ID $GATE_ID
+TASK1_ID = beads_create({ title: "Task 1: <name>", parent: "<implement-step-id>", type: "task", description: "<full step-by-step instructions from the plan's Task 1 body>" })
+beads_dep({ issue: TASK1_ID, blocker: GATE_ID })
 
-TASK2_ID=$(bd create "Task 2: <name>" --parent <implement-step-id> -t task -d "<full step-by-step instructions from the plan's Task 2 body>" --json | python3 -c "import json,sys;print(json.load(sys.stdin)['id'])")
-bd dep add $TASK2_ID $GATE_ID
-bd dep add $TASK2_ID $TASK1_ID   # only if the plan actually orders Task 2 after Task 1
+TASK2_ID = beads_create({ title: "Task 2: <name>", parent: "<implement-step-id>", type: "task", description: "<full step-by-step instructions from the plan's Task 2 body>" })
+beads_dep({ issue: TASK2_ID, blocker: GATE_ID })
+beads_dep({ issue: TASK2_ID, blocker: TASK1_ID })   # only if the plan actually orders Task 2 after Task 1
 ```
 
 Each task bead's `-d`/`--description` is the task's **entire** body from the plan
 document — every step, every code block, exactly as written. This bead is what
 `executing-plans`/`subagent-driven-development` read during execution —
-`bd show <task-id>`. It is the requirements at execution time; there is no plan.md.
+`beads_show({ id: "<task-id>" })`. It is the requirements at execution time; there is no plan.md.
 
 **Recording the plan-approval verdict** (same revise/recheck pattern as brainstorming's
 `design-approved`/`spec-approved` gates, Task 2 Step 3): when presenting the plan for
 review, don't just wait silently on the gate.
-- Approved: `bd update $GATE_ID --set-metadata review.verdict=done`, then
-  `bd gate resolve <the-gate-id-bd-gate-create-returned>`.
-  Then close the plan-approval gate bead explicitly:
-  `bd close $GATE_ID --reason "plan approved"` — resolving the human gate unblocks
-  dependents but does NOT close the gate task bead itself; without this close, every
-  dependent task bead's `bd close` later fails with "blocked by open issues [..]".
-  Step closes are order-enforced: a blocked `bd close` means a prerequisite step/gate
+  - Approved: `beads_update({ id: GATE_ID, setMetadata: "review.verdict=done" })`, then
+  `beads_gate_resolve({ id: <the-gate-id-beads_gate_create-returned> })` — this both
+  resolves the human gate and closes the gate task bead itself, so dependent task beads
+  aren't later blocked by the still-open gate ("blocked by open issues [..]").
+  Step closes are order-enforced: a blocked `beads_close` means a prerequisite step/gate
   is still open — close/resolve it first; the error is the signal, not a mistake.
-- Changes requested: `bd update $GATE_ID --set-metadata review.verdict=iterate`, write
-  a specific revision summary (`bd comment $GATE_ID "<what needs to change>"`), revise
-  the affected task beads' descriptions in place (`bd update <task-id> --description
-  "<revised instructions>"`) or add/remove/re-order task beads as needed, and re-present
+  - Changes requested: `beads_update({ id: GATE_ID, setMetadata: "review.verdict=iterate" })`, write
+  a specific revision summary (`beads_comment({ id: GATE_ID, text: "<what needs to change>" })`), revise
+  the affected task beads' descriptions in place (`beads_update({ id: "<task-id>", description:
+  "<revised instructions>" })`) or add/remove/re-order task beads as needed, and re-present
   — do NOT resolve the gate. On resume, read the existing task beads under `implement`
-  (`bd mol show <implement-step-id>`) plus the latest revision summary before revising,
+  (`beads_mol_show({ id: "<implement-step-id>" })`) plus the latest revision summary before revising,
   rather than starting the breakdown over.
 
 ## Task Separation
@@ -196,7 +194,7 @@ review, don't just wait silently on the gate.
 Each task MUST end with an unfenced `---` (three or more hyphens) on its own
 line, immediately followed (after optional blank lines) by the next task's
 `### Task N` heading or a non-task trailing section. Task bodies are mirrored
-verbatim into task beads (`bd create -d`), and the `---` delimiter is what
+verbatim into task beads (`beads_create` with `description`), and the `---` delimiter is what
 keeps one task's body from bleeding into the next, so the rule is absolute:
 
 - Between consecutive tasks: `---`, blank line, `### Task N+1`.
@@ -248,12 +246,12 @@ Step 5, "Complete Development"). Nothing further to close here; the plan is now
 the bead graph itself.
 
 Hand the **implement step id** over to execution — `subagent-driven-development` /
-`executing-plans` read task beads directly (`bd show <task-id>`); no plan file is
+`executing-plans` read task beads directly (`beads_show({ id: "<task-id>" })`); no plan file is
 written or required.
 
 If planning stops early for any reason (blocked, redirected, session stopped), leave
 `implement` and any partially-created task beads as-is — the next session resumes by
-reading `bd mol show <implement-step-id>` to see what's already wired.
+reading `beads_mol_show({ id: "<implement-step-id>" })` to see what's already wired.
 
 Then offer execution choice:
 

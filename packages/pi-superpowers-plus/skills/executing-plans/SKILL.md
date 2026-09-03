@@ -25,25 +25,25 @@ Call `set_phase({ phase: "development" })`.
 ## The Process
 
 ### Step 1: Load and Review Plan
-1. Load the molecule: `bd mol current <implement-step-id> --json` — this returns every
+1. Load the molecule: `beads_mol_current({ id: "<implement-step-id>" })` — this returns every
    task bead's status and the current/next step.
 2. Review critically — read each task bead's full description
-   (`bd show <task-id>`) and identify any questions or concerns about the plan.
+   (`beads_show({ id: "<task-id>" })`) and identify any questions or concerns about the plan.
 3. If concerns: Raise them with your human partner before starting.
 4. If no concerns: confirm the `plan-approved` gate is resolved
-   (`bd show <plan-approved-gate-id>` — status should be `closed`; if not, stop and ask
-   the human to run `bd gate resolve <plan-approved-gate-id>` before proceeding).
+   (`beads_show({ id: "<plan-approved-gate-id>" })` — status should be `closed`; if not, stop and ask
+   the human to run `beads_gate_resolve({ id: "<plan-approved-gate-id>" })` before proceeding).
 
 ### Step 2: Execute Batch
 **Default: First 3 tasks**
 
 For each task, working the ready frontier (`bd ready --mol <implement-step-id>` shows
 what's unblocked right now):
-1. Claim it: `bd update <task-id> --claim` (atomically sets assignee + `in_progress`).
+1. Claim it: `beads_update({ id: "<task-id>", claim: true })` (atomically sets assignee + `in_progress`).
 2. Follow the task bead's full description exactly (it holds the same bite-sized steps that used to live in a plan file — now they live in the
    task bead's description).
 3. Run verifications as specified in the description.
-4. Close it: `bd close <task-id> --reason "<what was done>"` — this unblocks whatever
+4. Close it: `beads_close({ ids: "<task-id>", reason: "<what was done>" })` — this unblocks whatever
    depended on it; re-run `bd ready --mol <implement-step-id>` to see the next batch.
 
 ### Step 3: Report
@@ -62,8 +62,8 @@ Based on feedback:
 
 After all tasks complete and verified — confirm with `bd ready --mol
 <implement-step-id>` returning empty — close the `implement` step itself
-(`bd close <implement-step-id> --reason "all tasks complete"`), which unblocks `verify`.
-Claim `verify` (`bd update <verify-step-id> --claim`) and proceed to that work before the
+(`beads_close({ ids: "<implement-step-id>", reason: "all tasks complete" })`), which unblocks `verify`.
+Claim `verify` (`beads_update({ id: "<verify-step-id>", claim: true })`) and proceed to that work before the
 finishing-a-development-branch handoff below.
 
 - Announce: "I'm using the finishing-a-development-branch skill to complete this work."
@@ -81,9 +81,9 @@ finishing-a-development-branch handoff below.
 **Ask for clarification rather than guessing.**
 
 If you stop on a blocker or abort mid-batch, do not silently leave the current task bead
-in `in_progress`: mark it `blocked` (`bd update <task-id> --status blocked` with a
-`bd comment <task-id> "<blocker>"` explaining why), or leave it `in_progress` for resume,
-and on resume re-claim it (`bd update <task-id> --claim`) to continue.
+in `in_progress`: mark it `blocked` (`beads_update({ id: "<task-id>", status: "blocked" })` with a
+`beads_comment({ id: "<task-id>", text: "<blocker>" })` explaining why), or leave it `in_progress` for resume,
+and on resume re-claim it (`beads_update({ id: "<task-id>", claim: true })`) to continue.
 
 ## When the Plan Is Wrong
 
