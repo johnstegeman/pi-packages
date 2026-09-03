@@ -244,10 +244,10 @@ If you find issues, fix them inline. No need to re-review — just fix and move 
 After the task beads and `plan-approved` gate are created and wired, the `implement`
 step's own claim is left open on purpose — it stays `in_progress`, representing the
 whole implementation phase, until every task bead under it closes (see `executing-plans`
-Step 3, "Rewrite Complete Development"). Nothing further to close here; the plan is now
+Step 5, "Complete Development"). Nothing further to close here; the plan is now
 the bead graph itself.
 
-Hand execution the **implement step id** — `subagent-driven-development` /
+Hand the **implement step id** over to execution — `subagent-driven-development` /
 `executing-plans` read task beads directly (`bd show <task-id>`); no plan file is
 written or required.
 
