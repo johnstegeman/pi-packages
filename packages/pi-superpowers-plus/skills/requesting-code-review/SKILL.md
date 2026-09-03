@@ -62,7 +62,7 @@ HEAD_SHA=$(git rev-parse HEAD)
 
 [Dispatch code reviewer subagent]
   DESCRIPTION: Added verifyIndex() and repairIndex() with 4 issue types
-  PLAN_OR_REQUIREMENTS: the task bead pi-packages-mol-ogh.2 (read via `bd show`)
+  PLAN_OR_REQUIREMENTS: the task bead <task-id> (read via `beads_show({ id: "<task-id>", full: true })`)
   BASE_SHA: a7981ec
   HEAD_SHA: 3df7661
 
