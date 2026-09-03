@@ -87,15 +87,28 @@ the fenced code-block style used in `writing-plans`).
 
 ## Verification
 
-- Grep the four files for raw CLI usage (`` `bd `` + verb tokens, `bd <verb>`) → **0 hits**.
+- Grep the four SKILL.md files + the three SDD template files for raw CLI usage (`` `bd `` + verb tokens, `bd <verb>`) → **0 hits**.
 - Confirm every converted `beads_show` for requirement reads carries `full: true`; the gate status check stays compact.
 - Proofread each edit site for prose continuity.
 
 ## Acceptance
 
-1. Zero raw `bd` references remain in the four files.
+1. Zero raw `bd` references remain in the four SKILL.md files **and** the three SDD template files (`implementer-prompt.md`, `task-reviewer-prompt.md`, `re-review-prompt.md`).
 2. All 11 sites map to the equivalent `beads_*` call per the table above.
 3. Full-description reads (`subagent-driven-development` L189, `requesting-code-review` L65) use `full: true`.
 4. The two nits applied; prose voice preserved throughout.
 5. Single docs commit on `fix/superpowers-beads-cleanup`, e.g.
    `docs(skills): convert remaining bd CLI calls to beads_* tools`.
+
+
+## Scope expansion (post-approval, user choice B)
+
+Approved at plan-execution time: **Task 1 additionally converts the SDD template files**
+(`implementer-prompt.md`, `task-reviewer-prompt.md`, `re-review-prompt.md`), which hold 8
+more raw `bd` references (`` `bd show <TASK_ID>` ``, `` `bd show <TASK_ID> --json` ``,
+`` `bd mol show <implement-step-id>` ``) executed by dispatched
+implementer/reviewer subagents. They are requirement reads, so all map to
+`beads_show({ id: "<TASK_ID>", full: true })` / `beads_mol_show({ id: "<implement-step-id>" })`;
+`beads_show` + `full: true` returns the complete body, so the old `--json for the raw body`
+alternative is collapsed out. The `executing-plans` `bd ready --mol` references remain
+tracked separately under pi-packages-6np.
