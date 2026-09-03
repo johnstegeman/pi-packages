@@ -260,6 +260,7 @@ export default function piBeadsLean(pi: any) {
     let arr: any[];
     try {
       arr = JSON.parse(json);
+      if (arr && !Array.isArray(arr) && Array.isArray(arr.issues)) arr = arr.issues;
     } catch {
       return json.trim();
     }
@@ -514,6 +515,11 @@ export default function piBeadsLean(pi: any) {
           description:
             "Require AT LEAST ONE of these labels (comma-separated, bd --label-any semantics)",
         },
+        mol: {
+          type: "string",
+          description:
+            "Optional molecule root id or step id — scope ready steps to that molecule (bd ready --mol)",
+        },
       },
     },
     async execute(_id: string, params: any) {
@@ -526,6 +532,7 @@ export default function piBeadsLean(pi: any) {
       const rargs = ["ready", "--json", "--include-ephemeral", "-n", String(params?.limit ?? 15)];
       if (params?.label) rargs.push("--label", String(params.label));
       if (params?.labelAny) rargs.push("--label-any", String(params.labelAny));
+      if (params?.mol) rargs.push("--mol", String(params.mol));
       const r = await bd(rargs, scope);
       if (!r.ok) return textResult(`bd ready failed: ${r.err}`);
       return textResult(fmtRows(r.out));
@@ -559,6 +566,11 @@ export default function piBeadsLean(pi: any) {
           description:
             "Require AT LEAST ONE of these labels (comma-separated, bd --label-any semantics)",
         },
+        mol: {
+          type: "string",
+          description:
+            "Optional molecule root id — scope results to that molecule's steps/gates (bd list --parent + --include-gates)",
+        },
       },
     },
     async execute(_id: string, params: any) {
@@ -572,6 +584,8 @@ export default function piBeadsLean(pi: any) {
       if (params?.status) args.push("--status", String(params.status));
       if (params?.label) args.push("--label", String(params.label));
       if (params?.labelAny) args.push("--label-any", String(params.labelAny));
+      if (params?.mol)
+        args.push("--parent", String(params.mol), "--include-gates");
       const r = await bd(args, scoped ?? umbrella);
       if (!r.ok) return textResult(`bd list failed: ${r.err}`);
       return textResult(fmtRows(r.out));
