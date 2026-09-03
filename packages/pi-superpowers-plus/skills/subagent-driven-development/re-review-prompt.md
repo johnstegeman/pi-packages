@@ -17,7 +17,9 @@ Dispatch a subagent with this prompt:
     ## The Task
 
     call `set_phase({ phase: "development" })`.
-    Read the task brief: [BRIEF_FILE]
+    Read your task bead: `bd show <TASK_ID>`
+    (or `bd show <TASK_ID> --json` for the raw body).
+    It contains the exact, full text of the task.
 
     ## The Findings Under Verification
 
@@ -91,13 +93,13 @@ Dispatch a subagent with this prompt:
 ```
 
 **Placeholders:**
-- `[BRIEF_FILE]` — the task brief file (same file the implementer worked from)
+- `[TASK_ID]` — the task bead id (same task the implementer worked from)
 - `[FINDINGS]` — the Critical/Important findings and spec gaps from the
   previous review, copied verbatim, one per bullet
 - `[REPORT_FILE]` — the implementer's report file (fix reports appended)
 - `[FIX_BASE_SHA]` — the head the previous review saw
 - `[HEAD_SHA]` — current commit
-- `[DIFF_FILE]` — the path `scripts/review-package PLAN_FILE FIX_BASE HEAD` printed
+- `[DIFF_FILE]` — the path `scripts/review-package <implement-step-id> FIX_BASE HEAD` printed
 
 **Re-reviewer returns:** per-finding verdicts (ADDRESSED / NOT ADDRESSED),
 new breakage in the fix diff, out-of-scope observations, and a round verdict.

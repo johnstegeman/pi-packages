@@ -133,19 +133,19 @@ sequences — the single most expensive failure observed. Track progress in
 a ledger file, not only in todos.
 
 - Each plan owns a workspace: at skill start, run this skill's
-  `scripts/sdd-workspace PLAN_FILE` — it prints the plan's git-ignored
-  directory (`<repo-root>/.superpowers/sdd/<plan-basename>/`), home to
-  every artifact for THIS plan: ledger, briefs, reports, review packages.
-  Another plan's directory is never yours to read or write.
-- Check for this plan's ledger at `<workspace>/progress.md`. If its first
-  line names your plan file, tasks with a `Task <N>: complete` line are DONE
-  — do not re-dispatch them; resume at the first task without one. A task
-  whose last line is a fix round is mid-loop: resume the loop at the next
-  round. A ledger whose first line names a different plan file — or a stray
+  `scripts/sdd-workspace <implement-step-id>` — it prints the plan's git-ignored
+  directory (`<repo-root>/.superpowers/sdd/<implement-step-id>/`), home to the
+  ledger, implementer reports, and review packages. The implement step id (from
+  the molecule) keys the workspace; another plan's directory is never yours.
+- Check for this plan's ledger at `<workspace>/progress.md`. If its first line
+  names your implement step id, tasks with a `Task <N>: complete` line are DONE —
+  do not re-dispatch them; resume at the first task without one. A task whose
+  last line is a fix round is mid-loop: resume the loop at the next round. A
+  ledger whose first line names a different implement step id — or a stray
   ledger at the old flat path `.superpowers/sdd/progress.md` — is another
   plan's progress: leave it in place and start your own, fresh.
 - Create the ledger with its identity as the first line:
-  `# SDD ledger — plan: <plan file path>`.
+  `# SDD ledger — plan: <implement-step-id>`.
 - The ledger is your recovery map: the commits it names exist in git even
   when your context no longer remembers creating them. After compaction,
   trust the ledger and `git log` over your own recollection.
@@ -182,27 +182,16 @@ and is re-read on every later turn. Hand artifacts over as files.
 Record BASE (`git rev-parse HEAD`) before dispatching — the review package
 and fix-round diffs need it.
 
-- **Task brief:** before dispatching an implementer, run this skill's
-  `scripts/task-brief PLAN_FILE N` — it extracts the task's full text to a
-  uniquely named file and prints the path. The extractor relies on the plan
-  format that `/skill:writing-plans` mandates: tasks are delimited by an
-  unfenced `---` on its own line (before the next `### Task` heading, and
-  before any trailing section after the last task). Tasks written to that
-  format extract cleanly — including the last task, which ends at the
-  `---`-before-trailing-section instead of running off the end of the
-  plan. Compose the dispatch so the
-  brief stays the single source of requirements. Your dispatch should
-  contain: (1) one line on where this task fits in the project; (2) the
-  brief path, introduced as "read this first — it is your requirements,
-  with the exact values to use verbatim"; (3) interfaces and decisions from
-  earlier tasks that the brief cannot know; (4) your resolution of any
-  ambiguity you noticed in the brief; (5) the report-file path and report
-  contract. Exact values (numbers, magic strings, signatures, test cases)
-  appear only in the brief. Never make a subagent read the whole plan file.
-- **Report file:** name the implementer's report file after the brief
-  (brief `…/task-N-brief.md` → report `…/task-N-report.md`) and put it in
-  the dispatch prompt. The implementer writes the full report there and
-  returns only status, commits, a one-line test summary, and concerns.
+- **Task bead:** before dispatching an implementer, note the task's bead id
+  (`bd mol show <implement-step-id>` lists the task beads under it). Each task
+  bead's `description` IS the task's full requirements — every step, every code
+  block. Hand the implementer ONLY its own task bead id, never the whole
+  molecule: "read your task bead first — `bd show <task-id>` — it is your
+  requirements, verbatim." There is no plan file and no brief file.
+- **Report file:** name the implementer's report file after its task id
+  (`<workspace>/<task-id>-report.md`) and put it in the dispatch prompt. The
+  implementer writes the full report there and returns only status, commits,
+  a one-line test summary, and concerns.
 - A dispatch prompt describes one task, not the session's history. Do not
   paste accumulated prior-task summaries ("state after Tasks 1-3") into
   later dispatches. A fresh subagent needs its task, the interfaces it
@@ -221,7 +210,7 @@ Template: [implementer-prompt.md](implementer-prompt.md)
 
 Implementer subagents report one of four statuses. Handle each appropriately:
 
-**DONE:** Generate the review package (`scripts/review-package PLAN_FILE BASE HEAD`, from this skill's directory — it prints the unique file path it wrote; BASE is the commit you recorded before dispatching the implementer — never `HEAD~1`, which silently drops all but the last commit of a multi-commit task), then dispatch the task reviewer with the printed path.
+**DONE:** Generate the review package (`scripts/review-package <implement-step-id> BASE HEAD`, from this skill's directory — it prints the unique file path it wrote; BASE is the commit you recorded before dispatching the implementer — never `HEAD~1`, which silently drops all but the last commit of a multi-commit task), then dispatch the task reviewer with the printed path.
 
 **DONE_WITH_CONCERNS:** The implementer completed the work but flagged doubts. Read the concerns before proceeding. If the concerns are about correctness or scope, address them before review. If they're observations (e.g., "this file is getting large"), note them and proceed to review.
 
@@ -250,7 +239,7 @@ required. Implementer self-review never replaces the task review; both are
 needed.
 
 - Hand the reviewer its diff as a file: run this skill's
-  `scripts/review-package PLAN_FILE BASE HEAD` and pass the reviewer the file path
+  `scripts/review-package <implement-step-id> BASE HEAD` and pass the reviewer the file path
   it prints (or, without bash: `git log --oneline`, `git diff --stat`,
   and `git diff -U10` for the range, redirected to one uniquely named
   file). The output never enters your own context, and the reviewer sees
@@ -258,8 +247,8 @@ needed.
   call. Use the BASE you recorded before dispatching the implementer —
   never `HEAD~1`, which silently truncates multi-commit tasks. Never
   dispatch a task reviewer without a diff file.
-- **Reviewer inputs:** the task reviewer gets three paths — the same brief
-  file, the report file, and the review package — plus the global
+- **Reviewer inputs:** the task reviewer gets three paths — the same task
+  bead id, the report file, and the review package — plus the global
   constraints that bind the task.
 - The global-constraints block you hand the reviewer is its attention
   lens. Copy the binding requirements verbatim from the plan's Global
@@ -318,7 +307,7 @@ parameter is real tool support from `@tintinweb/pi-subagents` — the old
 "resume this agent" instruction had no tool behind it; now it does.
 
 **Rounds 4-5 — dispatch a fresh implementer** (drop `resume:`), with the
-brief path, the report-file path, the open findings, and this framing: "A
+task bead id, the report-file path, the open findings, and this framing: "A
 prior implementer attempted this task [N] times; you own it now. Read the
 report file for what was tried." A loop that survives three resumes usually
 means the implementer cannot see its own problem — fresh eyes in one move.
@@ -331,10 +320,10 @@ output; dispatch the re-review once all three are present. Name the
 covering test files in the fix message — a one-line fix does not need the
 whole suite.
 
-**The re-review is scoped.** Run `scripts/review-package PLAN_FILE FIX_BASE HEAD`
+**The re-review is scoped.** Run `scripts/review-package <implement-step-id> FIX_BASE HEAD`
 where FIX_BASE is the head the previous review saw, and dispatch
 [re-review-prompt.md](re-review-prompt.md) with the findings list, the
-brief, the report file, and the printed diff path. The re-reviewer verdicts
+task bead id, the report file, and the printed diff path. The re-reviewer verdicts
 each finding ADDRESSED or NOT ADDRESSED and flags new breakage in the fix
 diff only. New Critical/Important breakage in the fix diff joins the open
 findings list. Out-of-scope observations go to the ledger as deferred
@@ -393,7 +382,7 @@ Do NOT automatically dispatch final review or start the finishing skill. The use
 
 After the user confirms, At the start of the skill, call `set_phase({ phase: "final review" })`.
 The final whole-branch review gets a package too:
-run `scripts/review-package PLAN_FILE MERGE_BASE HEAD` (MERGE_BASE is the
+run `scripts/review-package <implement-step-id> MERGE_BASE HEAD` (MERGE_BASE is the
 branch point) and dispatch the `code-reviewer` agent with the
 [code-reviewer.md](../requesting-code-review/code-reviewer.md) template from
 the requesting-code-review skill, passing the printed package path.
@@ -426,7 +415,7 @@ If an implementer subagent fails, errors out, or produces incomplete work:
 - Skip the task review (spec + quality)
 - Proceed with unfixed issues that are neither fixed nor parked-with-ruling
 - Dispatch multiple implementation subagents in parallel (conflicts)
-- Make a subagent read the plan file (hand it the brief file instead)
+- Make a subagent read more than its own task bead (hand it the whole plan / molecule tree)
 - Skip scene-setting context (subagent needs to understand where task fits)
 - Ignore subagent questions (answer before letting them proceed)
 - Accept "close enough" on spec compliance

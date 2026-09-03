@@ -9,8 +9,9 @@ Dispatch a subagent with this prompt:
 
     ## Task Description
 
-    Read your task brief first: [BRIEF_FILE]
-    It contains the full task text from the plan.
+    Read your task bead first: `bd show <TASK_ID>`
+    (or `bd show <TASK_ID> --json` for the raw body).
+    It contains the exact, full text of your task.
 
     ## Context
 
@@ -142,10 +143,9 @@ Dispatch a subagent with this prompt:
 ```
 
 **Placeholders:**
-- `[BRIEF_FILE]` — REQUIRED: the task brief file (`scripts/task-brief PLAN N`
-  prints the path)
+- `[TASK_ID]` — REQUIRED: the task bead id (from `bd mol show <implement-step-id>`)
 - `[REPORT_FILE]` — REQUIRED: the file the implementer writes its full report to
-  (name after the brief: brief `…/task-N-brief.md` → report `…/task-N-report.md`)
+  (name by task id: `<workspace>/<task-id>-report.md`)
 - `[task name]`, `[Context …]`, `[directory]` — fill per task
 
 **Implementer returns:** short status contract (Status, commits, one-line test

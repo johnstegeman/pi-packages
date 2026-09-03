@@ -18,7 +18,9 @@ Dispatch a subagent with this prompt:
     ## What Was Requested
 
     call `set_phase({ phase: "brainstorming" })`.
-    Read the task brief: [BRIEF_FILE]
+    Read your task bead: `bd show <TASK_ID>`
+    (or `bd show <TASK_ID> --json` for the raw body).
+    It contains the exact, full text of the task.
 
     Global constraints from the spec/design that bind this task:
     [GLOBAL_CONSTRAINTS]
@@ -126,7 +128,7 @@ Dispatch a subagent with this prompt:
     would block a merge over — verbatim duplication of a logic block,
     swallowed errors, tests that assert nothing. "Coverage could be broader"
     and polish suggestions are Minor.
-    If the plan or brief explicitly mandates something this rubric calls a
+    If the task text explicitly mandates something this rubric calls a
     defect (a test that asserts nothing, verbatim duplication of a logic
     block), that IS a finding — report it as Important, labeled
     plan-mandated. The plan's authorship does not grade its own work; the
@@ -165,8 +167,8 @@ Dispatch a subagent with this prompt:
 ```
 
 **Placeholders:**
-- `[BRIEF_FILE]` — REQUIRED: the task brief file (`scripts/task-brief PLAN N`
-  prints the path; same file the implementer worked from)
+- `[TASK_ID]` — REQUIRED: the task bead id (from `bd mol show <implement-step-id>`);
+  the same task the implementer worked from
 - `[GLOBAL_CONSTRAINTS]` — the binding requirements copied verbatim from
   the plan's Global Constraints section or the spec: exact values, formats,
   and stated relationships between components (not process rules — those
@@ -176,7 +178,7 @@ Dispatch a subagent with this prompt:
 - `[BASE_SHA]` — commit before this task
 - `[HEAD_SHA]` — current commit
 - `[DIFF_FILE]` — REQUIRED: the path the controller wrote the review
-  package to (`scripts/review-package PLAN_FILE BASE HEAD` prints the unique
+  package to (`scripts/review-package <implement-step-id> BASE HEAD` prints the unique
   path it wrote; the package never enters the controller's context)
 
 **Reviewer returns:** Spec Compliance verdict (✅/❌/⚠️), Strengths, Issues
