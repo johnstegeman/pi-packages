@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync, writeFileSync, mkdirSync, symlinkSync, rmSync, readlinkSync, existsSync } from "node:fs";
+import { mkdtempSync, writeFileSync, mkdirSync, symlinkSync, rmSync, readlinkSync, existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { seedFormula } from "./formula-seed.mjs";
@@ -39,6 +39,45 @@ test("our good symlink -> already-linked (no change)", async () => {
   } finally { cleanup(s); }
 });
 
+test("symlinked package dir -> linked", async () => {
+  const s = scratch();
+  try {
+    const pkgDir = join(s.dir, "pkg"); // real package dir
+    symlinkSync(pkgDir, join(s.dir, "alias")); // simulate a pi-install-style symlinked package dir
+    const source = join(s.dir, "alias", "formulas", FORMULA);
+    const r = await seedFormula(source, s.targetDir);
+    assert.equal(r.action, "linked");
+    assert.ok(existsSync(s.target));
+  } finally { cleanup(s); }
+});
+
+test("symlinked package dir, re-seed -> already-linked (realpath identity)", async () => {
+  const s = scratch();
+  try {
+    const pkgDir = join(s.dir, "pkg");
+    symlinkSync(pkgDir, join(s.dir, "alias"));
+    const source = join(s.dir, "alias", "formulas", FORMULA);
+    const r1 = await seedFormula(source, s.targetDir);
+    assert.equal(r1.action, "linked");
+    const r2 = await seedFormula(source, s.targetDir);
+    assert.equal(r2.action, "already-linked");
+  } finally { cleanup(s); }
+});
+
+test("already-linked despite differing source path form (real vs symlinked)", async () => {
+  const s = scratch();
+  try {
+    const pkgDir = join(s.dir, "pkg");
+    symlinkSync(pkgDir, join(s.dir, "alias"));
+    const symlinkSource = join(s.dir, "alias", "formulas", FORMULA);
+    const realSource = join(pkgDir, "formulas", FORMULA);
+    assert.equal((await seedFormula(symlinkSource, s.targetDir)).action, "linked");
+    // re-seed through the sibling real path; only realpath-based identity sees this as already-linked
+    const r = await seedFormula(realSource, s.targetDir);
+    assert.equal(r.action, "already-linked");
+  } finally { cleanup(s); }
+});
+
 test("dangling symlink -> relinked", async () => {
   const s = scratch();
   try {
@@ -71,6 +110,7 @@ test("regular file at target -> skipped-user-file (untouched)", async () => {
     const r = await seedFormula(s.source, s.targetDir);
     assert.equal(r.action, "skipped-user-file");
     assert.equal(existsSync(s.target), true);
+    assert.equal(readFileSync(join(s.targetDir, FORMULA), "utf8"), "user customized");
   } finally { cleanup(s); }
 });
 
@@ -88,5 +128,6 @@ test("missing source -> skipped-error (no throw)", async () => {
   try {
     const r = await seedFormula(join(s.dir, "pkg", "formulas", "nope.formula.toml"), s.targetDir);
     assert.equal(r.action, "skipped-error");
+    assert.equal(existsSync(join(s.targetDir, FORMULA)), false);
   } finally { cleanup(s); }
 });
