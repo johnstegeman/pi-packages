@@ -182,7 +182,7 @@ digraph brainstorming {
 
 Closing steps is order-enforced: `bd close <step>` fails ("blocked by open issues
 [..]") until the prerequisite step is closed and its gate resolved. `bd gate resolve`
-unblocks the dependent step but does not close the gate task bead itself -- e.g. after
+unblocks the dependent step but does not close the gate task bead itself — e.g. after
 `writing-plans` reveals the plan, close the plan-approval gate bead explicitly
 (`bd close <id>`) after resolving.
 

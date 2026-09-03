@@ -9,8 +9,8 @@ Dispatch a subagent with this prompt:
 
     ## Task Description
 
-    Read your task bead first: `bd show <TASK_ID>`
-    (or `bd show <TASK_ID> --json` for the raw body).
+    Read your task bead first: bd show <TASK_ID>
+    (or bd show <TASK_ID> --json for the raw body).
     It contains the exact, full text of your task.
 
     ## Context
@@ -30,14 +30,14 @@ Dispatch a subagent with this prompt:
     ## Your Job
 
     Once you're clear on requirements:
-    1. call `set_phase({ phase: "development" })`.
+    1. call set_phase({ phase: "development" }).
     2. Implement exactly what the task specifies
     3. Write tests (following TDD if task says to)
     4. Verify implementation works
     5. Commit your work
     6. Self-review (see below)
     7. Report back
-    **Do NOT create, update, or close any beads issues (`beads_*` tools / `bd` commands) — task tracking belongs to the orchestrator, who closes this task's bead only after the review passes. Report DONE; the controller handles the bead.**
+    **Do NOT create, update, or close any beads issues (beads_* tools / bd commands) — task tracking belongs to the orchestrator, who closes this task's bead only after the review passes. Report DONE; the controller handles the bead.**
 
     Work from: [directory]
 

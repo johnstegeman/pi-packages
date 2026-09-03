@@ -16,9 +16,9 @@ Dispatch a subagent with this prompt:
 
     ## The Task
 
-    call `set_phase({ phase: "development" })`.
-    Read your task bead: `bd show <TASK_ID>`
-    (or `bd show <TASK_ID> --json` for the raw body).
+    call set_phase({ phase: "development" }).
+    Read your task bead: bd show <TASK_ID>
+    (or bd show <TASK_ID> --json for the raw body).
     It contains the exact, full text of the task.
 
     ## The Findings Under Verification
@@ -37,8 +37,8 @@ Dispatch a subagent with this prompt:
     Read the diff file once — it contains the fix commits, a stat summary,
     and the fix diff with surrounding context. Do not re-run git commands.
     If the diff file is missing, fetch the diff yourself:
-    `git diff --stat [FIX_BASE_SHA]..[HEAD_SHA]` and
-    `git diff [FIX_BASE_SHA]..[HEAD_SHA]`.
+    git diff --stat [FIX_BASE_SHA]..[HEAD_SHA] and
+    git diff [FIX_BASE_SHA]..[HEAD_SHA].
 
     Your review is read-only on this checkout. Do not mutate the working
     tree, the index, HEAD, or branch state in any way.

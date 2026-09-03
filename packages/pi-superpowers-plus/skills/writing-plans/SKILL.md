@@ -195,17 +195,17 @@ review, don't just wait silently on the gate.
 
 Each task MUST end with an unfenced `---` (three or more hyphens) on its own
 line, immediately followed (after optional blank lines) by the next task's
-`### Task N` heading or a non-task trailing section. An extractor named by
-one task number (e.g. a task-bead extractor) needs a definite end-of-task
-delimiter, so the rule is absolute:
+`### Task N` heading or a non-task trailing section. Task bodies are mirrored
+verbatim into task beads (`bd create -d`), and the `---` delimiter is what
+keeps one task's body from bleeding into the next, so the rule is absolute:
 
 - Between consecutive tasks: `---`, blank line, `### Task N+1`.
 - After the last task, before any trailing section (`## Verification`,
   `## Summary`, `## Notes`, etc.): `---`, then the section heading.
 - NEVER use `---` inside a task body (e.g. between `**Files:**` and the
   first step). The `**Step N:**` labels are bold text, not headings, so
-  an extractor would not mistake them for a boundary — but keep bodies
-  free of `---` anyway so the format stays unambiguous.
+  they can't be mistaken for a boundary — but keep bodies free of `---`
+  anyway so the format stays unambiguous.
 
 A `---` line inside a code fence is literal markdown content (the file
 content the task edits) and is NOT a separator.
@@ -244,10 +244,10 @@ If you find issues, fix them inline. No need to re-review — just fix and move 
 After the task beads and `plan-approved` gate are created and wired, the `implement`
 step's own claim is left open on purpose — it stays `in_progress`, representing the
 whole implementation phase, until every task bead under it closes (see `executing-plans`
-Step 3, "Rewrite Complete Development"). Nothing further to close here; the plan is now
+Step 5, "Complete Development"). Nothing further to close here; the plan is now
 the bead graph itself.
 
-Hand execution the **implement step id** — `subagent-driven-development` /
+Hand the **implement step id** over to execution — `subagent-driven-development` /
 `executing-plans` read task beads directly (`bd show <task-id>`); no plan file is
 written or required.
 

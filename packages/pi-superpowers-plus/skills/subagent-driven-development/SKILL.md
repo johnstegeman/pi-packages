@@ -65,7 +65,7 @@ digraph process {
         "Implementer implements, tests, commits, self-reviews" [shape=box];
         "Generate review package, dispatch task reviewer (./task-reviewer-prompt.md)" [shape=box];
         "Spec ✅ and quality approved?" [shape=diamond];
-        "Finding conflicts with plan text?" [shape=diamond];
+        "Finding conflicts with task text?" [shape=diamond];
         "Ask human partner which governs" [shape=box];
         "Fix round R of 5: R≤3 resume implementer; R≥4 fresh implementer" [shape=box];
         "Dispatch scoped re-review (./re-review-prompt.md)" [shape=box];
@@ -94,10 +94,10 @@ digraph process {
     "Implementer implements, tests, commits, self-reviews" -> "Generate review package, dispatch task reviewer (./task-reviewer-prompt.md)";
     "Generate review package, dispatch task reviewer (./task-reviewer-prompt.md)" -> "Spec ✅ and quality approved?";
     "Spec ✅ and quality approved?" -> "Append completion to ledger, mark todo complete" [label="yes"];
-    "Spec ✅ and quality approved?" -> "Finding conflicts with plan text?" [label="no"];
-    "Finding conflicts with plan text?" -> "Ask human partner which governs" [label="yes"];
+    "Spec ✅ and quality approved?" -> "Finding conflicts with task text?" [label="no"];
+    "Finding conflicts with task text?" -> "Ask human partner which governs" [label="yes"];
     "Ask human partner which governs" -> "Fix round R of 5: R≤3 resume implementer; R≥4 fresh implementer";
-    "Finding conflicts with plan text?" -> "Fix round R of 5: R≤3 resume implementer; R≥4 fresh implementer" [label="no"];
+    "Finding conflicts with task text?" -> "Fix round R of 5: R≤3 resume implementer; R≥4 fresh implementer" [label="no"];
     "Fix round R of 5: R≤3 resume implementer; R≥4 fresh implementer" -> "Dispatch scoped re-review (./re-review-prompt.md)";
     "Dispatch scoped re-review (./re-review-prompt.md)" -> "All findings addressed?";
     "All findings addressed?" -> "Append completion to ledger, mark todo complete" [label="yes"];
@@ -166,7 +166,7 @@ Before dispatching Task 1, scan the plan once for conflicts:
   defect (a test that asserts nothing, verbatim duplication of a logic block)
 
 Present everything you find to your human partner as one batched question —
-each finding beside the plan text that mandates it, asking which governs —
+each finding beside the task text that mandates it, asking which governs —
 before execution begins, not one interrupt per discovery mid-plan. If the
 scan is clean, proceed without comment. The review loop remains the net for
 conflicts that only emerge from implementation.
@@ -290,8 +290,8 @@ Before the loop starts, two routes leave it immediately:
   before merge. A roll-up nobody reads is a silent discard. Minor findings
   never enter the loop.
 - A finding labeled plan-mandated — or any finding that conflicts with
-  what the plan's text requires — is the human's decision, like any plan
-  contradiction: present the finding and the plan text, ask which governs.
+  what the task text requires — is the human's decision, like any plan
+  contradiction: present the finding and the task text, ask which governs.
   Do not dismiss the finding because the plan mandates it, and do not
   dispatch a fix that contradicts the plan without asking.
 
@@ -346,7 +346,7 @@ the cross-task context the reviewer lacks:
   a ruling that says it's real and deferred.
 - **Real and load-bearing** — a later task builds on it, or it reveals a
   plan defect: STOP. Append `Task <N>: BLOCKED — <reason>` and report to
-  your human partner with the finding, the plan text it collides with, and
+  your human partner with the finding, the task text it collides with, and
   the fix history. Parking a structural failure lets every dependent task
   build on it and hands the final review a problem it cannot fix either.
 
