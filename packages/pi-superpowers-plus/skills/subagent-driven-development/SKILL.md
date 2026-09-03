@@ -152,9 +152,9 @@ a ledger file, not only in todos.
 - `git clean -fdx` will destroy the workspace (it's git-ignored scratch); if
   that happens, recover from `git log`.
 
-Read the molecule once (`bd mol current <implement-step-id> --json`), note its context
+Read the molecule once (`beads_mol_current({ id: "<implement-step-id>" })`), note its context
 and Global Constraints from each task bead's description, and confirm the
-`plan-approved` gate is closed (`bd show <plan-approved-gate-id>`) before dispatching any
+`plan-approved` gate is closed (`beads_show({ id: "<plan-approved-gate-id>" })`) before dispatching any
 subagent. Task ids and their `needs` ordering already exist as real dependency edges —
 no `TaskCreate`-equivalent step is needed here; `writing-plans` already created them
 (see its Task Structure section).
@@ -183,10 +183,10 @@ Record BASE (`git rev-parse HEAD`) before dispatching — the review package
 and fix-round diffs need it.
 
 - **Task bead:** before dispatching an implementer, note the task's bead id
-  (`bd mol show <implement-step-id>` lists the task beads under it). Each task
+  (`beads_mol_show({ id: "<implement-step-id>" })` lists the task beads under it). Each task
   bead's `description` IS the task's full requirements — every step, every code
   block. Hand the implementer ONLY its own task bead id, never the whole
-  molecule: "read your task bead first — `bd show <task-id>` — it is your
+  molecule: "read your task bead first — `beads_show({ id: "<task-id>", full: true })` — it is your
   requirements, verbatim." There is no plan file and no brief file.
 - **Report file:** name the implementer's report file after its task id
   (`<workspace>/<task-id>-report.md`) and put it in the dispatch prompt. The
@@ -222,7 +222,7 @@ Implementer subagents report one of four statuses. Handle each appropriately:
 3. If the task is too large, break it into smaller pieces
 4. If the plan itself is wrong, escalate to the human
 
-Update the task's bead: `beads_update({ id: "<id>", status: "blocked", appendNotes: "<blocker>" })`. If the task is later re-dispatched (anything other than escalate-to-human), re-mark it `in_progress` when work resumes — never leave it silently in `in_progress`/`open`.
+Update the task's bead: `beads_update({ id: "<id>", status: "blocked" })` and `beads_comment({ id: "<id>", text: "<blocker>" })`. If the task is later re-dispatched (anything other than escalate-to-human), re-mark it `in_progress` when work resumes — never leave it silently in `in_progress`/`open`.
 
 **Never** ignore an escalation or force a retry without changes. If the implementer said it's stuck, something needs to change.
 
@@ -364,7 +364,7 @@ message as your other bookkeeping:
 - `Task <N>: complete (commits <base7>..<head7>, <K> parked)` after a
   tripped breaker
 
-Then close the task bead (`bd close <task-id> --reason "<summary>"`) and move on. Never
+Then close the task bead (`beads_close({ ids: "<task-id>", reason: "<summary>" })`) and move on. Never
 move to the next task while the review has open Critical/Important issues
 that are neither fixed nor parked-with-ruling at the cap.
 

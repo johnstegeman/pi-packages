@@ -9,8 +9,7 @@ Dispatch a subagent with this prompt:
 
     ## Task Description
 
-    Read your task bead first: bd show <TASK_ID>
-    (or bd show <TASK_ID> --json for the raw body).
+    Read your task bead first: beads_show({ id: "<TASK_ID>", full: true }).
     It contains the exact, full text of your task.
 
     ## Context
@@ -143,7 +142,7 @@ Dispatch a subagent with this prompt:
 ```
 
 **Placeholders:**
-- `[TASK_ID]` — REQUIRED: the task bead id (from `bd mol show <implement-step-id>`)
+- `[TASK_ID]` — REQUIRED: the task bead id (from `beads_mol_show({ id: "<implement-step-id>" })`)
 - `[REPORT_FILE]` — REQUIRED: the file the implementer writes its full report to
   (name by task id: `<workspace>/<task-id>-report.md`)
 - `[task name]`, `[Context …]`, `[directory]` — fill per task
