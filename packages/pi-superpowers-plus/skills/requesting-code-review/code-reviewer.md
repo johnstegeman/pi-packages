@@ -133,7 +133,7 @@ Dispatch a subagent with this prompt:
 
 **Placeholders:**
 - `[DESCRIPTION]` — brief summary of what was built
-- `[PLAN_OR_REQUIREMENTS]` — what it should do (plan file path, task text, or requirements)
+- `[PLAN_OR_REQUIREMENTS]` — what it should do (task text, task bead id, or requirements)
 - `[BASE_SHA]` — starting commit
 - `[HEAD_SHA]` — ending commit
 - `[DIFF_FILE]` — optional: path to a pre-generated review package (commit list + stat summary + full diff). When provided, the reviewer reads it instead of running git diff. Used by subagent-driven-development's final whole-branch review.
