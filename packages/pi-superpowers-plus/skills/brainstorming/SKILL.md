@@ -1,7 +1,6 @@
 ---
 name: brainstorming
 description: "You MUST use this before any creative work - creating features, building components, adding functionality, or modifying behavior. Explores user intent, requirements and design before implementation."
-disable-model-invocation: true
 ---
 
 > **Related skills:** Consider `/skill:using-git-worktrees` to set up an isolated workspace, then `/skill:writing-plans` for implementation planning.
@@ -72,6 +71,7 @@ into spec work, handed off to `writing-plans` at `implement`. Resolve each step 
 runtime via `beads_list({ label: "step:<key>", mol: "<root-id>" })` — e.g. `step:explore`,
 `step:clarify`, `step:design`, `step:write-spec`; gates are `step:gate-<key>` (e.g.
 `step:gate-design-approved`).
+Close each step bead in the same turn its real output exists (never batch several closes at the end of a phase) — this is what keeps `bd mol current --json` honest so the widget shows the real current step.
 
 1. **Explore project context** (`beads_update({ id: "<explore-step-id>", claim: true })`) — check files, docs, recent commits in the **user's current working directory** (not the skill's install directory — see `using-superpowers` → Working Directory). Close with `beads_close({ ids: "<explore-step-id>" })` once done.
 2. **Ask clarifying questions** (`beads_update({ id: "<clarify-step-id>", claim: true })`) — one at a time, across as many turns as it takes, waiting for the user's actual reply each time, until you understand purpose/constraints/success criteria. Do not close this step after a single question.
