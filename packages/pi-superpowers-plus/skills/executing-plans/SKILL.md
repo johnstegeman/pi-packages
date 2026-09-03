@@ -26,7 +26,7 @@ Call `set_phase({ phase: "development" })`.
 
 ### Step 1: Load and Review Plan
 1. Load the molecule: `bd mol current <implement-step-id> --json` — this returns every
-   task bead's status and the current/next step, replacing "read plan file."
+   task bead's status and the current/next step.
 2. Review critically — read each task bead's full description
    (`bd show <task-id>`) and identify any questions or concerns about the plan.
 3. If concerns: Raise them with your human partner before starting.
@@ -40,8 +40,8 @@ Call `set_phase({ phase: "development" })`.
 For each task, working the ready frontier (`bd ready --mol <implement-step-id>` shows
 what's unblocked right now):
 1. Claim it: `bd update <task-id> --claim` (atomically sets assignee + `in_progress`).
-2. Follow the task bead's full description exactly (it holds the same bite-sized steps a
-   plan.md task body used to hold).
+2. Follow the task bead's full description exactly (it holds the same bite-sized steps that used to live in a plan file — now they live in the
+   task bead's description).
 3. Run verifications as specified in the description.
 4. Close it: `bd close <task-id> --reason "<what was done>"` — this unblocks whatever
    depended on it; re-run `bd ready --mol <implement-step-id>` to see the next batch.

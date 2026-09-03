@@ -180,6 +180,11 @@ digraph brainstorming {
     recorded, leave the current step's status as-is (open or in_progress) for the next
     session to resume — do not close steps whose real output doesn't exist yet.
 
+Closing steps is order-enforced: `bd close <step>` fails ("blocked by open issues
+[..]") until the prerequisite step is closed and its gate resolved. `bd gate resolve`
+unblocks the dependent step but does not close the gate task bead itself (e.g. the
+plan-approval gate bead in writing-plans — close it explicitly after resolving).
+
 **Spec Self-Review:**
 After writing the spec document, look at it with fresh eyes:
 
