@@ -515,11 +515,6 @@ export default function piBeadsLean(pi: any) {
           description:
             "Require AT LEAST ONE of these labels (comma-separated, bd --label-any semantics)",
         },
-        mol: {
-          type: "string",
-          description:
-            "Optional molecule root id or step id — scope ready steps to that molecule (bd ready --mol)",
-        },
       },
     },
     async execute(_id: string, params: any) {
@@ -532,7 +527,6 @@ export default function piBeadsLean(pi: any) {
       const rargs = ["ready", "--json", "--include-ephemeral", "-n", String(params?.limit ?? 15)];
       if (params?.label) rargs.push("--label", String(params.label));
       if (params?.labelAny) rargs.push("--label-any", String(params.labelAny));
-      if (params?.mol) rargs.push("--mol", String(params.mol));
       const r = await bd(rargs, scope);
       if (!r.ok) return textResult(`bd ready failed: ${r.err}`);
       return textResult(fmtRows(r.out));

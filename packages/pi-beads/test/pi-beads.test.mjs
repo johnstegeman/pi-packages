@@ -434,7 +434,6 @@ test("single-repo: read tools never emit beads:changed", async () => {
     ["beads_list", { status: "open,in_progress", limit: 7 }, ["list", "--json", "-n", "7", "--status", "open,in_progress"]],
     ["beads_list", { label: "step:implement", mol: "proj-m1" }, ["list", "--json", "-n", "30", "--label", "step:implement", "--parent", "proj-m1", "--include-gates"]],
     ["beads_list", { mol: "proj-m1" }, ["list", "--json", "-n", "30", "--parent", "proj-m1", "--include-gates"]],
-    ["beads_ready", { mol: "proj-m1" }, ["ready", "--json", "--include-ephemeral", "-n", "15", "--mol", "proj-m1"]],
     ["beads_show", { id: "proj-1a2" }, ["show", "proj-1a2", "--json"]],
     ["beads_deps", { ids: "proj-1a2" }, ["dep", "tree", "proj-1a2", "--direction", "down", "--json"]],
     ["beads_mol_show", { id: "proj-m1" }, ["mol", "show", "proj-m1", "--json"]],
