@@ -1,29 +1,16 @@
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
-import {
-  createChangeCoalescer,
-  moleculeWidgetLines,
-  parseMoleculeCurrent,
-  parseMoleculeShow,
-} from "./beads-molecule-widget.mjs";
+import { createChangeCoalescer, moleculeWidgetLines, parseMoleculeCurrent } from "./beads-molecule-widget.mjs";
 
-/** A child bead of the current step, as produced by `parseMoleculeShow`. */
-type ChildBead = {
-  id: string;
-  title: string;
-  status: string;
-  priority?: number;
-  issue_type: string;
-  created_at?: string;
+type WidgetTheme = { fg?: (color: string, text: string) => string };
+type UiApi = {
+  setWidget(id: string, widget: unknown, opts?: unknown): void;
+  theme?: WidgetTheme;
 };
-
-type MoleculeState = ReturnType<typeof parseMoleculeCurrent> & {
-  /** children of the current step, attached by refreshChildren — `mol current` never emits these */
-  children?: ChildBead[];
-};
+type SessionContext = { ui?: UiApi; cwd?: string };
 
 export default function (pi: ExtensionAPI) {
-  let uiRef: any = null;
-  let activeMolecule: MoleculeState | null = null;
+  let ui: UiApi | null = null;
+  let activeMolecule: ReturnType<typeof parseMoleculeCurrent> | null = null;
 
   // ---- event-driven refresh: fires on every beads:changed, coalesced ----
   let coalescer: ReturnType<typeof createChangeCoalescer> | null = null;
@@ -31,80 +18,40 @@ export default function (pi: ExtensionAPI) {
 
   function doRefresh() {
     const cwd = lastCwd;
-    void refreshMolecule(cwd)
-      .then(() => refreshChildren(cwd))
-      .then(
-        () => renderMolecule(),
-        () => {},
-      );
+    void refreshMolecule(cwd).then(
+      () => renderMolecule(),
+      () => {},
+    );
   }
+
   async function refreshMolecule(cwd: string): Promise<void> {
     const r = await pi.exec("bd", ["mol", "current", "--json"], {
       cwd,
       timeout: 5000,
     });
-    if (!r || r.code !== 0) {
+    if (r?.code !== 0) {
       // only clear on a clean "no active molecule" signal, never on a transient
-      // failure — an unreachable `bd` binary should not blank a widget that was
+      // failure — an unreachable bd binary should not blank a widget that was
       // showing real progress a moment ago.
       if (r && /no active molecule/i.test(r.stderr ?? "")) activeMolecule = null;
       return;
     }
     const parsed = parseMoleculeCurrent(r.stdout);
-    if (parsed) {
-      // A fresh parse carries no `children`; carry the last known subtree forward
-      // when the current step is unchanged (children are cached alongside
-      // activeMolecule), so a steady tick never blanks it and a failed `mol show`
-      // can't erase the last known children.
-      if (activeMolecule && activeMolecule.children && parsed.current_step?.id === activeMolecule.current_step?.id) {
-        parsed.children = activeMolecule.children;
-      }
-      activeMolecule = parsed;
-    }
-  }
-
-  // Always-on child fetch: attaches `bd mol show <step> --json` children to the active
-  // molecule for the renderer on every poll tick, so a child `bd close` flips to ✓ within
-  // ~5s even within a long-running step. On failure it leaves the last known
-  // children in place and never throws, matching the "failed `mol show` keeps the last
-  // children" rule in refreshMolecule.
-  async function refreshChildren(cwd: string): Promise<void> {
-    if (!activeMolecule || !activeMolecule.current_step?.id) return;
-    const mol = activeMolecule;
-    const r = await pi.exec("bd", ["mol", "show", mol.current_step.id, "--json"], {
-      cwd,
-      timeout: 5000,
-    });
-    if (r && r.code === 0) {
-      const kids = parseMoleculeShow(r.stdout);
-      if (kids) mol.children = kids; // attach for the renderer (never overwrite the whole state)
-    }
+    if (parsed) activeMolecule = parsed;
   }
 
   function renderMolecule() {
     try {
-      if (!uiRef?.setWidget) return;
+      if (!ui?.setWidget) return;
       if (!activeMolecule) {
-        uiRef.setWidget("beads-mol", undefined);
+        ui.setWidget("beads-mol", undefined);
         return;
       }
-      uiRef.setWidget(
+      ui.setWidget(
         "beads-mol",
-        (_tui: any, theme: any) => ({
+        (_tui: unknown, theme: WidgetTheme | undefined) => ({
           render: (width: number) =>
-            moleculeWidgetLines(activeMolecule, width - 1, uiRef?.theme ?? theme).map((l: string) => ` ${l}`),
-          invalidate: () => {
-            if (!activeMolecule) return;
-            const cwd = process.cwd();
-            void refreshMolecule(cwd).then(
-              () =>
-                refreshChildren(cwd).then(
-                  () => renderMolecule(),
-                  () => {},
-                ),
-              () => {},
-            );
-          },
+            moleculeWidgetLines(activeMolecule, width - 1, ui?.theme ?? theme).map((l: string) => ` ${l}`),
         }),
         { placement: "aboveEditor" },
       );
@@ -113,8 +60,8 @@ export default function (pi: ExtensionAPI) {
     }
   }
 
-  pi.on("session_start", async (_event: any, ctx: any) => {
-    uiRef = ctx?.ui ?? null;
+  pi.on("session_start", (_event: unknown, ctx: SessionContext) => {
+    ui = ctx?.ui ?? null;
     const cwd = ctx?.cwd ?? process.cwd();
     lastCwd = cwd;
     if (!coalescer) {
@@ -123,26 +70,18 @@ export default function (pi: ExtensionAPI) {
       pi.events.on("beads:changed", () => c.trigger());
     }
     void refreshMolecule(cwd).then(
-      () =>
-        refreshChildren(cwd).then(
-          () => renderMolecule(),
-          () => {},
-        ),
-      () => {
-        /* bd missing/broken -> widget just stays empty */
-      },
+      () => renderMolecule(),
+      () => {},
     );
   });
 
-  // a fresh turn always re-syncs both the current step and its children
-  pi.on("agent_start", async (_event: any, ctx: any) => {
+  // a fresh turn always re-syncs the current molecule state
+  pi.on("agent_start", (_event: unknown, ctx: SessionContext) => {
     const cwd = ctx?.cwd ?? process.cwd();
     lastCwd = cwd;
-    void refreshMolecule(cwd)
-      .then(() => refreshChildren(cwd))
-      .then(
-        () => renderMolecule(),
-        () => {},
-      );
+    void refreshMolecule(cwd).then(
+      () => renderMolecule(),
+      () => {},
+    );
   });
 }
