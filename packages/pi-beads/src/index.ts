@@ -61,6 +61,18 @@ const TOOL = {
   molCurrent: "beads_mol_current",
 };
 
+// Type allowlists, enforced before the value reaches bd (a typo must not
+// silently persist a junk edge; bd itself accepts arbitrary --type strings).
+// Verified against `bd link --help` / `bd gate create --help` on bd 1.2.2.
+export const DEP_LINK_TYPES = [
+  "blocks",
+  "tracks",
+  "related",
+  "parent-child",
+  "discovered-from",
+];
+export const GATE_TYPES = ["human", "timer", "gh:run", "gh:pr"];
+
 export default function piBeadsLean(pi: any) {
   let activeCwd: string = process.cwd();
 
@@ -853,7 +865,12 @@ export default function piBeadsLean(pi: any) {
       const dir = dirForPrefix(String(params.blocks));
       if (!dir) return textResult(`unknown repo for id '${params.blocks}'`);
       const args = ["gate", "create", "--blocks", String(params.blocks)];
-      if (params.type) args.push("--type", String(params.type));
+      if (params.type) {
+        const t = String(params.type);
+        if (!GATE_TYPES.includes(t))
+          return textResult(`invalid gate type '${t}' (allowed: ${GATE_TYPES.join("|")})`);
+        args.push("--type", t);
+      }
       if (params.reason) args.push("--reason", String(params.reason));
       if (params.timeout) args.push("--timeout", String(params.timeout));
       if (params.awaitId) args.push("--await-id", String(params.awaitId));
@@ -895,7 +912,7 @@ export default function piBeadsLean(pi: any) {
     name: TOOL.molPour,
     label: "Beads molecule pour",
     description:
-      "Instantiate a proto formula as a persistent molecule (bd mol pour). Returns the root issue id. Repo-scoped like beads_create.",
+      "Instantiate a proto formula as a persistent molecule (bd mol pour). Prints the root issue id from bd's output. Repo-scoped like beads_create.",
     parameters: {
       type: "object",
       properties: {
@@ -972,7 +989,7 @@ export default function piBeadsLean(pi: any) {
           type: "string",
           description: "The issue that must be done first",
         },
-        type: { type: "string", description: "Dependency type: blocks (default) | discovered-from | related | tracks | parent-child" },
+        type: { type: "string", description: "Dependency type: blocks|tracks|related|parent-child|discovered-from (default blocks)" },
       },
       required: ["issue", "blocker"],
     },
@@ -989,7 +1006,14 @@ export default function piBeadsLean(pi: any) {
           "cross-repo dependencies are not supported by beads; both ids must be in the same repo",
         );
       const linkArgs = ["link", String(params.issue), String(params.blocker)];
-      if (params.type) linkArgs.push("--type", String(params.type));
+      if (params.type) {
+        const t = String(params.type);
+        if (!DEP_LINK_TYPES.includes(t))
+          return textResult(
+            `invalid dependency type '${t}' (allowed: ${DEP_LINK_TYPES.join("|")})`,
+          );
+        linkArgs.push("--type", t);
+      }
       const r = await bd(linkArgs, dir);
       if (!r.ok) return textResult(`bd link failed: ${r.err}`);
       await afterWrite(dir);

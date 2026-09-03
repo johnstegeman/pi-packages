@@ -118,8 +118,9 @@ export default function (pi: ExtensionAPI) {
     const cwd = ctx?.cwd ?? process.cwd();
     lastCwd = cwd;
     if (!coalescer) {
-      coalescer = createChangeCoalescer(doRefresh, 10000);
-      pi.events.on("beads:changed", () => coalescer!.trigger());
+      const c = createChangeCoalescer(doRefresh, 10000);
+      coalescer = c;
+      pi.events.on("beads:changed", () => c.trigger());
     }
     void refreshMolecule(cwd).then(
       () =>
