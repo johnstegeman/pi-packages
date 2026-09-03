@@ -16,3 +16,4 @@ jobs:
           node-version: 22
       - run: npm ci
       - run: npx biome check .
+      - run: node extensions/beads-molecule-widget.test.mjs

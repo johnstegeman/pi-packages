@@ -36,7 +36,7 @@ export default function (pi: ExtensionAPI) {
       // only clear on a clean "no active molecule" signal, never on a transient
       // failure — an unreachable `bd` binary should not blank a widget that was
       // showing real progress a moment ago.
-      if (r && /no active molecule|not found/i.test(r.stderr ?? "")) activeMolecule = null;
+      if (r && /no active molecule/i.test(r.stderr ?? "")) activeMolecule = null;
       return;
     }
     const parsed = parseMoleculeCurrent(r.stdout);
@@ -123,7 +123,7 @@ export default function (pi: ExtensionAPI) {
     const cwd = ctx?.cwd ?? process.cwd();
     startPolling(cwd);
     void refreshMolecule(cwd).then(
-      () => renderMolecule(),
+      () => refreshChildren(cwd).then(() => renderMolecule(), () => {}),
       () => {
         /* bd missing/broken -> widget just stays empty */
       },

@@ -52,16 +52,6 @@ function assemble(frags, width) {
   }
   return { text, width: used };
 }
-export function formatAge(startedAt, now = Date.now()) {
-  const t = Date.parse(startedAt ?? "");
-  if (!Number.isFinite(t)) return "";
-  const min = Math.floor((now - t) / 60000);
-  if (!Number.isFinite(min) || min < 0) return "";
-  if (min < 60) return `${min}m`;
-  const h = Math.floor(min / 60);
-  if (h < 24) return `${h}h`;
-  return `${Math.floor(h / 24)}d`;
-}
 
 // ---- status markers (bd-list / R7 shape) ----
 // open ○ · in_progress ◐ · blocked ● · closed ✓ · deferred ❄ · anything else ○
