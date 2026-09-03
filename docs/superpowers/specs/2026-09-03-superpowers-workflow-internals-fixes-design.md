@@ -39,6 +39,19 @@ monorepo (all at runtime; none originated as a commit in this repo):
    the finishing steps (Verify / Smoke test / Finish) never rendered. Root cause: the
    implement **parent step bead was never closed** once its last task closed.
 
+5. **Steps are not closed as they occur, and the widget shows no current step.** Observed
+   live while running this formula: step beads (e.g. `Present design sections`,
+   `User approves design`, `Write spec`, `Spec self-review`) remained open until a closing
+   burst at the end, instead of being closed in the same turn their real work happened.
+   Conversely, once those closed, the *human-review* step (`User reviews written spec`)
+   is `open`/`pending` with an open `Gate: human` (`spec-approved`) and **no `current_step`**
+   in `bd mol current --json` — so the widget has no current/awaiting line and the step
+   renders as a future `○` row rather than the active "waiting on you" item.
+   implement tasks close, the header still read `Implementing · 12/17` and the implement
+   parent bead was still `in_progress`, so `phaseFor()` never returned `"finishing"` and
+   the finishing steps (Verify / Smoke test / Finish) never rendered. Root cause: the
+   implement **parent step bead was never closed** once its last task closed.
+
 ## Goals
 
 - The head/tail rule for the close flow: **when a gate is resolved, the step it gated
@@ -49,6 +62,11 @@ monorepo (all at runtime; none originated as a commit in this repo):
 - The widget keeps its phase header + phase views and renders the implementing phase as a
   tree again (parent + nested task rows), and advances to finishing once the implement
   parent closes.
+- Steps close **as their real work occurs** (never a closing burst at phase end), keeping
+  `current_step` honest.
+- An awaiting Human gate / human-review step renders as a visible `⏸ Waiting on you:`
+  current line in the widget (e.g. the spec-review handoff), instead of a stale phase with
+  no current item.
 
 ## Non-goals
 
@@ -150,6 +168,34 @@ Package: `packages/pi-superpowers-plus/extensions/beads-molecule-widget.mjs` (+
 - **Issue-4 rendering side needs no widget-logic change**: once Part A closes the
   implement parent step, `phaseFor()` reads `impl.step_status === "done"` → `"finishing"`
   → Verify/Smoke/Finish render and can be claimed.
+  → Verify/Smoke/Finish render and can be claimed.
+
+### Part D — close steps as they occur + show the current/awaiting step (issue 5)
+
+**D1. Close-as-you-go (skill/discipline, not just beads).** The observed failure was that
+step bookkeeping was deferred to a closing burst at the end of the run instead of happening
+in the same turn the real work completed. Two reinforce each other:
+  - **Skills** already say `claim when begun, close when real output exists`; enforce it in
+    the way the runner behaves: close `Explore` the turn exploration is done, close each
+    `Present design sections`/`User approves design`/`Write spec`/`Spec self-review` step
+    immediately after the user's actual sign-off lands — never batch several closes at the
+    end of a phase. Add a light one-line reminder to `brainstorming`/`writing-plans` skill
+    text so the practice survives (optional, non-blocking).
+  - This is what keeps `bd mol current --json` honest: `current_step` reflects the deepest
+    open step at all times, so the widget's header/rows track reality rather than lag.
+
+**D2. Widget: render an awaiting Human gate (and its gated step) as the current line.**
+When the deepest position in the molecule is a human gate awaiting the user — gates are
+`ready` (`open` status, `issue_type: gate`, no `current_step` present) or a gate whose
+gated step is `open`/`pending` — the widget currently draws nothing current. Extend
+`moleculeWidgetLines` so that:
+  - If `state.current_step` is a gate → today's `⏸ Waiting on you: <gate>` (unchanged).
+  - Else, if any step is a `ready` human gate / or the *next actionable human-review step*
+    exists and nothing else is `current`/in_progress → emit a pinned `⏸ Waiting on you:`
+    line for it (title), and highlight its gated step row (e.g. `User reviews written spec`)
+    rather than rendering it as a plain future `○` row.
+  - This makes the spec-review / design-approval handoff visible in the widget instead of
+    appearing stalled at a stale phase.
 
 ### Interfaces / impact
 
@@ -177,6 +223,10 @@ Package: `packages/pi-superpowers-plus/extensions/beads-molecule-widget.mjs` (+
     present with `├──`/`└──` connectors, closed `✓` vs current `◐`, ≤ 15 lines.
   - regression: finishing phase with implement parent `done` renders Verify / Smoke test /
     Finish rows (issue-4 advance).
+  - awaiting-gate fixture (Part D2): no `current_step`, a `ready` Human gate with an
+    `open`/`pending` gated step → a pinned `⏸ Waiting on you:` line plus the gated step row
+    highlighted (not rendered as a plain future `○` row).
+  - `npx biome check` on touched files clean.
   - `npx biome check` on touched files clean.
 - **skills**: `grep -rn disable-model-invocation packages/pi-superpowers-plus/skills/` → no
   matches after Part B.
