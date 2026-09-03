@@ -579,7 +579,7 @@ export default function piBeadsLean(pi: any) {
       if (params?.label) args.push("--label", String(params.label));
       if (params?.labelAny) args.push("--label-any", String(params.labelAny));
       if (params?.mol)
-        args.push("--parent", String(params.mol), "--include-gates");
+        args.push("--all", "--parent", String(params.mol), "--include-gates");
       const r = await bd(args, scoped ?? umbrella);
       if (!r.ok) return textResult(`bd list failed: ${r.err}`);
       return textResult(fmtRows(r.out));

@@ -129,7 +129,7 @@ case "$1" in
     if [ -n "$P" ]; then
       case "$P" in
         *2*) printf '{"issues":[{"id":"proj-m2-imp","title":"Implement T2","status":"open","priority":2,"labels":["step:implement"]}],"meta":{"count":1}}' ;;
-        *)   printf '{"issues":[{"id":"proj-m1-imp","title":"Implement T1","status":"open","priority":2,"labels":["step:implement"]}],"meta":{"count":1}}' ;;
+        *)   printf '{"issues":[{"id":"proj-m1-imp","title":"Implement T1","status":"open","priority":2,"labels":["step:implement"]},{"id":"proj-m1-done","title":"Explore done","status":"closed","priority":2,"labels":["step:implement"]}],"meta":{"count":2}}' ;;
       esac
     elif [ "$MODE" = "umbrella" ]; then
       echo '[{"id": "crmback-1a2", "title": "sample"}]'
@@ -432,8 +432,8 @@ test("single-repo: read tools never emit beads:changed", async () => {
   const reads = [
     ["beads_ready", { limit: 5 }, ["ready", "--json", "--include-ephemeral", "-n", "5"]],
     ["beads_list", { status: "open,in_progress", limit: 7 }, ["list", "--json", "-n", "7", "--status", "open,in_progress"]],
-    ["beads_list", { label: "step:implement", mol: "proj-m1" }, ["list", "--json", "-n", "30", "--label", "step:implement", "--parent", "proj-m1", "--include-gates"]],
-    ["beads_list", { mol: "proj-m1" }, ["list", "--json", "-n", "30", "--parent", "proj-m1", "--include-gates"]],
+    ["beads_list", { label: "step:implement", mol: "proj-m1" }, ["list", "--json", "-n", "30", "--label", "step:implement", "--all", "--parent", "proj-m1", "--include-gates"]],
+    ["beads_list", { mol: "proj-m1" }, ["list", "--json", "-n", "30", "--all", "--parent", "proj-m1", "--include-gates"]],
     ["beads_show", { id: "proj-1a2" }, ["show", "proj-1a2", "--json"]],
     ["beads_deps", { ids: "proj-1a2" }, ["dep", "tree", "proj-1a2", "--direction", "down", "--json"]],
     ["beads_mol_show", { id: "proj-m1" }, ["mol", "show", "proj-m1", "--json"]],
@@ -460,7 +460,7 @@ test("single-repo: beads_list mol scope isolates the same step:implement label a
   const r2 = await s.byName.get("beads_list").execute("c", { label: "step:implement", mol: "proj-m2" });
   assert.match(r2.content[0].text, /proj-m2-imp/);
   assert.doesNotMatch(r2.content[0].text, /proj-m1-imp/);
-  findInvocation(["list", "--json", "-n", "30", "--label", "step:implement", "--parent", "proj-m2", "--include-gates"]);
+  findInvocation(["list", "--json", "-n", "30", "--label", "step:implement", "--all", "--parent", "proj-m2", "--include-gates"]);
 });
 
 test("single-repo: beads_list formats object-shape --parent output (normalizes {issues,meta})", async () => {
@@ -469,6 +469,15 @@ test("single-repo: beads_list formats object-shape --parent output (normalizes {
   const r = await s.byName.get("beads_list").execute("c", { mol: "proj-m1" });
   assert.ok(okResult(r), JSON.stringify(r));
   assert.match(r.content[0].text, /proj-m1-imp/);
+});
+
+test("single-repo: beads_list mol resolves closed labeled steps too (--all)", async () => {
+  const s = await openSession("single", repoDir);
+  resetLog();
+  const r = await s.byName.get("beads_list").execute("c", { label: "step:implement", mol: "proj-m1" });
+  assert.ok(okResult(r), JSON.stringify(r));
+  assert.match(r.content[0].text, /proj-m1-done/); // closed step still resolves
+  findInvocation(["list", "--json", "-n", "30", "--label", "step:implement", "--all", "--parent", "proj-m1", "--include-gates"]);
 });
 
 test("single-repo: beads_mol_ready digest (ready + empty) without emitting", async () => {
