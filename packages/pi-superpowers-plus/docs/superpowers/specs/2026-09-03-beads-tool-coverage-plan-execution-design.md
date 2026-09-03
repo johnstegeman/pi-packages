@@ -184,7 +184,7 @@ Two spots currently point elsewhere for constraint sourcing:
 
 **pi-superpowers-plus (`packages/pi-superpowers-plus`)** — grep checks:
 - `grep -rn "bd ready --mol" skills/` → zero matches (only historical `docs/superpowers/specs|plans/*` may retain the string).
-- `grep -rn "GLOBAL_CONSTRAINTS" skills/subagent-driven-development/` → only the rewritten Placeholders entry + reviewer-body instruction; no inline "copy from memory" wording remains.
+- `grep -rn "GLOBAL_CONSTRAINTS" skills/subagent-driven-development/` → empty (the placeholder was replaced by `[GATE_ID]` in both the reviewer body and the Placeholders list; no inline "copy from memory" wording remains).
 - Markdown consistency: the changed `SKILL.md`/template files parse cleanly (the repo's CI/doc-parity gate on PRs to main will catch malformed markdown).
 
 **Cross-check:** no other living skill references `bd ready --mol` or reconstructs Global Constraints from memory; `writing-plans`'s Self-Review already mirrors the plan into task beads and now also populates the gate bead description.
