@@ -31,12 +31,17 @@ only in a beads-initialized project: if the working directory has no
    aggressive for resumed phases).
 4. This touches **wisps only** — persistent issues are never affected.
 5. Confirm the superpowers workflow formula is available in this project:
-   `bd formula list | grep superpowers-workflow`. If missing, copy it in from this
-   package's bundled copy (`formulas/superpowers-workflow.formula.toml` inside
-   the installed `pi-superpowers-plus` package directory) into the project's
-   `.beads/formulas/superpowers-workflow.formula.toml`, then re-run
-   `bd formula list` to confirm it's now visible. Never overwrite an existing formula
-   file of the same name — a user-customized formula takes precedence.
+   `bd formula list | grep superpowers-workflow`. The pi-superpowers-plus package
+   auto-seeds it globally at `~/.beads/formulas/superpowers-workflow.formula.toml`
+   (a symlink into the installed package, re-created on load if dangling), so every
+   beads project finds it with no per-project copy. Never overwrite an existing
+   formula file of the same name — a user-customized formula takes precedence, and a
+   per-project copy in `.beads/formulas/` still overrides the global seed.
+
+   Fallback for non-pi installs (headless/CI/other agents):
+   `mkdir -p ~/.beads/formulas && ln -sf <installed-package>/formulas/superpowers-workflow.formula.toml ~/.beads/formulas/`
+   (use `cp` if symlinks are unavailable; `<installed-package>` = wherever
+   pi-superpowers-plus is loaded from).
 
 ## Working Directory
 
