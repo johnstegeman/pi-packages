@@ -87,7 +87,7 @@ the fenced code-block style used in `writing-plans`).
 
 ## Verification
 
-- Grep the four SKILL.md files + the three SDD template files for raw CLI usage (`` `bd `` + verb tokens, `bd <verb>`) → **0 hits**.
+- Grep the four SKILL.md files + the three SDD template files for raw `bd`-CLI usage (`bd <verb>` tokens, backtick-quoted or bare) → **0 hits**.
 - Confirm every converted `beads_show` for requirement reads carries `full: true`; the gate status check stays compact.
 - Proofread each edit site for prose continuity.
 
