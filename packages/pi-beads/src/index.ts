@@ -984,7 +984,7 @@ export default function piBeadsLean(pi: any) {
     name: TOOL.gateResolve,
     label: "Beads gate resolve",
     description:
-      "Resolve a human gate (unblocks dependents) and close the gate bead itself in one call, so dependents' later beads_close never fails with 'blocked by open issues'.",
+      "Resolve a human gate (unblocks dependents) and close the gated step(s) it was blocking in one call, so dependents' later beads_close never fails with 'blocked by open issues'.",
     parameters: {
       type: "object",
       properties: { id: { type: "string", description: "Gate issue id" } },
@@ -992,18 +992,39 @@ export default function piBeadsLean(pi: any) {
     },
     async execute(_id: string, params: any) {
       if (!params?.id) return textResult("id is required");
-      const dir = dirForPrefix(String(params.id));
-      if (!dir) return textResult(`unknown repo for id '${params.id}'`);
-      const rr = await bd(["gate", "resolve", String(params.id)], dir);
+      const id = String(params.id);
+      const dir = dirForPrefix(id);
+      if (!dir) return textResult(`unknown repo for id '${id}'`);
+      const rr = await bd(["gate", "resolve", id], dir);
       if (!rr.ok) return textResult(`bd gate resolve failed: ${rr.err}`);
       await afterWrite(dir);
-      const rc = await bd(["close", String(params.id)], dir);
-      if (!rc.ok)
+      // bd 1.2.2: `gate resolve` already closes the gate. Don't double-close.
+      // Instead close the step(s) this gate was gating (its open non-gate dependents),
+      // so nothing resolved-but-left-open blocks later beads_close calls.
+      const dep = await bd(["dep", "list", id, "--direction", "up", "--json"], dir);
+      const dependentList = Array.isArray(jparse(dep.out)) ? (jparse(dep.out) as any[]) : [];
+      const gated = dependentList.filter(
+        (x: any) => x && x.id != null && x.issue_type !== "gate" && x.status !== "closed",
+      );
+      const closed: string[] = [];
+      const stillBlocked: string[] = [];
+      for (const g of gated) {
+        const rc = await bd(["close", String(g.id)], dir);
+        if (rc.ok) {
+          closed.push(String(g.id));
+          await afterWrite(dir);
+        } else {
+          stillBlocked.push(String(g.id));
+        }
+      }
+      if (closed.length === 0) {
         return textResult(
-          `gate resolved but close failed (retry beads_close on ${params.id}): ${rc.err}`,
+          stillBlocked.length
+            ? `gate ${id} resolved; gated step(s) still blocked: ${stillBlocked.join(", ")}`
+            : `gate ${id} resolved`,
         );
-      await afterWrite(dir);
-      return textResult(`gate ${params.id} resolved and closed`);
+      }
+      return textResult(`gate ${id} resolved and gated step ${closed.join(", ")} closed`);
     },
   });
 
