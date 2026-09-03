@@ -53,6 +53,12 @@ const TOOL = {
   dep: "beads_dep",
   undep: "beads_undep",
   comment: "beads_comment",
+  reopen: "beads_reopen",
+  gateCreate: "beads_gate_create",
+  gateResolve: "beads_gate_resolve",
+  molPour: "beads_mol_pour",
+  molShow: "beads_mol_show",
+  molCurrent: "beads_mol_current",
 };
 
 export default function piBeadsLean(pi: any) {
@@ -197,9 +203,11 @@ export default function piBeadsLean(pi: any) {
   }
   // after a routed write: re-export the repo's JSONL so the next `repo sync` sees it
   async function afterWrite(repoDir: string): Promise<void> {
-    if (!isUmbrella) return; // single-repo: same DB the reads use, nothing to sync
-    await bd(["export", "-o", ".beads/issues.jsonl"], repoDir, 30000);
-    needSync = true;
+    if (isUmbrella) {
+      await bd(["export", "-o", ".beads/issues.jsonl"], repoDir, 30000);
+      needSync = true;
+    }
+    pi.events.emit("beads:changed");
   }
 
   function dirForPrefix(id: string): string | null {
@@ -258,6 +266,7 @@ export default function piBeadsLean(pi: any) {
   function fmtShow(
     o: any,
     childInfo?: { done: number; total: number; openIds: string[] } | null,
+    full?: boolean,
   ): string {
     if (Array.isArray(o)) o = o[0];
     if (!o) return "(not found)";
@@ -267,7 +276,7 @@ export default function piBeadsLean(pi: any) {
       `${o.id} [${o.status}]${blocked ? " BLOCKED" : ""} P${o.priority} ${o.issue_type ?? "task"}`,
       `title: ${o.title ?? ""}`,
     ];
-    if (o.description) lines.push(`desc: ${trunc(String(o.description), 240)}`);
+    if (o.description) lines.push(`desc: ${full ? String(o.description) : trunc(String(o.description), 240)}`);
     if (blockers.length) {
       lines.push(
         `blocked_by: ${blockers.map((b) => `${b.id}${b.status === "closed" ? "\u2713" : `[${b.status}]`}`).join(", ")}`,
@@ -474,11 +483,13 @@ export default function piBeadsLean(pi: any) {
       type: "object",
       properties: {
         id: { type: "string", description: "Issue id, e.g. 'crmback-1a2'" },
+        full: { type: "boolean", description: "Include the full description body (compact mode truncates to 240 chars)" },
       },
       required: ["id"],
     },
     async execute(_id: string, params: any) {
       if (!params?.id) return textResult("id is required");
+      const full = params.full === true || params.full === "true";
       await ensureFresh();
       const r = await bd(["show", String(params.id), "--json"], umbrella);
       if (!r.ok) return textResult(`bd show failed: ${r.err}`);
@@ -500,7 +511,7 @@ export default function piBeadsLean(pi: any) {
           };
         }
       }
-      return textResult(fmtShow(obj, childInfo));
+      return textResult(fmtShow(obj, childInfo, full));
     },
   });
 
@@ -651,7 +662,7 @@ export default function piBeadsLean(pi: any) {
     name: TOOL.update,
     label: "Beads update",
     description:
-      "Update a beads issue: status (open|in_progress|blocked|deferred|closed), priority (0-4), and/or title. Auto-routed to the owning repo by id prefix.",
+      "Update a beads issue: status (open|in_progress|blocked|deferred|closed), priority (0-4), title, claim (assignee=you + status=in_progress), setMetadata, and/or description. Auto-routed to the owning repo by id prefix.",
     parameters: {
       type: "object",
       properties: {
@@ -680,6 +691,9 @@ export default function piBeadsLean(pi: any) {
           type: "string",
           description: "Comma-separated labels to remove",
         },
+        claim: { type: "boolean", description: "Atomically claim the issue (assignee=you, status=in_progress)" },
+        setMetadata: { type: "string", description: "key=value metadata to set (comma-separated for multiple, e.g. review.verdict=done,foo=bar)" },
+        description: { type: "string", description: "Replace the issue's description body" },
       },
       required: ["id"],
     },
@@ -707,9 +721,16 @@ export default function piBeadsLean(pi: any) {
       if (params.addLabels) args.push("--add-label", String(params.addLabels));
       if (params.removeLabels)
         args.push("--remove-label", String(params.removeLabels));
+      if (params.claim === true || params.claim === "true") args.push("--claim");
+      if (params.setMetadata) {
+        for (const pair of String(params.setMetadata).split(",").map((s: string) => s.trim()).filter(Boolean)) {
+          args.push("--set-metadata", pair);
+        }
+      }
+      if (params.description !== undefined) args.push("--description", String(params.description));
       if (args.length === 2)
         return textResult(
-          "nothing to update (pass status, priority, title, parent, notes, or label changes)",
+          "nothing to update (pass status, priority, title, parent, notes, label changes, claim, setMetadata, or description)",
         );
       const r = await bd(args, repoDir);
       if (!r.ok) return textResult(`bd update failed: ${r.err}`);
@@ -768,6 +789,177 @@ export default function piBeadsLean(pi: any) {
   });
 
   pi.registerTool({
+    name: TOOL.reopen,
+    label: "Beads reopen",
+    description:
+      "Reopen one or more closed beads issues by id. Auto-routed to owning repos by id prefix.",
+    parameters: {
+      type: "object",
+      properties: {
+        ids: { type: "string", description: "One or more issue ids, space or comma separated" },
+        reason: { type: "string", description: "Optional reason for reopening" },
+      },
+      required: ["ids"],
+    },
+    async execute(_id: string, params: any) {
+      if (!params?.ids) return textResult("ids is required");
+      const ids = String(params.ids).split(/[\s,]+/).filter(Boolean);
+      if (ids.length === 0) return textResult("no valid ids");
+      const byRepo = new Map<string, string[]>();
+      for (const id of ids) {
+        const dir = dirForPrefix(id);
+        if (!dir)
+          return textResult(
+            `unknown repo for id '${id}' (known prefixes: ${Array.from(prefixToDir.keys()).join(", ")})`,
+          );
+        (byRepo.get(dir) ?? byRepo.set(dir, []).get(dir)!).push(id);
+      }
+      const reopenedIds: string[] = [];
+      let failure: string | null = null;
+      for (const [dir, rids] of byRepo) {
+        const args = ["reopen", ...rids];
+        if (params.reason) args.push("-r", String(params.reason));
+        const r = await bd(args, dir);
+        if (!r.ok) {
+          failure = `bd reopen failed for ${rids.join(", ")}: ${r.err}`;
+          break;
+        }
+        await afterWrite(dir);
+        reopenedIds.push(...rids);
+      }
+      if (failure) return textResult(failure);
+      return textResult(`reopened ${reopenedIds.join(", ")}`);
+    },
+  });
+
+  pi.registerTool({
+    name: TOOL.gateCreate,
+    label: "Beads gate create",
+    description:
+      "Create an async gate that blocks an issue until resolved (bd gate resolve/beads_gate_resolve). Routed to the owning repo by the blocked issue's id prefix.",
+    parameters: {
+      type: "object",
+      properties: {
+        blocks: { type: "string", description: "Issue id the gate blocks" },
+        type: { type: "string", description: "human|timer|gh:run|gh:pr (default human)" },
+        reason: { type: "string", description: "Reason for the gate" },
+        timeout: { type: "string", description: "Timeout duration for timer gates, e.g. 2h, 30m" },
+        awaitId: { type: "string", description: "Condition identifier for gh:run/gh:pr gates" },
+      },
+      required: ["blocks"],
+    },
+    async execute(_id: string, params: any) {
+      if (!params?.blocks) return textResult("blocks is required");
+      const dir = dirForPrefix(String(params.blocks));
+      if (!dir) return textResult(`unknown repo for id '${params.blocks}'`);
+      const args = ["gate", "create", "--blocks", String(params.blocks)];
+      if (params.type) args.push("--type", String(params.type));
+      if (params.reason) args.push("--reason", String(params.reason));
+      if (params.timeout) args.push("--timeout", String(params.timeout));
+      if (params.awaitId) args.push("--await-id", String(params.awaitId));
+      const r = await bd(args, dir);
+      if (!r.ok) return textResult(`bd gate create failed: ${r.err}`);
+      await afterWrite(dir);
+      return textResult(r.out.trim() || "gate created");
+    },
+  });
+
+  pi.registerTool({
+    name: TOOL.gateResolve,
+    label: "Beads gate resolve",
+    description:
+      "Resolve a human gate (unblocks dependents) and close the gate bead itself in one call, so dependents' later beads_close never fails with 'blocked by open issues'.",
+    parameters: {
+      type: "object",
+      properties: { id: { type: "string", description: "Gate issue id" } },
+      required: ["id"],
+    },
+    async execute(_id: string, params: any) {
+      if (!params?.id) return textResult("id is required");
+      const dir = dirForPrefix(String(params.id));
+      if (!dir) return textResult(`unknown repo for id '${params.id}'`);
+      const rr = await bd(["gate", "resolve", String(params.id)], dir);
+      if (!rr.ok) return textResult(`bd gate resolve failed: ${rr.err}`);
+      await afterWrite(dir);
+      const rc = await bd(["close", String(params.id)], dir);
+      if (!rc.ok)
+        return textResult(
+          `gate resolved but close failed (retry beads_close on ${params.id}): ${rc.err}`,
+        );
+      await afterWrite(dir);
+      return textResult(`gate ${params.id} resolved and closed`);
+    },
+  });
+
+  pi.registerTool({
+    name: TOOL.molPour,
+    label: "Beads molecule pour",
+    description:
+      "Instantiate a proto formula as a persistent molecule (bd mol pour). Returns the root issue id. Repo-scoped like beads_create.",
+    parameters: {
+      type: "object",
+      properties: {
+        proto: { type: "string", description: "Proto/formula id, e.g. superpowers-workflow" },
+        vars: { type: "string", description: "Comma-separated key=value pairs, e.g. topic=foo,owner=bar" },
+        repo: { type: "string", description: "Target repo (folder name or id prefix); defaults to the session cwd's repo" },
+      },
+      required: ["proto"],
+    },
+    async execute(_id: string, params: any) {
+      if (!params?.proto) return textResult("proto is required");
+      const repoDir = resolveCreateTarget(params?.repo);
+      if (!repoDir)
+        return textResult(`specify repo (one of: ${knownRepos()}) — cannot pour in the umbrella aggregate`);
+      const args = ["mol", "pour", String(params.proto)];
+      if (params.vars) {
+        for (const pair of String(params.vars).split(",").map((s: string) => s.trim()).filter(Boolean)) {
+          args.push("--var", pair);
+        }
+      }
+      const r = await bd(args, repoDir);
+      if (!r.ok) return textResult(`bd mol pour failed: ${r.err}`);
+      await afterWrite(repoDir);
+      return textResult(r.out.trim() || "poured");
+    },
+  });
+
+  pi.registerTool({
+    name: TOOL.molShow,
+    label: "Beads molecule show",
+    description: "Show a molecule/proto's structure (bd mol show <id> --json). Read-only.",
+    parameters: {
+      type: "object",
+      properties: { id: { type: "string", description: "Molecule or step id" } },
+      required: ["id"],
+    },
+    async execute(_id: string, params: any) {
+      if (!params?.id) return textResult("id is required");
+      await ensureFresh();
+      const r = await bd(["mol", "show", String(params.id), "--json"], umbrella);
+      if (!r.ok) return textResult(`bd mol show failed: ${r.err}`);
+      return textResult(r.out.trim());
+    },
+  });
+
+  pi.registerTool({
+    name: TOOL.molCurrent,
+    label: "Beads molecule current",
+    description: "Show the current position in a molecule's workflow (bd mol current <id> --json). Read-only.",
+    parameters: {
+      type: "object",
+      properties: { id: { type: "string", description: "Molecule root id" } },
+      required: ["id"],
+    },
+    async execute(_id: string, params: any) {
+      if (!params?.id) return textResult("id is required");
+      await ensureFresh();
+      const r = await bd(["mol", "current", String(params.id), "--json"], umbrella);
+      if (!r.ok) return textResult(`bd mol current failed: ${r.err}`);
+      return textResult(r.out.trim());
+    },
+  });
+
+  pi.registerTool({
     name: TOOL.dep,
     label: "Beads dependency",
     description:
@@ -780,6 +972,7 @@ export default function piBeadsLean(pi: any) {
           type: "string",
           description: "The issue that must be done first",
         },
+        type: { type: "string", description: "Dependency type: blocks (default) | discovered-from | related | tracks | parent-child" },
       },
       required: ["issue", "blocker"],
     },
@@ -795,10 +988,9 @@ export default function piBeadsLean(pi: any) {
         return textResult(
           "cross-repo dependencies are not supported by beads; both ids must be in the same repo",
         );
-      const r = await bd(
-        ["link", String(params.issue), String(params.blocker)],
-        dir,
-      );
+      const linkArgs = ["link", String(params.issue), String(params.blocker)];
+      if (params.type) linkArgs.push("--type", String(params.type));
+      const r = await bd(linkArgs, dir);
       if (!r.ok) return textResult(`bd link failed: ${r.err}`);
       await afterWrite(dir);
       return textResult(r.out.trim() || "linked");
@@ -833,6 +1025,8 @@ export default function piBeadsLean(pi: any) {
         return textResult(
           "cross-repo dependencies are not supported by beads; both ids must be in the same repo",
         );
+      // bd dep remove has no --type flag (confirmed via `bd dep remove --help`); it removes
+      // whatever dependency edge exists between the two ids regardless of type.
       const r = await bd(
         ["dep", "remove", String(params.issue), String(params.blocker)],
         dir,
