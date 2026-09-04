@@ -64,32 +64,13 @@ independently testable deliverable.
 - "Run the tests and make sure they pass" - step
 - "Commit" - step
 
-## Plan Document Header
-
-**Every plan MUST start with this header:**
-
-```markdown
-# [Feature Name] Implementation Plan
-
-> **For agentic workers:** REQUIRED SUB-SKILL: Use `/skill:subagent-driven-development` (recommended) or `/skill:executing-plans` to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
-
-**Goal:** [One sentence describing what this builds]
-
-**Architecture:** [2-3 sentences about approach]
-
-**Tech Stack:** [Key technologies/libraries]
-
-## Global Constraints
-
-[The spec's project-wide requirements — version floors, dependency limits,
-naming and copy rules, platform requirements — one line each, with exact
-values copied verbatim from the spec. Every task's requirements implicitly
-include this section.]
-
----
-```
 
 ## Task Structure
+
+Each task is one task bead. The template below is the exact shape of every task bead's
+`description` — what `beads_create({ title, description })` writes. The markdown
+heading `### Task N: [Component Name]` is the bead's TITLE, not a heading in a
+document:
 
 ````markdown
 ### Task N: [Component Name]
@@ -137,19 +118,15 @@ git add tests/path/test.py src/path/file.py
 git commit -m "feat: add specific feature"
 ```
 
----
-
 ### Task N+1: [Next Component Name]
 
-(Repeat the same shape for every task. After the LAST task, place a final
-`---` before any trailing section such as `## Verification` or `## Summary` —
-see Task Separation below.)
+(Repeat the same shape for every task.)
 ````
 
 ## Creating Tasks as Beads
 
-Once the task breakdown above is written out in the plan document and has passed the
-lifecycle-duplicate check (Self-Review item 4), mirror it into real beads under the
+Once the task breakdown above is authored and has passed the
+lifecycle-duplicate check (Self-Review item 4), create the real task beads under the
 `implement` step:
 
 ```
@@ -159,28 +136,26 @@ GATE_ID = beads_create({
   title: "Plan reviewed / ready to execute",
   parent: "<implement-step-id>",
   type: "task",
-  description: "## Global Constraints\n<constraints block verbatim from the plan header>",
+  description: "## Global Constraints\n<the constraints block, authored here>",
 })
 beads_gate_create({ blocks: GATE_ID, type: "human", reason: "Plan approval" })
 
 # One bead per task, in order, each depending on the gate and on its plan-declared
 # predecessor:
-TASK1_ID = beads_create({ title: "Task 1: <name>", parent: "<implement-step-id>", type: "task", description: "<full step-by-step instructions from the plan's Task 1 body>" })
+TASK1_ID = beads_create({ title: "Task 1: <name>", parent: "<implement-step-id>", type: "task", description: "<the Task 1 breakdown above, verbatim>" })
 beads_dep({ issue: TASK1_ID, blocker: GATE_ID })
 
-TASK2_ID = beads_create({ title: "Task 2: <name>", parent: "<implement-step-id>", type: "task", description: "<full step-by-step instructions from the plan's Task 2 body>" })
+TASK2_ID = beads_create({ title: "Task 2: <name>", parent: "<implement-step-id>", type: "task", description: "<the Task 2 breakdown above, verbatim>" })
 beads_dep({ issue: TASK2_ID, blocker: GATE_ID })
 beads_dep({ issue: TASK2_ID, blocker: TASK1_ID })   # only if the plan actually orders Task 2 after Task 1
 ```
 
-The gate bead's `description` is the plan's **canonical Global Constraints artifact**: copy the plan's
-`## Global Constraints` section verbatim (exact values, exact formats, stated component
-relationships) into it. It stays readable after the gate is resolved/closed, and
-`subagent-driven-development` hands this bead's id to task reviewers, who read the constraints from
-it directly.
+The gate bead's `description` is the **canonical Global Constraints artifact**: this is
+where the constraints block is authored (exact values, exact formats, stated component
+relationships). It stays readable after the gate is resolved/closed, and
 
-Each task bead's `-d`/`--description` is the task's **entire** body from the plan
-document — every step, every code block, exactly as written. This bead is what
+Each task bead's `-d`/`--description` is the task's **entire** breakdown above — every step, every
+code block, exactly as written. This bead is what
 `executing-plans`/`subagent-driven-development` read during execution —
 `beads_show({ id: "<task-id>" })`. It is the requirements at execution time; there is no plan.md.
 
@@ -203,24 +178,6 @@ review, don't just wait silently on the gate.
 
 Close each step bead in the same turn its real output exists (never batch several closes at the end of a phase) — this is what keeps `bd mol current --json` honest so the widget shows the real current step.
 
-## Task Separation
-
-Each task MUST end with an unfenced `---` (three or more hyphens) on its own
-line, immediately followed (after optional blank lines) by the next task's
-`### Task N` heading or a non-task trailing section. Task bodies are mirrored
-verbatim into task beads (`beads_create` with `description`), and the `---` delimiter is what
-keeps one task's body from bleeding into the next, so the rule is absolute:
-
-- Between consecutive tasks: `---`, blank line, `### Task N+1`.
-- After the last task, before any trailing section (`## Verification`,
-  `## Summary`, `## Notes`, etc.): `---`, then the section heading.
-- NEVER use `---` inside a task body (e.g. between `**Files:**` and the
-  first step). The `**Step N:**` labels are bold text, not headings, so
-  they can't be mistaken for a boundary — but keep bodies free of `---`
-  anyway so the format stays unambiguous.
-
-A `---` line inside a code fence is literal markdown content (the file
-content the task edits) and is NOT a separator.
 
 ## No Placeholders
 
