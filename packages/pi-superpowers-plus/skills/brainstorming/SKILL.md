@@ -11,6 +11,40 @@ Help turn ideas into fully formed designs and specs through natural collaborativ
 
 Start by understanding the current project context, then ask questions one at a time to refine the idea. Once you understand what you're building, present the design and get user approval.
 At the start of the skill, call `set_phase({ phase: "brainstorming" })`.
+<HARD-GATE>
+**STOP — set up tracking before you do anything else.** Before you read any files, run
+any commands, or explore the project in any way (Step 1 below), you must pour the workflow
+molecule and put the widget on screen:
+
+- **Fresh topic:** cook and pour the workflow formula, then note the returned root issue id
+  (the `Root issue:` line) — this is the molecule you work against for the rest of this
+  skill and for `writing-plans`/`executing-plans` afterward:
+
+  ```bash
+  bd cook superpowers-workflow --var topic="<topic>" --persist
+  beads_mol_pour({ proto: "superpowers-workflow", vars: "topic=<topic>" })
+  ```
+
+- **Existing epic** (e.g. "brainstorm beads-kp0"): this gate still applies — an existing
+  issue does NOT release you from pouring. Pour a NEW molecule as above, seeding
+  `--var topic="<existing issue's title>"`, then link the new root to the existing issue
+  without mutating it:
+
+  ```
+  beads_dep({ issue: "<new-root-id>", blocker: "<existing-issue-id>", type: "discovered-from" })
+  ```
+
+  If `discovered-from` is rejected by your `bd` version, use `--type related` instead —
+  both are non-blocking link types; do not use `blocks`. Never change the existing issue's
+  type, parent, or status — it stays exactly what it was.
+
+- **Show the widget immediately after pouring:** run `beads_mol_current({ id: "<root-id>" })`
+  (and `beads_mol_ready({ id: "<root-id>" })`) so the user sees the live current step
+  before any exploration begins.
+
+Step 0 is **not complete until the widget is actually visible** — calling `bd cook` /
+`beads_mol_pour` alone is not enough. **Do not begin Step 1 until Step 0 is complete.**
+</HARD-GATE>
 
 <HARD-GATE>
 Do NOT invoke any implementation skill, write any code, scaffold any project, or take any implementation action until you have presented a design and the user has approved it. This applies to EVERY project regardless of perceived simplicity.
@@ -30,6 +64,15 @@ Every project goes through this process. A todo list, a single-function utility,
 ## Anti-Pattern: Rushing the Checklist in One Turn
 
 After the user answers a question, it's tempting to treat that as "enough" and fast-forward through proposing approaches, presenting a design, writing the doc, and handing off to `writing-plans` — all without another real exchange. This produces designs nobody actually reviewed. Each of "ask more questions," "propose approaches," and "present design sections" is its own turn (or several); only advance when the user's actual words justify it, never because the checklist item "seems small."
+## Anti-Pattern: "Let Me Just Peek At The Repo First"
+
+Exploration ("I'll just do a quick `ls` / read a few files / check recent commits first")
+is Step 1, and Step 1 must not begin until Step 0's widget is on screen. What looks like
+harmless context-gathering is the exact mechanism by which the mandatory tracking setup
+gets silently deferred — once you start reading the project it feels productive and the
+pour never happens. If you are about to touch files or run git commands before
+`beads_mol_pour` + `beads_mol_current` have run and the widget is visible, stop and pour
+first. This holds even when the work is a follow-up on an existing epic.
 
 ## Boundaries
 - Read code and docs: yes
@@ -38,33 +81,7 @@ After the user answers a question, it's tempting to treat that as "enough" and f
 
 ## Checklist
 
-**Step 0 — Pour the workflow molecule (MANDATORY, before anything else).** Create the epic
-this brainstorming session works against, then show it to the user as a live widget:
-
-- **Fresh topic:** cook and pour the workflow formula:
-
-  ```bash
-  bd cook superpowers-workflow --var topic="<topic>" --persist
-  beads_mol_pour({ proto: "superpowers-workflow", vars: "topic=<topic>" })
-  ```
-
-  Note the returned root issue id (the `Root issue:` line) — this is the molecule you
-  work against for the rest of this skill and for `writing-plans`/`executing-plans`
-  afterward.
-- **Existing issue** (e.g. "brainstorm beads-kp0"): pour a new molecule as above, seeding
-  `--var topic="<existing issue's title>"`, then link the new root to the existing issue
-  without mutating it:
-
-  ```
-  beads_dep({ issue: "<new-root-id>", blocker: "<existing-issue-id>", type: "discovered-from" })
-  ```
-
-  If `discovered-from` is rejected by your `bd` version, use `--type related` instead —
-  both are non-blocking link types; do not use `blocks` here. Never change the existing
-  issue's type, parent, or status — it stays exactly what it was.
-- **Display the widget immediately after pouring:** run `beads_mol_current({ id: "<root-id>" })`
-  (and `beads_mol_ready({ id: "<root-id>" })`) so the user sees the live current step
-  before any exploration begins.
+**Step 0 — Pour the workflow molecule and show the widget (MANDATORY — see the STOP gate at the top of this skill).** Do this before anything else; the full commands and the existing-epic branch live in that gate. Step 0 is complete only when `beads_mol_pour` **and** `beads_mol_current` have both been called **and** the widget is visible on screen. This applies even when an existing epic already tracks this work — pour a NEW molecule, link it via `discovered-from` (`--type related` if rejected), and leave the existing issue untouched.
 
 **Do not begin Step 1 below until Step 0 is complete.**
 
@@ -93,6 +110,8 @@ Close each step bead in the same turn its real output exists (never batch severa
 
 ```dot
 digraph brainstorming {
+    "Pour workflow molecule\n+ render widget" [shape=box, style=bold, color=red];
+    "Step 0 complete\n(widget shown)?" [shape=diamond];
     "Explore project context" [shape=box];
     "Ask clarifying questions" [shape=box];
     "Propose 2-3 approaches" [shape=box];
@@ -103,6 +122,9 @@ digraph brainstorming {
     "User reviews spec?" [shape=diamond];
     "Invoke writing-plans skill" [shape=doublecircle];
 
+    "Pour workflow molecule\n+ render widget" -> "Step 0 complete\n(widget shown)?";
+    "Step 0 complete\n(widget shown)?" -> "Pour workflow molecule\n+ render widget" [label="no, not yet"];
+    "Step 0 complete\n(widget shown)?" -> "Explore project context" [label="yes"];
     "Explore project context" -> "Ask clarifying questions";
     "Ask clarifying questions" -> "Propose 2-3 approaches";
     "Propose 2-3 approaches" -> "Present design sections";
