@@ -177,6 +177,7 @@ review, don't just wait silently on the gate.
   rather than starting the breakdown over.
 
 Close each step bead in the same turn its real output exists (never batch several closes at the end of a phase) — this is what keeps `bd mol current --json` honest so the widget shows the real current step.
+**When you claim step N+1, close step N you just completed in the same turn** — every step handoff (e.g. `spec-review`→`spec-approved`, `spec-approved`→`implement`) follows this same general rule.
 
 
 ## No Placeholders
