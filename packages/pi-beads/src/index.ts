@@ -48,6 +48,7 @@ const TOOL = {
   show: "beads_show",
   deps: "beads_deps",
   create: "beads_create",
+  createList: "beads_create_list",
   update: "beads_update",
   close: "beads_close",
   dep: "beads_dep",
@@ -112,6 +113,8 @@ export default function piBeadsLean(pi: any) {
 
   // ---- resolution helpers ----
   const firstLine = (s: string) => (s.split("\n")[0] ?? "").trim();
+  // `bd create --silent` prints JUST the minted id on the last (non-empty) stdout line
+  const lastId = (s: string) => (s.trim().split("\n").pop() ?? "").trim();
 
   async function beadsDirOf(dir: string): Promise<string> {
     const r = await bd(["where"], dir);
@@ -766,6 +769,95 @@ export default function piBeadsLean(pi: any) {
       if (!r.ok) return textResult(`bd create failed: ${r.err}`);
       await afterWrite(repoDir);
       return textResult(`${r.out.trim()}  (repo: ${path.basename(repoDir)})`);
+    },
+  });
+
+  pi.registerTool({
+    name: TOOL.createList,
+    label: "Beads create list",
+    description:
+      "Create a gate bead (optional) and then a sequence of task beads under one parent, each via a sequential `bd create --parent` call so ids come out parent.1..N in declared order, then wire the blocks-chain (every task → gate; task N → task N-1). One call replaces N beads_create + beads_dep + beads_gate_create rounds. Tasks array order is the plan order. Partial failures report ids created so far.",
+    parameters: {
+      type: "object",
+      properties: {
+        parent: { type: "string", description: "Parent/implement step issue id; owning repo is where all creates route." },
+        gate: {
+          type: "object",
+          description: "Optional first bead + human gate (default title 'Plan reviewed / ready to execute')",
+          properties: {
+            title: { type: "string" },
+            description: { type: "string", description: "Global Constraints block (becomes gate bead description)" },
+            reason: { type: "string", description: "Human gate reason (default 'Plan approval')" },
+          },
+        },
+        tasks: {
+          type: "array",
+          description: "Task beads in PLAN ORDER (index order). Each: { title, type?, description?, labels?, priority? }",
+          items: {
+            type: "object",
+            properties: {
+              title: { type: "string" },
+              type: { type: "string", description: "task|bug|feature|chore|epic|decision... (default task)" },
+              description: { type: "string" },
+              labels: { type: "string", description: "Comma-separated" },
+              priority: { type: "number", description: "0-4" },
+            },
+            required: ["title"],
+          },
+        },
+      },
+      required: ["parent", "tasks"],
+    },
+    async execute(_id: string, params: any) {
+      if (!params?.parent || !Array.isArray(params?.tasks) || params.tasks.length === 0)
+        return textResult("parent and tasks[] are required (tasks must be non-empty)");
+      const repoDir = dirForPrefix(String(params.parent));
+      if (!repoDir) return textResult(`unknown repo for id '${params.parent}'`);
+      const gateTitle = params.gate?.title ?? "Plan reviewed / ready to execute";
+      const gateReason = params.gate?.reason ?? "Plan approval";
+      // (1) gate bead + human gate (abort on failure — nothing partial)
+      let gateId: string | null = null;
+      if (params.gate) {
+        const gArgs = ["create", gateTitle, "--parent", String(params.parent), "-t", "task"];
+        if (params.gate.description) gArgs.push("-d", String(params.gate.description));
+        gArgs.push("--silent");
+        const g = await bd(gArgs, repoDir);
+        if (!g.ok) return textResult(`gate create failed before any task: ${g.err}`);
+        gateId = lastId(g.out);
+        const gc = await bd(["gate", "create", "--blocks", gateId, "--type", "human", "--reason", gateReason], repoDir);
+        if (!gc.ok) return textResult(`gate created (${gateId}) but human-gate setup failed: ${gc.err}`);
+      }
+      // (2) sequential create of every task, awaiting each so ids come out parent.1..N in order
+      const taskIds: string[] = [];
+      for (const t of params.tasks) {
+        const a = ["create", String(t.title), "--parent", String(params.parent)];
+        if (t.type) a.push("-t", String(t.type));
+        if (t.description) a.push("-d", String(t.description));
+        if (t.labels) a.push("-l", String(t.labels));
+        if (t.priority !== undefined && t.priority !== null) a.push("-p", String(t.priority));
+        a.push("--silent");
+        const r = await bd(a, repoDir);
+        if (!r.ok) {
+          const ids = [...(gateId ? [gateId] : []), ...taskIds];
+          return textResult(`${taskIds.length} of ${params.tasks.length} tasks created before failure: ${ids.join(", ")}`);
+        }
+        taskIds.push(lastId(r.out));
+      }
+      // (3) wire deps: each task blocks the gate; task i+1 blocks task i (plan chain)
+      for (let i = 0; i < taskIds.length; i++) {
+        if (gateId) {
+          const l = await bd(["link", taskIds[i], gateId, "--type", "blocks"], repoDir);
+          if (!l.ok) return textResult(`deps: linking ${taskIds[i]}→${gateId} failed: ${l.err}`);
+        }
+        if (i > 0) {
+          const l = await bd(["link", taskIds[i], taskIds[i - 1], "--type", "blocks"], repoDir);
+          if (!l.ok) return textResult(`deps: linking ${taskIds[i]}→${taskIds[i - 1]} failed: ${l.err}`);
+        }
+      }
+      await afterWrite(repoDir);
+      const lines = gateId ? [`gate: ${gateId}`] : [];
+      taskIds.forEach((id, i) => lines.push(`t${i + 1}: ${id}`));
+      return textResult(lines.join("\n"));
     },
   });
 

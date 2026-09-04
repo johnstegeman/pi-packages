@@ -206,6 +206,17 @@ case "$1" in
     fi
     echo "ok"; exit 0
     ;;
+  create)
+    case "$2" in
+      "Plan reviewed / ready to execute") printf 'proj-m1-imp.1\\n'; exit 0 ;;
+      "Task 1: setup") printf 'proj-m1-imp.2\\n'; exit 0 ;;
+      "Task 2: build") printf 'proj-m1-imp.3\\n'; exit 0 ;;
+      "Task 3: verify") printf 'proj-m1-imp.4\\n'; exit 0 ;;
+      "Doomed task") echo "boom" >&2; exit 1 ;;
+      "Doomed gate") echo "boom" >&2; exit 1 ;;
+      *) printf 'generic-id\\n'; exit 0 ;;
+    esac
+    ;;
   *) echo "ok"; exit 0 ;;
 esac
 `;
@@ -307,13 +318,14 @@ const okResult = (r) => r && Array.isArray(r.content) && r.content[0]?.type === 
 // ---------------------------------------------------------------------------
 // 0. module surface: the new tools are registered and the type allowlists export
 // ---------------------------------------------------------------------------
-test("registers all 17 tools, including the seven new ones", async () => {
+test("registers all 18 tools, including beads_create_list", async () => {
   const { tools } = makePi();
   const names = tools.map((t) => t.name).sort();
   assert.deepEqual(names, [
     "beads_close",
     "beads_comment",
     "beads_create",
+    "beads_create_list",
     "beads_dep",
     "beads_deps",
     "beads_gate_create",
@@ -349,7 +361,7 @@ test("type allowlists are exactly the bd-verified sets", async () => {
 test("single-repo: session_start resolves, registers tools, emits nothing", async () => {
   const s = await openSession("single", repoDir);
   assert.equal(s.emitted.length, 0, "session_start must not emit beads:changed");
-  assert.equal(s.tools.length, 17);
+  assert.equal(s.tools.length, 18);
 });
 
 test("single-repo: beads_create builds argv and emits beads:changed", async () => {
@@ -361,6 +373,123 @@ test("single-repo: beads_create builds argv and emits beads:changed", async () =
   findInvocation(["create", "Do the thing"]);
   assert.equal(s.emitted.length, before + 1);
   assert.equal(s.emitted.at(-1), "beads:changed");
+});
+
+test("single-repo: beads_create_list creates sequentially, wires gate+chain deps, emits", async () => {
+  const s = await openSession("single", repoDir);
+  const before = s.emitted.length;
+  resetLog();
+  const r = await s.byName.get("beads_create_list").execute("c", {
+    parent: "proj-m1-imp",
+    gate: {
+      title: "Plan reviewed / ready to execute",
+      description: "constraints",
+      reason: "Plan approval",
+    },
+    tasks: [
+      { title: "Task 1: setup", description: "d1" },
+      { title: "Task 2: build", description: "d2", type: "feature" },
+      { title: "Task 3: verify", description: "d3", labels: "a,b" },
+    ],
+  });
+  assert.ok(okResult(r), JSON.stringify(r));
+
+  // exact argv of every bd call: gate bead, human gate, three tasks, then the blocks chain
+  findInvocation(["create", "Plan reviewed / ready to execute", "--parent", "proj-m1-imp", "-t", "task", "-d", "constraints", "--silent"]);
+  findInvocation(["gate", "create", "--blocks", "proj-m1-imp.1", "--type", "human", "--reason", "Plan approval"]);
+  findInvocation(["create", "Task 1: setup", "--parent", "proj-m1-imp", "-d", "d1", "--silent"]);
+  findInvocation(["create", "Task 2: build", "--parent", "proj-m1-imp", "-t", "feature", "-d", "d2", "--silent"]);
+  findInvocation(["create", "Task 3: verify", "--parent", "proj-m1-imp", "-d", "d3", "-l", "a,b", "--silent"]);
+  findInvocation(["link", "proj-m1-imp.2", "proj-m1-imp.1", "--type", "blocks"]); // task1 blocks gate
+  findInvocation(["link", "proj-m1-imp.3", "proj-m1-imp.1", "--type", "blocks"]); // task2 blocks gate
+  findInvocation(["link", "proj-m1-imp.3", "proj-m1-imp.2", "--type", "blocks"]); // task2 blocks task1
+  findInvocation(["link", "proj-m1-imp.4", "proj-m1-imp.1", "--type", "blocks"]); // task3 blocks gate
+  findInvocation(["link", "proj-m1-imp.4", "proj-m1-imp.3", "--type", "blocks"]); // task3 blocks task2
+
+  // the whole point: one atomic call, creates issued SEQUENTIALLY in gate -> t1 -> t2 -> t3 order
+  // (each awaited before the next) so ids come out parent.1..N in plan order.
+  const seq = invocations().map((inv) => {
+    if (inv[0] === "create") {
+      if (inv[1] === "Plan reviewed / ready to execute") return "GATE_CREATE";
+      if (inv[1] === "Task 1: setup") return "T1_CREATE";
+      if (inv[1] === "Task 2: build") return "T2_CREATE";
+      if (inv[1] === "Task 3: verify") return "T3_CREATE";
+      return "OTHER_CREATE";
+    }
+    if (inv[0] === "gate") return "GATE";
+    if (inv[0] === "link") return "LINK";
+    return "OTHER";
+  });
+  assert.deepEqual(seq, [
+    "GATE_CREATE",
+    "GATE",
+    "T1_CREATE",
+    "T2_CREATE",
+    "T3_CREATE",
+    "LINK",
+    "LINK",
+    "LINK",
+    "LINK",
+    "LINK",
+  ]);
+
+  // output maps the input task index -> minted id (gate first)
+  const text = r.content[0].text;
+  assert.match(text, /gate: proj-m1-imp\.1/);
+  assert.match(text, /t1: proj-m1-imp\.2/);
+  assert.match(text, /t2: proj-m1-imp\.3/);
+  assert.match(text, /t3: proj-m1-imp\.4/);
+
+  // a single afterWrite at the very end (gate/task creates are raw bd, not tool calls)
+  assert.equal(s.emitted.length, before + 1);
+  assert.equal(s.emitted.at(-1), "beads:changed");
+});
+
+test("single-repo: beads_create_list reports partial failure with created-so-far ids", async () => {
+  const s = await openSession("single", repoDir);
+  resetLog();
+  const r = await s.byName.get("beads_create_list").execute("c", {
+    parent: "proj-m1-imp",
+    tasks: [
+      { title: "Task 1: setup", description: "d1" }, // ok -> proj-m1-imp.2
+      { title: "Doomed task", description: "d2" }, // fails (fixture)
+      { title: "Task 3: verify", description: "d3" }, // never attempted: sequential
+    ],
+  });
+  const text = r?.content?.[0]?.text ?? "";
+  assert.match(text, /1 of 3 tasks created before failure: proj-m1-imp\.2/, text);
+  const invs = invocations();
+  assert.equal(invs.filter((iv) => iv[0] === "create").length, 2, JSON.stringify(invs));
+  assert.ok(!invs.some((iv) => iv[0] === "link"), `no dep wiring after a task failure: ${JSON.stringify(invs)}`);
+});
+
+test("single-repo: beads_create_list gate-failure aborts before any task", async () => {
+  const s = await openSession("single", repoDir);
+  resetLog();
+  const r = await s.byName.get("beads_create_list").execute("c", {
+    parent: "proj-m1-imp",
+    gate: { title: "Doomed gate", reason: "Plan approval" },
+    tasks: [{ title: "Task 1: setup", description: "d1" }],
+  });
+  const text = r?.content?.[0]?.text ?? "";
+  assert.match(text, /gate create failed before any task/, text);
+  const invs = invocations();
+  assert.equal(invs.length, 1, JSON.stringify(invs));
+  assert.deepEqual(invs[0], ["create", "Doomed gate", "--parent", "proj-m1-imp", "-t", "task", "--silent"]);
+});
+
+test("single-repo: beads_create_list validates parent and non-empty tasks before touching bd", async () => {
+  const s = await openSession("single", repoDir);
+  resetLog();
+  const r1 = await s.byName.get("beads_create_list").execute("c", { parent: "proj-m1-imp", tasks: [] });
+  assert.match(r1?.content?.[0]?.text ?? "", /parent and tasks\[\] are required/);
+  resetLog();
+  const r2 = await s.byName.get("beads_create_list").execute("c", { tasks: [{ title: "Task 1: setup" }] });
+  assert.match(r2?.content?.[0]?.text ?? "", /parent and tasks\[\] are required/);
+  resetLog();
+  const r3 = await s.byName.get("beads_create_list").execute("c", { parent: "nope-1", tasks: [{ title: "Task 1: setup" }] });
+  assert.match(r3?.content?.[0]?.text ?? "", /unknown repo for id 'nope-1'/);
+  assert.equal(invocations().length, 0, "validation errors must not call bd");
 });
 
 test("single-repo: beads_update claim/setMetadata/description/title plumbing", async () => {
