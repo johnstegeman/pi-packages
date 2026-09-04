@@ -38,30 +38,37 @@ After the user answers a question, it's tempting to treat that as "enough" and f
 
 ## Checklist
 
-**Starting from a fresh topic:** cook and pour the workflow formula to create the epic
-this brainstorming session works against:
+**Step 0 — Pour the workflow molecule (MANDATORY, before anything else).** Create the epic
+this brainstorming session works against, then show it to the user as a live widget:
 
-```bash
-bd cook superpowers-workflow --var topic="<topic>" --persist
-beads_mol_pour({ proto: "superpowers-workflow", vars: "topic=<topic>" })
-```
+- **Fresh topic:** cook and pour the workflow formula:
 
-Note the returned root issue id (the `Root issue:` line) — this is the molecule you work
-against for the rest of this skill and for `writing-plans`/`executing-plans` afterward.
+  ```bash
+  bd cook superpowers-workflow --var topic="<topic>" --persist
+  beads_mol_pour({ proto: "superpowers-workflow", vars: "topic=<topic>" })
+  ```
 
-**Starting from an existing issue** (e.g. "brainstorm beads-kp0"): pour a new molecule as
-above, seeding `--var topic="<existing issue's title>"`, then link the new root to the
-existing issue without mutating it:
+  Note the returned root issue id (the `Root issue:` line) — this is the molecule you
+  work against for the rest of this skill and for `writing-plans`/`executing-plans`
+  afterward.
+- **Existing issue** (e.g. "brainstorm beads-kp0"): pour a new molecule as above, seeding
+  `--var topic="<existing issue's title>"`, then link the new root to the existing issue
+  without mutating it:
 
-```
-beads_dep({ issue: "<new-root-id>", blocker: "<existing-issue-id>", type: "discovered-from" })
-```
+  ```
+  beads_dep({ issue: "<new-root-id>", blocker: "<existing-issue-id>", type: "discovered-from" })
+  ```
 
-If `discovered-from` is rejected by your `bd` version, use `--type related` instead — both
-are non-blocking link types; do not use `blocks` here. Never change the existing issue's
-type, parent, or status — it stays exactly what it was.
+  If `discovered-from` is rejected by your `bd` version, use `--type related` instead —
+  both are non-blocking link types; do not use `blocks` here. Never change the existing
+  issue's type, parent, or status — it stays exactly what it was.
+- **Display the widget immediately after pouring:** run `beads_mol_current({ id: "<root-id>" })`
+  (and `beads_mol_ready({ id: "<root-id>" })`) so the user sees the live current step
+  before any exploration begins.
 
-Each checklist item below corresponds to one formula step. Claim the step when you begin
+**Do not begin Step 1 below until Step 0 is complete.**
+
+Each checklist item from Step 1 on corresponds to one formula step. Claim the step when you begin
 it (`beads_update({ id: "<step-id>", claim: true })`), work it, and close it (`beads_close({ ids: "<step-id>", reason:
 "<one-line summary>" })`) only once its real output actually exists in the conversation (see
 the hard-gate above) — never close several in a row within the same turn. Step ids in
