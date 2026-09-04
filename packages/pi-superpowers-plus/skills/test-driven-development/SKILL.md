@@ -61,21 +61,15 @@ For typo fixes, config tweaks, string changes, renames:
 
 **Be honest:** If the change touches logic, it's not trivial. Use Scenario 1 or 2.
 
-## Interpreting Runtime Warnings
+## Before Writing Source Code
 
-The workflow monitor tracks your TDD phase and may inject warnings like:
+Before writing any source code, run the scenario logic below and name which
+scenario applies (1: new feature → full TDD, 2: modifying tested code → run
+existing tests first, 3: trivial → judgment call). If you catch yourself
+writing production code with no failing test, stop and re-check the Iron Law
+below. The checkpoints are in these steps — there is no external monitor
+injecting warnings.
 
-```
-⚠️ TDD: Writing source code (src/foo.ts) without a failing test.
-```
-
-**When you see this, pause and assess:**
-- Which scenario applies to this change?
-- If Scenario 2: run existing tests to confirm coverage, then proceed
-- If Scenario 1: write a failing test first
-- If Scenario 3: proceed, run tests after
-
-The warning is a signal to think, not a hard stop.
 
 ## The Iron Law (Scenario 1)
 
