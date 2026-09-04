@@ -1,14 +1,18 @@
 import assert from "node:assert/strict";
 import {
+  applyErrorFrame,
   applyMoleculeFrame,
   createChangeCoalescer,
   displayWidth,
+  hasLockedMolecule,
   moleculeWidgetLines,
   nextRefreshArgs,
   parseMoleculeCurrent,
   phaseFor,
   topicFor,
 } from "./beads-molecule-widget.mjs";
+
+// ---------- parser: malformed input never throws ----------
 
 // ---------- parser: malformed input never throws ----------
 assert.deepEqual(parseMoleculeCurrent(""), null);
@@ -799,6 +803,170 @@ assert.deepEqual(nextRefreshArgs("bd-mol-abc"), ["mol", "current", "bd-mol-abc",
     !rLines.some((l) => l.includes("Implement stale-frame fix")),
     `Implement-WIP row gone from finishing view: ${rLines.join(" | ")}`,
   );
+}
+
+// ---------- lock predicate: null / undefined / empty all mean "no lock" ----------
+{
+  const NO_ID = ["mol", "current", "--json"];
+  assert.deepEqual(nextRefreshArgs(null), NO_ID);
+  assert.deepEqual(nextRefreshArgs(undefined), NO_ID);
+  assert.deepEqual(nextRefreshArgs(""), NO_ID, "empty-string lock falls back to no-id inference");
+  assert.deepEqual(nextRefreshArgs("bd-mol-abc"), ["mol", "current", "bd-mol-abc", "--json"]);
+  assert.equal(hasLockedMolecule(null), false);
+  assert.equal(hasLockedMolecule(undefined), false);
+  assert.equal(hasLockedMolecule(""), false, "empty string is not a usable lock");
+  assert.equal(hasLockedMolecule("bd-mol-abc"), true);
+}
+
+// ---------- Finding 1a: a fully-done by-id frame releases the lock ----------
+{
+  const prev = parseMoleculeCurrent(RAW); // parsed RAW 4-step molecule (bd-mol-g0z)
+  const done = {
+    ...prev,
+    current_step: null,
+    next_step: null,
+    steps: prev.steps.map((s) => ({ ...s, step_status: "done", status: "closed" })),
+    doneCount: prev.total,
+  };
+  assert.equal(done.doneCount, done.total, "precondition: fixture is fully done");
+  const released = applyMoleculeFrame(prev, "bd-mol-g0z", done, true);
+  assert.equal(released.activeMolecule, done, "finished frame still shown (once)");
+  assert.equal(released.lockedMoleculeId, null, "fully-done by-id frame releases the lock");
+  assert.deepEqual(
+    nextRefreshArgs(released.lockedMoleculeId),
+    ["mol", "current", "--json"],
+    "next refresh after a finished molecule is no-id inference",
+  );
+
+  // a by-id frame still in progress keeps locking (existing pin behavior preserved)
+  const still = applyMoleculeFrame(prev, "bd-mol-g0z", prev, true);
+  assert.equal(still.lockedMoleculeId, "bd-mol-g0z", "in-progress by-id frame stays locked");
+  // a fully-done frame is never re-locked, even by a no-id refresh
+  const never = applyMoleculeFrame(done, null, done, false);
+  assert.equal(never.lockedMoleculeId, null, "finished frame never re-locks");
+}
+
+// ---------- Finding 1a (behavior): finish A -> pour B, lock moves to B ----------
+{
+  const A_DONE_RAW = JSON.stringify([
+    {
+      molecule_id: "bd-mol-A",
+      molecule_title: "superpowers-workflow",
+      current_step: null,
+      next_step: null,
+      steps: [
+        {
+          issue: { id: "A.1", title: "Explore project context: A", issue_type: "task", status: "closed" },
+          status: "done",
+          is_current: false,
+        },
+        {
+          issue: { id: "A.2", title: "Implement A", issue_type: "task", status: "closed" },
+          status: "done",
+          is_current: false,
+        },
+      ],
+    },
+  ]);
+  const B_RAW = JSON.stringify([
+    {
+      molecule_id: "bd-mol-B",
+      molecule_title: "superpowers-workflow",
+      current_step: { id: "B.2", title: "Implement B", status: "in_progress", issue_type: "task" },
+      next_step: null,
+      steps: [
+        {
+          issue: { id: "B.1", title: "Explore project context: B", issue_type: "task", status: "closed" },
+          status: "done",
+          is_current: false,
+        },
+        {
+          issue: { id: "B.2", title: "Implement B", issue_type: "task", status: "in_progress" },
+          status: "current",
+          is_current: true,
+        },
+      ],
+    },
+  ]);
+
+  let locked = "bd-mol-A";
+  let active = null;
+  let bActive = false;
+  const calls = [];
+  const fakeExec = async (_c, args) => {
+    calls.push(args);
+    if (locked === "bd-mol-A") return { code: 0, stdout: A_DONE_RAW, stderr: "" };
+    if (locked === "bd-mol-B") return { code: 0, stdout: B_RAW, stderr: "" };
+    return bActive ? { code: 0, stdout: B_RAW, stderr: "" } : { code: 0, stdout: "[]", stderr: "" };
+  };
+  async function refresh() {
+    const args = nextRefreshArgs(locked);
+    const r = await fakeExec("bd", args);
+    if (r.code !== 0) return;
+    const parsed = parseMoleculeCurrent(r.stdout);
+    const queriedById = hasLockedMolecule(locked);
+    const nxt = applyMoleculeFrame(active, locked, parsed, queriedById);
+    active = nxt.activeMolecule;
+    locked = nxt.lockedMoleculeId;
+  }
+
+  await refresh(); // A finishes -> the lock must drop
+  assert.equal(locked, null, "fully-done A releases the lock");
+  assert.equal(active.molecule_id, "bd-mol-A", "finished frame still shown once");
+  assert.deepEqual(calls.at(-1), ["mol", "current", "bd-mol-A", "--json"]);
+
+  await refresh(); // idle -> no-id inference finds nothing, finished frame persists
+  assert.equal(active.molecule_id, "bd-mol-A", "finished frame persists while nothing new is active");
+  assert.deepEqual(calls.at(-1), ["mol", "current", "--json"], "after release, refresh is no-id");
+
+  bActive = true;
+  await refresh(); // B poured -> no-id inference re-locks B
+  assert.equal(locked, "bd-mol-B", "fresh molecule B re-locks via no-id inference");
+  assert.equal(active.molecule_id, "bd-mol-B", "widget switches to B");
+
+  await refresh(); // B stays pinned by id while in progress
+  assert.equal(locked, "bd-mol-B", "B stays locked while in progress");
+  assert.deepEqual(calls.at(-1), ["mol", "current", "bd-mol-B", "--json"], "in-progress B is queried by id");
+}
+
+// ---------- Finding 1b: error-path not-found (in stdout OR stderr) clears lock + widget ----------
+{
+  const prev = parseMoleculeCurrent(RAW);
+  // bd writes some errors ("not found", "no active molecule") to STDOUT, not stderr
+  const clearedStdout = applyErrorFrame(prev, "bd-mol-g0z", {
+    code: 1,
+    stdout: "molecule bd-mol-g0z not found",
+    stderr: "",
+  });
+  assert.deepEqual(clearedStdout, { activeMolecule: null, lockedMoleculeId: null }, "not-found in stdout clears both");
+
+  const clearedNoActive = applyErrorFrame(prev, "bd-mol-g0z", {
+    code: 1,
+    stdout: "no active molecule",
+    stderr: "",
+  });
+  assert.deepEqual(
+    clearedNoActive,
+    { activeMolecule: null, lockedMoleculeId: null },
+    "no-active in stdout clears both",
+  );
+
+  const clearedStderr = applyErrorFrame(prev, "bd-mol-g0z", {
+    code: 1,
+    stdout: "",
+    stderr: "no active molecule",
+  });
+  assert.deepEqual(clearedStderr, { activeMolecule: null, lockedMoleculeId: null }, "no-active in stderr clears both");
+
+  // arbitrary/transient failure keeps the frame AND the lock
+  const kept = applyErrorFrame(prev, "bd-mol-g0z", { code: 1, stdout: "connection refused", stderr: "" });
+  assert.equal(kept.activeMolecule, prev, "transient failure keeps the frame");
+  assert.equal(kept.lockedMoleculeId, "bd-mol-g0z", "transient failure keeps the lock");
+
+  // null result (bd binary unreachable) keeps everything
+  const keptNull = applyErrorFrame(prev, "bd-mol-g0z", null);
+  assert.equal(keptNull.activeMolecule, prev);
+  assert.equal(keptNull.lockedMoleculeId, "bd-mol-g0z");
 }
 
 console.log("beads-molecule-widget: all assertions passed");

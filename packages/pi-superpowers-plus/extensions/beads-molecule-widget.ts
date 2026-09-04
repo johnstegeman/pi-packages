@@ -1,7 +1,9 @@
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import {
+  applyErrorFrame,
   applyMoleculeFrame,
   createChangeCoalescer,
+  hasLockedMolecule,
   moleculeWidgetLines,
   nextRefreshArgs,
   parseMoleculeCurrent,
@@ -36,17 +38,21 @@ export default function (pi: ExtensionAPI) {
   }
 
   async function refreshMolecule(cwd: string): Promise<void> {
-    const queriedById = lockedMoleculeId !== null;
+    const queriedById = hasLockedMolecule(lockedMoleculeId);
     const args = nextRefreshArgs(lockedMoleculeId);
     const r = await pi.exec("bd", args, {
       cwd,
       timeout: 5000,
     });
     if (r?.code !== 0) {
-      // only clear on a clean "no active molecule" signal, never on a transient
-      // failure — an unreachable bd binary should not blank a widget that was
-      // showing real progress a moment ago.
-      if (r && /no active molecule/i.test(r.stderr ?? "")) activeMolecule = null;
+      // only clear on a clean "no active molecule"/"not found" signal, which
+      // bd can emit on STDOUT as well as stderr — never on a transient failure
+      // (an unreachable bd binary should not blank a widget that was showing
+      // real progress a moment ago). Releasing the lock on a clean not-found
+      // also lets the next refresh re-infer a freshly poured molecule.
+      const err = applyErrorFrame(activeMolecule, lockedMoleculeId, r);
+      activeMolecule = err.activeMolecule;
+      lockedMoleculeId = err.lockedMoleculeId;
       return;
     }
     const parsed = parseMoleculeCurrent(r.stdout);
