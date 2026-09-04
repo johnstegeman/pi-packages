@@ -15,7 +15,7 @@ Determine which scenario applies before writing code:
 
 **Trivial changes (typo, config, rename):** Use judgment. Run relevant tests after if they exist.
 
-**If you see a ⚠️ TDD warning:** Pause. Consider which scenario applies. If existing tests cover your change, run them and proceed. If not, write a test first.
+Pause and consider which scenario applies before writing code: full TDD for new features, run existing tests when modifying tested code, judgment call for trivial changes.
 
 ## Rules
 - Keep changes minimal and scoped to the task.

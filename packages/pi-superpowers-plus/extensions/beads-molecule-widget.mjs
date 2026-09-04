@@ -101,6 +101,69 @@ export function parseMoleculeCurrent(json) {
   };
 }
 
+/**
+ * True when a molecule lock is actually usable: null, undefined, or an empty
+ * string all mean "no lock" (a blank id is never a valid query target). Both
+ * nextRefreshArgs and the .ts refreshMolecule use this single predicate so the
+ * should-query-by-id decision can never drift between the two call sites.
+ */
+export function hasLockedMolecule(lockedMoleculeId) {
+  return lockedMoleculeId != null && lockedMoleculeId !== "";
+}
+
+/**
+ * Choose the `bd mol current` args for a refresh. Once a usable molecule id is
+ * known, query by id — with-id mode always returns the full molecule even when
+ * every step is done — instead of the no-id inference call, which drops out to
+ * [] in the post-implementation window (nothing in_progress+assigned to infer
+ * from). A null / undefined / empty lock falls back to no-id inference.
+ */
+export function nextRefreshArgs(lockedMoleculeId) {
+  return hasLockedMolecule(lockedMoleculeId)
+    ? ["mol", "current", lockedMoleculeId, "--json"]
+    : ["mol", "current", "--json"];
+}
+
+/**
+ * Pure transition for one refresh result. Returns the next
+ * `{ activeMolecule, lockedMoleculeId }`:
+ * - parsed non-null: adopt the new frame and lock its molecule id — unless the
+ *   molecule is fully done (every step done, nothing current), in which case
+ *   the finished frame is kept for display but the lock is dropped so the next
+ *   refresh falls back to no-id inference and can pick up a newly poured
+ *   molecule (otherwise the widget would stay pinned to the finished molecule).
+ * - parsed null + queriedById: real "molecule gone" — clear the widget and the lock;
+ * - parsed null + no-id fallback (no lock yet): inference found nothing, keep the
+ *   previous frame as-is (nothing better to show).
+ */
+export function applyMoleculeFrame(prevActiveMolecule, prevLockedId, parsed, queriedById) {
+  if (parsed) {
+    const finished = parsed.doneCount === parsed.total && !parsed.current_step;
+    return finished
+      ? { activeMolecule: parsed, lockedMoleculeId: null }
+      : { activeMolecule: parsed, lockedMoleculeId: parsed.molecule_id };
+  }
+  if (queriedById) return { activeMolecule: null, lockedMoleculeId: null };
+  return { activeMolecule: prevActiveMolecule, lockedMoleculeId: prevLockedId };
+}
+
+/**
+ * Pure transition for a non-zero `bd mol current` result. bd emits some errors
+ * ("no active molecule", "not found") on **stdout**, so match both output
+ * streams. Only a clean not-found / no-active signal clears the widget AND the
+ * lock (which lets the next refresh re-infer a fresh molecule); arbitrary or
+ * transient failures keep both — an unreachable bd binary must not blank a
+ * widget that was showing real progress a moment ago.
+ */
+export function applyErrorFrame(prevActiveMolecule, prevLockedId, r) {
+  if (!r) return { activeMolecule: prevActiveMolecule, lockedMoleculeId: prevLockedId };
+  const msg = `${r.stdout ?? ""}\n${r.stderr ?? ""}`;
+  if (/no active molecule|not found/i.test(msg)) {
+    return { activeMolecule: null, lockedMoleculeId: null };
+  }
+  return { activeMolecule: prevActiveMolecule, lockedMoleculeId: prevLockedId };
+}
+
 const EXPLORE_PREFIX = "Explore project context: ";
 
 // ---- topic + phase helpers (superpowers-workflow formula coupling) ----

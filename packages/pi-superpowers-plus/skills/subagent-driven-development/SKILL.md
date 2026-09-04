@@ -1,6 +1,7 @@
 ---
 name: subagent-driven-development
 description: Use when executing implementation plans with independent tasks in the current session
+disable-model-invocation: true
 ---
 
 > **Related skills:** Need an isolated workspace? `/skill:using-git-worktrees`. Need a plan first? `/skill:writing-plans`. Done? `/skill:finishing-a-development-branch`.
@@ -441,7 +442,7 @@ If an implementer subagent fails, errors out, or produces incomplete work:
 - **`/skill:finishing-a-development-branch`** - Complete development after final review
 
 **Subagents follow by default:**
-- **TDD** - Runtime warnings on source-before-test patterns. Implementer subagents receive three-scenario TDD instructions via agent profile and prompt template: new feature (full TDD), modifying tested code (run existing tests), trivial change (judgment call).
+- **TDD** - Implementer subagents receive three-scenario TDD instructions via agent profile and prompt template (new feature, modifying tested code, trivial change); no runtime monitor — the discipline is in the instructions.
 
 **Alternative workflow:**
 - **`/skill:executing-plans`** - Use for parallel session instead of same-session execution

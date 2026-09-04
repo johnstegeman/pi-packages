@@ -8,6 +8,25 @@ Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ---
 
 ## [Unreleased]
+_Nothing yet beyond 0.9.0 — all prior work is released._
+
+---
+
+## [0.9.0] — 2026-09-04
+
+### Added
+
+- **Phase commands** — `/brainstorming` (or `/brainstorm`), `/plan`, `/verify`, `/review`, `/finish` each load the corresponding phase skill on demand via an `input` transform (`extensions/phase-commands.mjs`) that rewrites the command to `/skill:<name>` before pi's native skill expansion; extra arguments are preserved (`/brainstorm build a chat app` → `/skill:brainstorming build a chat app`). `/execute` stages the implementation phase and presents the Subagent-Driven Development vs Executing Plans choice in the editor instead of rewriting to a single skill.
+
+### Changed
+
+- **The 11 phase + supporting skills are hidden from the system prompt again** (`disable-model-invocation: true`): the 7 phase skills (`brainstorming`, `writing-plans`, `executing-plans`, `subagent-driven-development`, `verification-before-completion`, `requesting-code-review`, `finishing-a-development-branch`) plus 4 supporting skills (`test-driven-development`, `using-git-worktrees`, `dispatching-parallel-agents`, `receiving-code-review`). `using-superpowers` and `systematic-debugging` stay visible. Hidden skills remain loadable via `/skill:<name>` any time.
+- **Phase handoffs print the exact command for the user to run** (`Type /plan to continue`, `/finish`, `/verify`, ...). The next skill always loads via pi's native expansion — never improvised. Close-as-you-go reminders added at handoffs.
+
+### Removed
+
+- **Stale workflow-monitor / runtime-warning references scrubbed** from `test-driven-development`, `subagent-driven-development`, the `implementer` template, and the `worker` template — there is no runtime monitor (reaffirmed); discipline lives in skill instructions.
+
 
 ### Changed
 

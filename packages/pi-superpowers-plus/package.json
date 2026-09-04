@@ -1,12 +1,12 @@
 {
   "name": "pi-superpowers-plus",
-  "version": "0.8.0",
+  "version": "0.9.0",
   "description": "Superpowers workflow skills adapted for pi",
   "keywords": [
     "pi-package"
   ],
   "scripts": {
-    "test": "biome check . && node extensions/beads-molecule-widget.test.mjs",
+    "test": "biome check . && node extensions/beads-molecule-widget.test.mjs && node extensions/phase-commands.test.mjs",
     "lint": "biome check .",
     "check": "biome check ."
   },

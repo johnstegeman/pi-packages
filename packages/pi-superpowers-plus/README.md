@@ -8,13 +8,30 @@ Your coding agent doesn't just know the rules - it follows them. Skills teach th
 
 ## What You Get When You Install This
 
-**13 workflow skills** that guide the agent through a structured development process - from brainstorming ideas through shipping code.
+**13 workflow skills** that guide the agent through a structured development process - from brainstorming ideas through shipping code. 11 of them are hidden from the system prompt and load on demand, so the context stays lean — only `using-superpowers` and `systematic-debugging` remain visible. There's no runtime enforcement layer watching tool calls; phase loading is via pi's native `/skill:` expansion (see [Phase Commands](#phase-commands) below).
 
 **Two companion packages** provide the tooling the skills reference (bundled with the `pi-packages` monorepo install):
 - [`@tintinweb/pi-subagents`](https://github.com/tintinweb/pi-subagents) — registers the `Agent` / `get_subagent_result` / `steer_subagent` tools for dispatching implementation and review work to isolated in-process subagents, with a persistent widget, FleetView, mid-run steering, and session resume.
 - **forked [`pi-beads`](https://github.com/abix5/pi-beads)** — registers the `beads_create` / `beads_update` / `beads_close` / `beads_dep` / `beads_list` / `beads_show` tools for beads issue tracking — persistent issues for plan work, wisps (`ephemeral: true`) for session phase bookkeeping. The fork (bundled in this monorepo) adds the `ephemeral`/wisp support that upstream v0.2.2 lacks. The live workflow display is provided by this package's own `beads-molecule-widget` extension, not by pi-beads.
 
 There's no runtime enforcement layer watching tool calls — the discipline (TDD, verification before claiming done, branch safety, etc.) lives entirely in the skill instructions the agent reads and follows.
+
+## Phase Commands
+
+Phase entry is command-driven: the phase skills are hidden from the system prompt and load on demand when you type one of the six phase commands:
+
+| Command | Loads |
+|---------|-------|
+| `/brainstorming` or `/brainstorm` | `brainstorming` |
+| `/plan` | `writing-plans` |
+| `/execute` | presents the Subagent-Driven Development vs Executing Plans choice in the editor |
+| `/verify` | `verification-before-completion` |
+| `/review` | `requesting-code-review` |
+| `/finish` | `finishing-a-development-branch` |
+
+Each command is an `input` transform that rewrites to `/skill:<name>` before pi's native skill expansion, so the next skill always loads the same way — never improvised. Extra arguments are preserved (`/brainstorm build a chat app` → `/skill:brainstorming build a chat app`). `/execute` doesn't rewrite to a single skill; it stages the implementation phase and presents the two execution approaches in the editor — pick one and type its `/skill:` command.
+
+Because the hidden skills are not model-invocable, every phase skill — plus the supporting skills — is also `/skill:`-invocable any time (`/skill:test-driven-development`, `/skill:writing-plans`, etc.).
 
 ## Prerequisites
 

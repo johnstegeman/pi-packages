@@ -1,6 +1,7 @@
 ---
 name: writing-plans
 description: Use when you have a spec or requirements for a multi-step task, before touching code
+disable-model-invocation: true
 ---
 
 > **Related skills:** Did you `/skill:brainstorming` first? Ready to implement? Use `/skill:executing-plans` or `/skill:subagent-driven-development`.
@@ -19,7 +20,7 @@ Call `set_phase({ phase: "writing plan" })`
 At the start of planning, resolve the implement step id via
 `beads_list({ label: "step:implement", mol: "<root-id>" })`, then claim it:
 `beads_update({ id: "<implement-step-id>", claim: true })`. This is the container all real task
-beads are created under.
+beads are created under. **When you claim the `implement` step, close the `spec-approved` step in the same turn.**
 
 **Context:** If working in an isolated worktree, it should have been created via the `/skill:using-git-worktrees` skill at execution time.
 
@@ -278,7 +279,7 @@ options:**
 
 **2. Parallel Session (separate)** - Batch execution with human review checkpoints. Better when tasks are tightly coupled or you want more control between batches.
 
-**Which approach?"**
+**Which approach? Or type `/execute` to see the two options presented by the command."**
 
 **If Subagent-Driven chosen:**
 - **REQUIRED SUB-SKILL:** Use `/skill:subagent-driven-development`

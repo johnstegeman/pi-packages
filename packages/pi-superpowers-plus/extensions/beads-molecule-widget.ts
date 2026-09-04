@@ -1,5 +1,13 @@
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
-import { createChangeCoalescer, moleculeWidgetLines, parseMoleculeCurrent } from "./beads-molecule-widget.mjs";
+import {
+  applyErrorFrame,
+  applyMoleculeFrame,
+  createChangeCoalescer,
+  hasLockedMolecule,
+  moleculeWidgetLines,
+  nextRefreshArgs,
+  parseMoleculeCurrent,
+} from "./beads-molecule-widget.mjs";
 
 type WidgetTheme = { fg?: (color: string, text: string) => string };
 type UiApi = {
@@ -11,6 +19,11 @@ type SessionContext = { ui?: UiApi; cwd?: string };
 export default function (pi: ExtensionAPI) {
   let ui: UiApi | null = null;
   let activeMolecule: ReturnType<typeof parseMoleculeCurrent> | null = null;
+  // once a molecule is seen, remember its id so refreshes re-query by id — the
+  // no-id inference call drops out (returns []) when no step is in_progress,
+  // which used to freeze the widget on a stale frame after the implement step
+  // closed.
+  let lockedMoleculeId: string | null = null;
 
   // ---- event-driven refresh: fires on every beads:changed, coalesced ----
   let coalescer: ReturnType<typeof createChangeCoalescer> | null = null;
@@ -25,19 +38,27 @@ export default function (pi: ExtensionAPI) {
   }
 
   async function refreshMolecule(cwd: string): Promise<void> {
-    const r = await pi.exec("bd", ["mol", "current", "--json"], {
+    const queriedById = hasLockedMolecule(lockedMoleculeId);
+    const args = nextRefreshArgs(lockedMoleculeId);
+    const r = await pi.exec("bd", args, {
       cwd,
       timeout: 5000,
     });
     if (r?.code !== 0) {
-      // only clear on a clean "no active molecule" signal, never on a transient
-      // failure — an unreachable bd binary should not blank a widget that was
-      // showing real progress a moment ago.
-      if (r && /no active molecule/i.test(r.stderr ?? "")) activeMolecule = null;
+      // only clear on a clean "no active molecule"/"not found" signal, which
+      // bd can emit on STDOUT as well as stderr — never on a transient failure
+      // (an unreachable bd binary should not blank a widget that was showing
+      // real progress a moment ago). Releasing the lock on a clean not-found
+      // also lets the next refresh re-infer a freshly poured molecule.
+      const err = applyErrorFrame(activeMolecule, lockedMoleculeId, r);
+      activeMolecule = err.activeMolecule;
+      lockedMoleculeId = err.lockedMoleculeId;
       return;
     }
     const parsed = parseMoleculeCurrent(r.stdout);
-    if (parsed) activeMolecule = parsed;
+    const next = applyMoleculeFrame(activeMolecule, lockedMoleculeId, parsed, queriedById);
+    activeMolecule = next.activeMolecule;
+    lockedMoleculeId = next.lockedMoleculeId;
   }
 
   function renderMolecule() {
