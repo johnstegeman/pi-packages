@@ -37,10 +37,12 @@ export default function setupPhaseCommands(pi) {
     }
 
     if (first === "/execute") {
-      if (ctx?.hasUI) {
-        ctx.ui.setEditorText(EXECUTE_CHOICE);
-        ctx.ui.notify("Stage set to execute. Pick an execution approach.", "info");
-      }
+      // Headless / piped / programmatic runs have no UI: a silent "handled"
+      // no-op would eat the command with no error and no guidance. Fall back to
+      // "continue" so the phrase reaches the model instead of vanishing.
+      if (!ctx?.hasUI) return { action: "continue" };
+      ctx.ui.setEditorText(EXECUTE_CHOICE);
+      ctx.ui.notify("Stage set to execute. Pick an execution approach.", "info");
       return { action: "handled" };
     }
 

@@ -47,8 +47,12 @@ assert.ok(
 );
 assert.ok(lastEditorText.includes("/skill:executing-plans"), "/execute editor text must mention executing-plans");
 
-// ---------- /execute without UI still handled (never crashes) ----------
-assert.equal((await input({ source: "interactive", text: "/execute" }, { hasUI: false })).action, "handled");
+// ---------- /execute without UI falls back to continue (never silently swallowed) ----------
+assert.deepEqual(
+  await input({ source: "interactive", text: "/execute" }, { hasUI: false }),
+  { action: "continue" },
+  "headless /execute must reach the model, not be silently eaten",
+);
 
 // ---------- non-command input passes through ----------
 assert.deepEqual(await input({ source: "interactive", text: "hello" }, ctx), { action: "continue" });
