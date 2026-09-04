@@ -367,7 +367,9 @@ export function moleculeWidgetLines(state, width, theme) {
   // unless an awaiting (gated) step already leads, or an is_current step is present
   // (a real is_current step always wins).
   const leadCandidate = (set) => {
-    if (awaitingStep || set.some((s) => s.is_current)) return null;
+    // A real current step always wins; so does a waiting (gated) step, and a gate
+    // that IS the current step pins the ⏸ row on its own — never fall back then.
+    if (awaitingStep || gateCurrent || set.some((s) => s.is_current)) return null;
     for (let i = set.length - 1; i >= 0; i--) {
       const s = set[i];
       if (
@@ -420,7 +422,9 @@ export function moleculeWidgetLines(state, width, theme) {
                 ? 1
                 : 0,
       );
-    const lead = leadCandidate(kids);
+    // Kids only ever lead when the impl head is NOT the current step — when the
+    // head carries is_current its ◐ must be the only active row.
+    const lead = impl.is_current ? null : leadCandidate(kids);
     kids.forEach((kid, i) => {
       const last = i === kids.length - 1;
       const activeKid = kid === awaitingStep || kid === lead;

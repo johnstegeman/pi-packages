@@ -1161,4 +1161,69 @@ assert.deepEqual(nextRefreshArgs("bd-mol-abc"), ["mol", "current", "bd-mol-abc",
   );
 }
 
+// ---------- Finding 2 regression (a): gate is the current step ----------
+// When the gate itself carries is_current and NO other step is_current, the ⏸
+// Waiting-on-you gate row is the ONLY active row. The stale-fallback must NOT
+// fire (awaitingStep is null here and the gate is not in the brainstorming view
+// set), so no view step may render ◐ alongside the pinned gate row.
+{
+  const gateCurrentState = {
+    ...bstate,
+    current_step: { id: "gG", title: "Gate: human", issue_type: "gate" },
+    next_step: null,
+    doneCount: 2,
+    steps: bstate.steps.map((s) => ({
+      ...s,
+      is_current: false,
+      ...(s.id === "s2" ? { status: "closed", step_status: "done" } : {}),
+      ...(s.id === "g1" ? { is_current: true, step_status: "ready", status: "open" } : {}),
+    })),
+  };
+  const gcLines = moleculeWidgetLines(gateCurrentState, 200);
+  const gcWait = gcLines.find((l) => l.includes("Waiting on you:"));
+  assert.ok(
+    gcWait && gcWait.includes("Gate: human"),
+    `gate-current waiting row rendered: ${gcLines.join(" | ")}`
+  );
+  assert.equal(
+    gcLines.filter((l) => l.includes("\u25d0")).length,
+    0,
+    `no view step double-marked ◐ when the gate itself is current: ${gcLines.join(" | ")}`
+  );
+}
+
+// ---------- Finding 2 regression (b): impl head is the only current step ----------
+// When the impl head carries is_current and no kid does, the head's ◐ must be the
+// ONLY active row. The kids-lead fallback must NOT double-mark a kid (e.g. the
+// open/ready "Plan reviewed / ready to execute" kid) alongside the head's ◐.
+{
+  const headCurrentState = {
+    ...implState,
+    current_step: {
+      id: "mol-9.i",
+      title: "Implement Superpowers widget changes",
+      status: "in_progress",
+      issue_type: "task",
+    },
+    steps: implState.steps.map((s) => ({
+      ...s,
+      is_current: s.id === "mol-9.i",
+      ...(s.id === "mol-9.i.2" ? { status: "open", step_status: "pending" } : {}),
+    })),
+  };
+  const hcLines = moleculeWidgetLines(headCurrentState, 200);
+  const hcHead = hcLines.findIndex((l) => l.includes("Implement Superpowers widget changes"));
+  assert.ok(hcHead !== -1, `impl head row rendered: ${hcLines.join(" | ")}`);
+  assert.ok(
+    hcLines[hcHead].includes("\u25d0"),
+    `impl head (is_current) stays the active row: ${hcLines[hcHead]}`
+  );
+  const hcActive = hcLines.filter((l) => l.includes("\u25d0")).length;
+  assert.equal(
+    hcActive,
+    1,
+    `head's ◐ is the only active row, got ${hcActive}: ${hcLines.join(" | ")}`
+  );
+}
+
 console.log("beads-molecule-widget: all assertions passed");
