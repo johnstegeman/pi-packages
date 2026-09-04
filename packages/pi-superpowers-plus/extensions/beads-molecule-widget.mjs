@@ -359,10 +359,30 @@ export function moleculeWidgetLines(state, width, theme) {
         pinned: true,
       }
     : null;
+
+  // Close-as-you-go fallback "current" step: when the previous step was just closed
+  // and its successor isn't claimed yet, bd reports NO is_current step for a moment
+  // and the widget would otherwise show nothing as active. Pick the DEEPEST (last in
+  // render order) open/ready non-gate step of the view's render set and let it lead —
+  // unless an awaiting (gated) step already leads, or an is_current step is present
+  // (a real is_current step always wins).
+  const leadCandidate = (set) => {
+    if (awaitingStep || set.some((s) => s.is_current)) return null;
+    for (let i = set.length - 1; i >= 0; i--) {
+      const s = set[i];
+      if (
+        s.status === "open" &&
+        s.issue_type !== "gate" &&
+        (s.step_status === "ready" || s.step_status === "open")
+      )
+        return s;
+    }
+    return null;
+  };
   if (gateCurrent) rows.push(awaitingLine);
 
-  const stepRow = (step, label) => {
-    const active = step === awaitingStep;
+  const stepRow = (step, label, lead) => {
+    const active = step === awaitingStep || (lead && step === lead);
     return {
       text: assemble(
         [
@@ -381,7 +401,9 @@ export function moleculeWidgetLines(state, width, theme) {
   };
 
   if (phase === "brainstorming") {
-    for (const s of resolveRows(state.steps, BRAINSTORM_VIEW)) rows.push(stepRow(s.step, s.label));
+    const view = resolveRows(state.steps, BRAINSTORM_VIEW);
+    const lead = leadCandidate(view.map((v) => v.step));
+    for (const s of view) rows.push(stepRow(s.step, s.label, lead));
   } else if (phase === "implementing") {
     const impl = state.steps.find((s) => /^Implement( |$)/.test(s.title ?? ""));
     if (impl) rows.push(stepRow(impl));
@@ -398,9 +420,10 @@ export function moleculeWidgetLines(state, width, theme) {
                 ? 1
                 : 0,
       );
+    const lead = leadCandidate(kids);
     kids.forEach((kid, i) => {
       const last = i === kids.length - 1;
-      const activeKid = kid === awaitingStep;
+      const activeKid = kid === awaitingStep || kid === lead;
       rows.push({
         text: assemble(
           [
@@ -419,7 +442,9 @@ export function moleculeWidgetLines(state, width, theme) {
       });
     });
   } else if (phase === "finishing") {
-    for (const s of resolveRows(state.steps, FINISH_VIEW)) rows.push(stepRow(s.step, s.label));
+    const view = resolveRows(state.steps, FINISH_VIEW);
+    const lead = leadCandidate(view.map((v) => v.step));
+    for (const s of view) rows.push(stepRow(s.step, s.label, lead));
   }
 
   // Awaiting line when nothing is in progress goes after the view rows, so the

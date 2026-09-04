@@ -1077,4 +1077,88 @@ assert.deepEqual(nextRefreshArgs("bd-mol-abc"), ["mol", "current", "bd-mol-abc",
   assert.equal(keptNull.lockedMoleculeId, "bd-mol-g0z");
 }
 
+// ---------- Finding 2: current-row staleness fallback (close-as-you-go gap) ----------
+// No step is_current and no awaitingStep: the DEEPEST open/ready (non-done, non-gate) step
+// in the view's render set leads, instead of nothing being marked active.
+{
+  // brainstorm: step s2 just closed, next step s3 is open+ready; s4..s8 still pending.
+  const gapState = {
+    ...bstate,
+    current_step: null,
+    next_step: null,
+    steps: bstate.steps.map((s) => ({
+      ...s,
+      is_current: false,
+      ...(s.id === "s2" ? { status: "closed", step_status: "done" } : {}),
+    })),
+  };
+  const gapLines = moleculeWidgetLines(gapState, 200);
+  const proposeIdx = gapLines.findIndex((l) => l.includes("Propose approaches"));
+  assert.ok(proposeIdx !== -1, `propose row rendered: ${gapLines.join(" | ")}`);
+  assert.ok(
+    gapLines[proposeIdx].includes("\u25d0"),
+    `fallback step carries the active marker: ${gapLines[proposeIdx]}`,
+  );
+  const gapActive = gapLines.filter((l) => l.includes("\u25d0")).length;
+  assert.equal(gapActive, 1, `exactly one active row, got ${gapActive}: ${gapLines.join(" | ")}`);
+}
+
+{
+  // deeper of two open/ready steps wins (s7 beats s5): deepest = last in render order.
+  const deepState = {
+    ...bstate,
+    current_step: null,
+    next_step: null,
+    steps: bstate.steps.map((s) =>
+      s.id === "s2"
+        ? { ...s, status: "closed", step_status: "done", is_current: false }
+        : { ...s, is_current: false, ...(s.id === "s5" || s.id === "s7" ? { step_status: "ready", status: "open" } : {}) },
+    ),
+  };
+  const deepLines = moleculeWidgetLines(deepState, 200);
+  const s5Idx = deepLines.findIndex((l) => l.includes("User approves design"));
+  const s7Idx = deepLines.findIndex((l) => l.includes("Spec self-review"));
+  assert.ok(s5Idx !== -1 && s7Idx !== -1, `deep rows rendered: ${deepLines.join(" | ")}`);
+  assert.ok(deepLines[s7Idx].includes("\u25d0"), `deepest open/ready step leads: ${deepLines[s7Idx]}`);
+  assert.ok(!deepLines[s5Idx].includes("\u25d0"), `shallower ready step must not lead: ${deepLines[s5Idx]}`);
+}
+
+// a step marked is_current still wins over any open/ready fallback (no regression).
+{
+  const lines = moleculeWidgetLines(bstate, 200); // s2 is_current:true, s3 open+ready
+  const clarifyIdx = lines.findIndex((l) => l.includes("Ask clarifying questions"));
+  const proposeIdx = lines.findIndex((l) => l.includes("Propose approaches"));
+  assert.ok(clarifyIdx !== -1 && proposeIdx !== -1);
+  assert.ok(lines[clarifyIdx].includes("\u25d0"), `is_current row keeps the marker: ${lines[clarifyIdx]}`);
+  assert.ok(!lines[proposeIdx].includes("\u25d0"), `fallback must not steal from is_current: ${lines[proposeIdx]}`);
+  const activeCount = lines.filter((l) => l.includes("\u25d0")).length;
+  assert.equal(activeCount, 1, `only the is_current step is active: ${lines.join(" | ")}`);
+}
+
+// implementing: impl step open/ready + no kid in_progress => deepest open kid leads;
+// the impl head itself must NOT be falsely pinned/active.
+{
+  const gapImplState = {
+    ...implState,
+    current_step: null,
+    steps: implState.steps.map((s) => {
+      if (s.id === "mol-9.i") return { ...s, status: "open", step_status: "ready", is_current: false };
+      if (s.id === "mol-9.i.2") return { ...s, status: "closed", step_status: "done", is_current: false };
+      return { ...s, is_current: false };
+    }),
+  };
+  const gapImplLines = moleculeWidgetLines(gapImplState, 200);
+  const giImpl = gapImplLines.findIndex((l) => l.includes("Implement Superpowers widget changes"));
+  const giGate = gapImplLines.findIndex((l) => l.includes("Plan reviewed / ready to execute"));
+  assert.ok(giImpl !== -1 && giGate !== -1, `impl rows rendered: ${gapImplLines.join(" | ")}`);
+  assert.ok(
+    !gapImplLines[giImpl].includes("\u25d0"),
+    `impl head must not be falsely active (status open => ○): ${gapImplLines[giImpl]}`,
+  );
+  assert.ok(
+    gapImplLines[giGate].includes("\u25d0"),
+    `deepest open kid leads: ${gapImplLines[giGate]}`,
+  );
+}
+
 console.log("beads-molecule-widget: all assertions passed");
