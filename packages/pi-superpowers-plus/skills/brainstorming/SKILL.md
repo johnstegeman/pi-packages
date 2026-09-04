@@ -4,7 +4,7 @@ description: "You MUST use this before any creative work - creating features, bu
 disable-model-invocation: true
 ---
 
-> **Related skills:** Consider `/skill:using-git-worktrees` to set up an isolated workspace, then `/skill:writing-plans` for implementation planning.
+> **Related skills:** Consider `/skill:using-git-worktrees` to set up an isolated workspace, then `/skill:writing-plans` (run `/plan`) for implementation planning.
 
 # Brainstorming Ideas Into Designs
 
@@ -101,11 +101,11 @@ Close each step bead in the same turn its real output exists (never batch severa
 1. **Explore project context** (`beads_update({ id: "<explore-step-id>", claim: true })`) — check files, docs, recent commits in the **user's current working directory** (not the skill's install directory — see `using-superpowers` → Working Directory). Close with `beads_close({ ids: "<explore-step-id>" })` once done.
 2. **Ask clarifying questions** (`beads_update({ id: "<clarify-step-id>", claim: true })`) — one at a time, across as many turns as it takes, waiting for the user's actual reply each time, until you understand purpose/constraints/success criteria. Do not close this step after a single question.
 3. **Propose 2-3 approaches** (`beads_update({ id: "<approaches-step-id>", claim: true })`) — with trade-offs and your recommendation
-4. **Present design** (`beads_update({ id: "<design-step-id>", claim: true })`) — in sections scaled to their complexity, get user approval after each section
+4. **Present design** (`beads_update({ id: "<design-step-id>", claim: true })`) — in sections scaled to their complexity, get user approval after each section. **When you claim the design step, close the approaches step in the same turn — never move forward leaving the previous step open.**
 5. **Write design doc** — save to `docs/superpowers/specs/YYYY-MM-DD-<topic>-design.md` and commit
 6. **Spec self-review** — quick inline check for placeholders, contradictions, ambiguity, scope (see below)
 7. **User reviews written spec** — ask user to review the spec file before proceeding
-8. **Transition to implementation** — invoke `/skill:writing-plans` to create implementation plan
+8. **Transition to implementation** — print `/plan` for the user to run; the user types it to load the writing-plans skill and create the implementation plan
 
 ## Process Flow
 
@@ -121,7 +121,7 @@ digraph brainstorming {
     "Write design doc" [shape=box];
     "Spec self-review\n(fix inline)" [shape=box];
     "User reviews spec?" [shape=diamond];
-    "Invoke writing-plans skill" [shape=doublecircle];
+    "Print /plan for user; user runs it" [shape=doublecircle];
 
     "Pour workflow molecule\n+ render widget" -> "Step 0 complete\n(widget shown)?";
     "Step 0 complete\n(widget shown)?" -> "Pour workflow molecule\n+ render widget" [label="no, not yet"];
@@ -135,11 +135,11 @@ digraph brainstorming {
     "Write design doc" -> "Spec self-review\n(fix inline)";
     "Spec self-review\n(fix inline)" -> "User reviews spec?";
     "User reviews spec?" -> "Write design doc" [label="changes requested"];
-    "User reviews spec?" -> "Invoke writing-plans skill" [label="approved"];
+    "User reviews spec?" -> "Print /plan for user; user runs it" [label="approved"];
 }
 ```
 
-**The terminal state is invoking writing-plans.** Do NOT invoke frontend-design, mcp-builder, or any other implementation skill. The ONLY skill you invoke after brainstorming is writing-plans.
+**The terminal state is handing off:** after the user approves, print **`Type /plan to continue`** — do NOT attempt to invoke writing-plans yourself; the user runs the command so the skill loads via pi expansion. Do NOT invoke frontend-design, mcp-builder, or any other implementation skill — writing-plans (via `/plan`) is the only onward step.
 
 ## The Process
 
@@ -232,9 +232,9 @@ After the spec review loop passes, ask the user to review the written spec befor
 
 > "Spec written and committed to `<path>`. Please review it and let me know if you want to make any changes before we start writing out the implementation plan."
 
-Wait for the user's response. If they request changes, make them and re-run the spec review loop. Only proceed once the user approves.
+Wait for the user's response. If they request changes, make them and re-run the spec review loop. Only proceed once the user approves. **When you claim the spec-approved step, close the spec-review step in the same turn — never move forward leaving the previous step open.**
 
 **Implementation:**
 
-- Invoke the `/skill:writing-plans` skill to create a detailed implementation plan
+- Print `/plan` for the user to run — the user types it, loading the writing-plans skill via pi expansion, to create a detailed implementation plan
 - Do NOT invoke any other skill. writing-plans is the next step.

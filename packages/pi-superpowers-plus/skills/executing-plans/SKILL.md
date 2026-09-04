@@ -68,7 +68,7 @@ Claim `verify` (`beads_update({ id: "<verify-step-id>", claim: true })`) and pro
 finishing-a-development-branch handoff below.
 
 - Announce: "I'm using the finishing-a-development-branch skill to complete this work."
-- **REQUIRED SUB-SKILL:** Use `/skill:finishing-a-development-branch`
+- **REQUIRED SUB-SKILL:** Use `/skill:finishing-a-development-branch` — tell the user to type `/finish` to load it.
 - Follow that skill to verify tests, present options, execute choice
 
 ## When to Stop and Ask for Help

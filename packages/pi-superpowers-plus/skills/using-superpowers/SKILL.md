@@ -51,7 +51,7 @@ Always work in the user's current working directory — the project the user ope
 
 When multiple skills apply, process skills come first — they set the approach, then implementation skills (frontend-design, etc.) carry it out. Brainstorming and systematic-debugging are Superpowers' most common process skills, but the rule holds for any of them.
 
-- "Let's build X" → `/brainstorm` first (loads the brainstorming skill), then implementation skills.
+- "Let's build X" → `/brainstorm` first (loads the brainstorming skill; `/brainstorming` also works), then implementation skills.
 - "Fix this bug" → `/skill:systematic-debugging` first, then domain skills.
 
 ## Red Flags
