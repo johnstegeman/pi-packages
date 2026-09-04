@@ -10,6 +10,12 @@ Dispatch a subagent with this prompt:
     ## Task Description
 
     Read your task bead first: beads_show({ id: "<TASK_ID>", full: true }).
+    Note on your toolset: extension tools (beads_* / bd) ARE available to you
+    even though a plain Agent-dispatch "Tools:" summary lists only
+    read/write/edit/bash — that summary is the default no-extension scope; in
+    this extension-enabled session beads_show works. Use beads tools
+    READ-ONLY (reading your task bead) here.
+
     It contains the exact, full text of your task.
 
     ## Context

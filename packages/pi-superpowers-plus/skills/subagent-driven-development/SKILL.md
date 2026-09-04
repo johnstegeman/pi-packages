@@ -195,6 +195,13 @@ and fix-round diffs need it.
   block. Hand the implementer ONLY its own task bead id, never the whole
   molecule: "read your task bead first — `beads_show({ id: "<task-id>", full: true })` — it is your
   requirements, verbatim." There is no plan file and no brief file.
+  Extension tools (`beads_*`) remain available to implementer subagents, so
+  handing the task bead id (per the implementer-prompt template) is sufficient
+  and inlining the full task text is unnecessary. Mark the task bead
+  `in_progress` when you dispatch a task's implementer
+  (`beads_update({ id: "<task-id>", claim: true })`) — a task bead left `open`
+  renders as a future ○ on the molecule widget while its implementer is
+  actively working; `in_progress` shows active ◐.
 - **Report file:** name the implementer's report file after its task id
   (`<workspace>/<task-id>-report.md`) and put it in the dispatch prompt. The
   implementer writes the full report there and returns only status, commits,
