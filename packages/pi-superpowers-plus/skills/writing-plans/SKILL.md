@@ -71,6 +71,8 @@ Each task is one task bead. The template below is the exact shape of every task 
 `description` — what `beads_create({ title, description })` writes. The markdown
 heading `### Task N: [Component Name]` is the bead's TITLE, not a heading in a
 document:
+Set the bead title to `Task N: <name>`; the description body starts after the
+heading (do not include the `### Task N:` heading in the description).
 
 ````markdown
 ### Task N: [Component Name]

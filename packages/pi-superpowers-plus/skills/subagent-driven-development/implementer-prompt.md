@@ -15,6 +15,9 @@ Dispatch a subagent with this prompt:
     read/write/edit/bash — that summary is the default no-extension scope; in
     this extension-enabled session beads_show works. Use beads tools
     READ-ONLY (reading your task bead) here.
+    If `beads_show` is not actually available to you in this session, say so
+    (NEEDS_CONTEXT) — the controller will inline your task text; don't guess
+    or work from memory.
 
     It contains the exact, full text of your task.
 

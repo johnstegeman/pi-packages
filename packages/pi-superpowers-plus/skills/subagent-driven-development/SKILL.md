@@ -200,8 +200,9 @@ and fix-round diffs need it.
   and inlining the full task text is unnecessary. Mark the task bead
   `in_progress` when you dispatch a task's implementer
   (`beads_update({ id: "<task-id>", claim: true })`) — a task bead left `open`
-  renders as a future ○ on the molecule widget while its implementer is
-  actively working; `in_progress` shows active ◐.
+  gives no `in_progress` signal, so the widget's deepest-open fallback can't
+  tell "being worked" from "next up"; claim it at dispatch so ◐ means a real
+  claimed step.
 - **Report file:** name the implementer's report file after its task id
   (`<workspace>/<task-id>-report.md`) and put it in the dispatch prompt. The
   implementer writes the full report there and returns only status, commits,

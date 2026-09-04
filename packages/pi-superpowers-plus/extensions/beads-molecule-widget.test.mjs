@@ -342,10 +342,7 @@ assert.ok(
   `waiting line still pinned: ${anLines.join(" | ")}`,
 );
 const anWait = anLines.find((l) => l.includes("Waiting on you:"));
-assert.ok(
-  anWait && anWait.includes("a5"),
-  `no-precursor awaiting line falls back to the gate id (got '${anWait}')`,
-);
+assert.ok(anWait && anWait.includes("a5"), `no-precursor awaiting line falls back to the gate id (got '${anWait}')`);
 assert.ok(
   !anLines.some((l) => l.includes("\u25d0")),
   `no mis-associated active row when no preceding open gated step: ${anLines.join(" | ")}`,
@@ -361,13 +358,69 @@ assert.ok(
     doneCount: 4,
     total: 7,
     steps: [
-      { id: "t1", title: "Explore project context: footer test", status: "closed", issue_type: "task", created_at: "", step_status: "done", is_current: false },
-      { id: "t2", title: "Ask clarifying questions", status: "closed", issue_type: "task", created_at: "", step_status: "done", is_current: false },
-      { id: "t3", title: "Propose approaches", status: "closed", issue_type: "task", created_at: "", step_status: "done", is_current: false },
-      { id: "t4", title: "Present design sections", status: "closed", issue_type: "task", created_at: "", step_status: "done", is_current: false },
-      { id: "t5", title: "User approves design", status: "open", issue_type: "task", created_at: "", step_status: "pending", is_current: false },
-      { id: "g.1", title: "Gate: human", status: "open", issue_type: "gate", created_at: "", step_status: "ready", is_current: false },
-      { id: "t6", title: "Write spec to docs/superpowers/specs/", status: "open", issue_type: "task", created_at: "", step_status: "pending", is_current: false },
+      {
+        id: "t1",
+        title: "Explore project context: footer test",
+        status: "closed",
+        issue_type: "task",
+        created_at: "",
+        step_status: "done",
+        is_current: false,
+      },
+      {
+        id: "t2",
+        title: "Ask clarifying questions",
+        status: "closed",
+        issue_type: "task",
+        created_at: "",
+        step_status: "done",
+        is_current: false,
+      },
+      {
+        id: "t3",
+        title: "Propose approaches",
+        status: "closed",
+        issue_type: "task",
+        created_at: "",
+        step_status: "done",
+        is_current: false,
+      },
+      {
+        id: "t4",
+        title: "Present design sections",
+        status: "closed",
+        issue_type: "task",
+        created_at: "",
+        step_status: "done",
+        is_current: false,
+      },
+      {
+        id: "t5",
+        title: "User approves design",
+        status: "open",
+        issue_type: "task",
+        created_at: "",
+        step_status: "pending",
+        is_current: false,
+      },
+      {
+        id: "g.1",
+        title: "Gate: human",
+        status: "open",
+        issue_type: "gate",
+        created_at: "",
+        step_status: "ready",
+        is_current: false,
+      },
+      {
+        id: "t6",
+        title: "Write spec to docs/superpowers/specs/",
+        status: "open",
+        issue_type: "task",
+        created_at: "",
+        step_status: "pending",
+        is_current: false,
+      },
     ],
   };
   const approveLines = moleculeWidgetLines(approveState, 200);
@@ -1112,7 +1165,11 @@ assert.deepEqual(nextRefreshArgs("bd-mol-abc"), ["mol", "current", "bd-mol-abc",
     steps: bstate.steps.map((s) =>
       s.id === "s2"
         ? { ...s, status: "closed", step_status: "done", is_current: false }
-        : { ...s, is_current: false, ...(s.id === "s5" || s.id === "s7" ? { step_status: "ready", status: "open" } : {}) },
+        : {
+            ...s,
+            is_current: false,
+            ...(s.id === "s5" || s.id === "s7" ? { step_status: "ready", status: "open" } : {}),
+          },
     ),
   };
   const deepLines = moleculeWidgetLines(deepState, 200);
@@ -1155,10 +1212,7 @@ assert.deepEqual(nextRefreshArgs("bd-mol-abc"), ["mol", "current", "bd-mol-abc",
     !gapImplLines[giImpl].includes("\u25d0"),
     `impl head must not be falsely active (status open => ○): ${gapImplLines[giImpl]}`,
   );
-  assert.ok(
-    gapImplLines[giGate].includes("\u25d0"),
-    `deepest open kid leads: ${gapImplLines[giGate]}`,
-  );
+  assert.ok(gapImplLines[giGate].includes("\u25d0"), `deepest open kid leads: ${gapImplLines[giGate]}`);
 }
 
 // ---------- Finding 2 regression (a): gate is the current step ----------
@@ -1181,14 +1235,11 @@ assert.deepEqual(nextRefreshArgs("bd-mol-abc"), ["mol", "current", "bd-mol-abc",
   };
   const gcLines = moleculeWidgetLines(gateCurrentState, 200);
   const gcWait = gcLines.find((l) => l.includes("Waiting on you:"));
-  assert.ok(
-    gcWait && gcWait.includes("Gate: human"),
-    `gate-current waiting row rendered: ${gcLines.join(" | ")}`
-  );
+  assert.ok(gcWait && gcWait.includes("Gate: human"), `gate-current waiting row rendered: ${gcLines.join(" | ")}`);
   assert.equal(
     gcLines.filter((l) => l.includes("\u25d0")).length,
     0,
-    `no view step double-marked ◐ when the gate itself is current: ${gcLines.join(" | ")}`
+    `no view step double-marked ◐ when the gate itself is current: ${gcLines.join(" | ")}`,
   );
 }
 
@@ -1214,16 +1265,9 @@ assert.deepEqual(nextRefreshArgs("bd-mol-abc"), ["mol", "current", "bd-mol-abc",
   const hcLines = moleculeWidgetLines(headCurrentState, 200);
   const hcHead = hcLines.findIndex((l) => l.includes("Implement Superpowers widget changes"));
   assert.ok(hcHead !== -1, `impl head row rendered: ${hcLines.join(" | ")}`);
-  assert.ok(
-    hcLines[hcHead].includes("\u25d0"),
-    `impl head (is_current) stays the active row: ${hcLines[hcHead]}`
-  );
+  assert.ok(hcLines[hcHead].includes("\u25d0"), `impl head (is_current) stays the active row: ${hcLines[hcHead]}`);
   const hcActive = hcLines.filter((l) => l.includes("\u25d0")).length;
-  assert.equal(
-    hcActive,
-    1,
-    `head's ◐ is the only active row, got ${hcActive}: ${hcLines.join(" | ")}`
-  );
+  assert.equal(hcActive, 1, `head's ◐ is the only active row, got ${hcActive}: ${hcLines.join(" | ")}`);
 }
 
 console.log("beads-molecule-widget: all assertions passed");
