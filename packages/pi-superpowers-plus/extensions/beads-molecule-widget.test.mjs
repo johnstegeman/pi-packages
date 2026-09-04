@@ -247,10 +247,12 @@ assert.ok(headerLines[order[0]].includes("✓"), "done explore row: ✓");
 assert.ok(headerLines[order[1]].includes("◐"), "current clarify row: ◐");
 
 // ---------- gate as current => waiting line, checklist still shown ----------
-const gateCurrent = { ...bstate, current_step: { id: "g", title: "Gate: human", issue_type: "gate" } };
+const gateCurrent = { ...bstate, current_step: { id: "gate-g", title: "Gate: human", issue_type: "gate" } };
 const gLines = moleculeWidgetLines(gateCurrent, 120);
 assert.ok(gLines.some((l) => l.includes("Waiting on you:") && l.includes("Gate: human")));
 assert.ok(gLines.some((l) => l.includes("Ask clarifying questions")));
+const gWait = gLines.find((l) => l.includes("Waiting on you:"));
+assert.ok(gWait && gWait.includes("gate-g"), `gate-current footer falls back to gate id (got '${gWait}')`);
 
 // ---------- awaiting human: no current step, ready Human gate -> Waiting on you line ----------
 const awaitState = {
@@ -318,10 +320,10 @@ const awaitState = {
   ],
 };
 const aLines = moleculeWidgetLines(awaitState, 120);
-assert.ok(
-  aLines.some((l) => l.includes("Waiting on you:") && l.includes("Gate: human")),
-  aLines.join(" | "),
-);
+const aWait = aLines.find((l) => l.includes("Waiting on you:"));
+assert.ok(aWait && aWait.includes("User reviews written spec"), `footer shows gated step title (got '${aWait}')`);
+assert.ok(aWait && !aWait.includes("Gate: human"), `footer does not expose raw gate title (got '${aWait}')`);
+assert.ok(aWait && aWait.includes("a4"), `footer carries the gated step id (got '${aWait}')`);
 const aIdx = aLines.findIndex((l) => l.includes("User reviews written spec"));
 assert.ok(
   aIdx !== -1 && aIdx < aLines.findIndex((l) => l.includes("Waiting on you:")),
@@ -339,10 +341,95 @@ assert.ok(
   anLines.some((l) => l.includes("Waiting on you:") && l.includes("Gate: human")),
   `waiting line still pinned: ${anLines.join(" | ")}`,
 );
+const anWait = anLines.find((l) => l.includes("Waiting on you:"));
+assert.ok(anWait && anWait.includes("a5"), `no-precursor awaiting line falls back to the gate id (got '${anWait}')`);
 assert.ok(
   !anLines.some((l) => l.includes("\u25d0")),
   `no mis-associated active row when no preceding open gated step: ${anLines.join(" | ")}`,
 );
+
+// ---------- Finding 6: footer shows the gated human-review step, not raw gate title ----------
+{
+  const approveState = {
+    molecule_id: "pi-packages-mol-27qs",
+    molecule_title: "superpowers-workflow",
+    current_step: null,
+    next_step: { id: "g.1", title: "Gate: human", status: "open", issue_type: "gate" },
+    doneCount: 4,
+    total: 7,
+    steps: [
+      {
+        id: "t1",
+        title: "Explore project context: footer test",
+        status: "closed",
+        issue_type: "task",
+        created_at: "",
+        step_status: "done",
+        is_current: false,
+      },
+      {
+        id: "t2",
+        title: "Ask clarifying questions",
+        status: "closed",
+        issue_type: "task",
+        created_at: "",
+        step_status: "done",
+        is_current: false,
+      },
+      {
+        id: "t3",
+        title: "Propose approaches",
+        status: "closed",
+        issue_type: "task",
+        created_at: "",
+        step_status: "done",
+        is_current: false,
+      },
+      {
+        id: "t4",
+        title: "Present design sections",
+        status: "closed",
+        issue_type: "task",
+        created_at: "",
+        step_status: "done",
+        is_current: false,
+      },
+      {
+        id: "t5",
+        title: "User approves design",
+        status: "open",
+        issue_type: "task",
+        created_at: "",
+        step_status: "pending",
+        is_current: false,
+      },
+      {
+        id: "g.1",
+        title: "Gate: human",
+        status: "open",
+        issue_type: "gate",
+        created_at: "",
+        step_status: "ready",
+        is_current: false,
+      },
+      {
+        id: "t6",
+        title: "Write spec to docs/superpowers/specs/",
+        status: "open",
+        issue_type: "task",
+        created_at: "",
+        step_status: "pending",
+        is_current: false,
+      },
+    ],
+  };
+  const approveLines = moleculeWidgetLines(approveState, 200);
+  const foot = approveLines.find((l) => l.includes("Waiting on you:"));
+  assert.ok(foot, `awaiting footer present: ${approveLines.join(" | ")}`);
+  assert.ok(foot.includes("User approves design"), `footer shows gated step title (got '${foot}')`);
+  assert.ok(!foot.includes("Gate: human"), `footer does not expose raw gate title (got '${foot}')`);
+  assert.ok(foot.includes("t5"), `footer carries the gated step id (got '${foot}')`);
+}
 
 // ---------- awaiting human + overflow: awaited step and waiting line stay pinned, in order ----------
 const awaitOverflowState = {
@@ -394,9 +481,13 @@ const awaitOverflowState = {
 const aoLines = moleculeWidgetLines(awaitOverflowState, 120);
 assert.ok(aoLines.length <= 15, `overflow capped: ${aoLines.length}`);
 const aoAwaitIdx = aoLines.findIndex((l) => l.includes("Task 24: item 23"));
-const aoWaitIdx = aoLines.findIndex((l) => l.includes("Waiting on you: Gate: human"));
+const aoWaitIdx = aoLines.findIndex((l) => l.includes("Waiting on you:"));
 assert.ok(aoAwaitIdx !== -1, `awaited step survives overflow: ${aoLines.join(" | ")}`);
 assert.ok(aoWaitIdx !== -1, `waiting line survives overflow: ${aoLines.join(" | ")}`);
+const aoWait = aoLines[aoWaitIdx];
+assert.ok(aoWait.includes("Task 24: item 23"), `footer shows gated step title (got '${aoWait}')`);
+assert.ok(!aoWait.includes("Gate: human"), `footer does not expose raw gate title (got '${aoWait}')`);
+assert.ok(aoWait.includes("o.i.24"), `footer carries the gated step id (got '${aoWait}')`);
 assert.ok(aoAwaitIdx < aoWaitIdx, "awaited step before the waiting line under overflow");
 assert.ok(
   aoLines[aoAwaitIdx].includes("\u25d0"),
@@ -610,6 +701,76 @@ for (const line of manyLines) assert.ok(displayWidth(line) <= 300);
 
 // width truncation still enforced at narrow width
 for (const line of moleculeWidgetLines(implState, 30)) assert.ok(displayWidth(line) <= 30);
+
+// ---------- Finding 7: bead ids on step rows ----------
+// stepRow rows (brainstorming formula steps) append the bead id after the title
+{
+  const idState = {
+    molecule_id: "pi-packages-mol-abc123",
+    molecule_title: "superpowers-workflow",
+    current_step: {
+      id: "pi-packages-mol-abc123.2",
+      title: "Ask clarifying questions",
+      status: "in_progress",
+      issue_type: "task",
+    },
+    next_step: null,
+    doneCount: 1,
+    total: 3,
+    steps: [
+      {
+        id: "pi-packages-mol-abc123.1",
+        title: "Explore project context: bead ids restore",
+        status: "closed",
+        issue_type: "task",
+        created_at: "",
+        step_status: "done",
+        is_current: false,
+      },
+      {
+        id: "pi-packages-mol-abc123.2",
+        title: "Ask clarifying questions",
+        status: "in_progress",
+        issue_type: "task",
+        created_at: "",
+        step_status: "current",
+        is_current: true,
+      },
+    ],
+  };
+  const idLines = moleculeWidgetLines(idState, 200);
+  const exploreRow = idLines.find((l) => l.includes("Explore project context"));
+  assert.ok(
+    exploreRow && exploreRow.includes("pi-packages-mol-abc123.1"),
+    `done step row carries its bead id (got '${exploreRow}')`,
+  );
+  const clarifyRow = idLines.find((l) => l.includes("Ask clarifying questions"));
+  assert.ok(
+    clarifyRow && clarifyRow.includes("pi-packages-mol-abc123.2"),
+    `current step row carries its bead id (got '${clarifyRow}')`,
+  );
+}
+
+// implementing-view kid-task rows carry the kid's full id (starts with <impl.id>.)
+{
+  const kidLines = moleculeWidgetLines(implState, 200);
+  assert.ok(
+    kidLines.some((l) => l.includes("mol-9.i.2") && l.includes("Task 2: build it")),
+    `impl kid row carries its full bead id: ${kidLines.join(" | ")}`,
+  );
+  assert.ok(
+    kidLines.some((l) => l.includes("mol-9.i.3") && l.includes("Task 1: setup")),
+    `impl kid row carries its full bead id: ${kidLines.join(" | ")}`,
+  );
+}
+
+// awaiting footer line carries the ready gate's bead id
+{
+  const awaitLines2 = moleculeWidgetLines(awaitState, 200);
+  const waitLine = awaitLines2.find((l) => l.includes("Waiting on you:"));
+  assert.ok(waitLine, `awaiting footer present: ${awaitLines2.join(" | ")}`);
+  assert.ok(waitLine.includes("a4"), `awaiting footer carries gated step id (got '${waitLine}')`);
+}
 
 // ---------- theme passthrough ----------
 const THEME = { fg: (color, t) => (color === "accent" ? t.toUpperCase() : t) };
@@ -967,6 +1128,146 @@ assert.deepEqual(nextRefreshArgs("bd-mol-abc"), ["mol", "current", "bd-mol-abc",
   const keptNull = applyErrorFrame(prev, "bd-mol-g0z", null);
   assert.equal(keptNull.activeMolecule, prev);
   assert.equal(keptNull.lockedMoleculeId, "bd-mol-g0z");
+}
+
+// ---------- Finding 2: current-row staleness fallback (close-as-you-go gap) ----------
+// No step is_current and no awaitingStep: the DEEPEST open/ready (non-done, non-gate) step
+// in the view's render set leads, instead of nothing being marked active.
+{
+  // brainstorm: step s2 just closed, next step s3 is open+ready; s4..s8 still pending.
+  const gapState = {
+    ...bstate,
+    current_step: null,
+    next_step: null,
+    steps: bstate.steps.map((s) => ({
+      ...s,
+      is_current: false,
+      ...(s.id === "s2" ? { status: "closed", step_status: "done" } : {}),
+    })),
+  };
+  const gapLines = moleculeWidgetLines(gapState, 200);
+  const proposeIdx = gapLines.findIndex((l) => l.includes("Propose approaches"));
+  assert.ok(proposeIdx !== -1, `propose row rendered: ${gapLines.join(" | ")}`);
+  assert.ok(
+    gapLines[proposeIdx].includes("\u25d0"),
+    `fallback step carries the active marker: ${gapLines[proposeIdx]}`,
+  );
+  const gapActive = gapLines.filter((l) => l.includes("\u25d0")).length;
+  assert.equal(gapActive, 1, `exactly one active row, got ${gapActive}: ${gapLines.join(" | ")}`);
+}
+
+{
+  // deeper of two open/ready steps wins (s7 beats s5): deepest = last in render order.
+  const deepState = {
+    ...bstate,
+    current_step: null,
+    next_step: null,
+    steps: bstate.steps.map((s) =>
+      s.id === "s2"
+        ? { ...s, status: "closed", step_status: "done", is_current: false }
+        : {
+            ...s,
+            is_current: false,
+            ...(s.id === "s5" || s.id === "s7" ? { step_status: "ready", status: "open" } : {}),
+          },
+    ),
+  };
+  const deepLines = moleculeWidgetLines(deepState, 200);
+  const s5Idx = deepLines.findIndex((l) => l.includes("User approves design"));
+  const s7Idx = deepLines.findIndex((l) => l.includes("Spec self-review"));
+  assert.ok(s5Idx !== -1 && s7Idx !== -1, `deep rows rendered: ${deepLines.join(" | ")}`);
+  assert.ok(deepLines[s7Idx].includes("\u25d0"), `deepest open/ready step leads: ${deepLines[s7Idx]}`);
+  assert.ok(!deepLines[s5Idx].includes("\u25d0"), `shallower ready step must not lead: ${deepLines[s5Idx]}`);
+}
+
+// a step marked is_current still wins over any open/ready fallback (no regression).
+{
+  const lines = moleculeWidgetLines(bstate, 200); // s2 is_current:true, s3 open+ready
+  const clarifyIdx = lines.findIndex((l) => l.includes("Ask clarifying questions"));
+  const proposeIdx = lines.findIndex((l) => l.includes("Propose approaches"));
+  assert.ok(clarifyIdx !== -1 && proposeIdx !== -1);
+  assert.ok(lines[clarifyIdx].includes("\u25d0"), `is_current row keeps the marker: ${lines[clarifyIdx]}`);
+  assert.ok(!lines[proposeIdx].includes("\u25d0"), `fallback must not steal from is_current: ${lines[proposeIdx]}`);
+  const activeCount = lines.filter((l) => l.includes("\u25d0")).length;
+  assert.equal(activeCount, 1, `only the is_current step is active: ${lines.join(" | ")}`);
+}
+
+// implementing: impl step open/ready + no kid in_progress => deepest open kid leads;
+// the impl head itself must NOT be falsely pinned/active.
+{
+  const gapImplState = {
+    ...implState,
+    current_step: null,
+    steps: implState.steps.map((s) => {
+      if (s.id === "mol-9.i") return { ...s, status: "open", step_status: "ready", is_current: false };
+      if (s.id === "mol-9.i.2") return { ...s, status: "closed", step_status: "done", is_current: false };
+      return { ...s, is_current: false };
+    }),
+  };
+  const gapImplLines = moleculeWidgetLines(gapImplState, 200);
+  const giImpl = gapImplLines.findIndex((l) => l.includes("Implement Superpowers widget changes"));
+  const giGate = gapImplLines.findIndex((l) => l.includes("Plan reviewed / ready to execute"));
+  assert.ok(giImpl !== -1 && giGate !== -1, `impl rows rendered: ${gapImplLines.join(" | ")}`);
+  assert.ok(
+    !gapImplLines[giImpl].includes("\u25d0"),
+    `impl head must not be falsely active (status open => ○): ${gapImplLines[giImpl]}`,
+  );
+  assert.ok(gapImplLines[giGate].includes("\u25d0"), `deepest open kid leads: ${gapImplLines[giGate]}`);
+}
+
+// ---------- Finding 2 regression (a): gate is the current step ----------
+// When the gate itself carries is_current and NO other step is_current, the ⏸
+// Waiting-on-you gate row is the ONLY active row. The stale-fallback must NOT
+// fire (awaitingStep is null here and the gate is not in the brainstorming view
+// set), so no view step may render ◐ alongside the pinned gate row.
+{
+  const gateCurrentState = {
+    ...bstate,
+    current_step: { id: "gG", title: "Gate: human", issue_type: "gate" },
+    next_step: null,
+    doneCount: 2,
+    steps: bstate.steps.map((s) => ({
+      ...s,
+      is_current: false,
+      ...(s.id === "s2" ? { status: "closed", step_status: "done" } : {}),
+      ...(s.id === "g1" ? { is_current: true, step_status: "ready", status: "open" } : {}),
+    })),
+  };
+  const gcLines = moleculeWidgetLines(gateCurrentState, 200);
+  const gcWait = gcLines.find((l) => l.includes("Waiting on you:"));
+  assert.ok(gcWait && gcWait.includes("Gate: human"), `gate-current waiting row rendered: ${gcLines.join(" | ")}`);
+  assert.equal(
+    gcLines.filter((l) => l.includes("\u25d0")).length,
+    0,
+    `no view step double-marked ◐ when the gate itself is current: ${gcLines.join(" | ")}`,
+  );
+}
+
+// ---------- Finding 2 regression (b): impl head is the only current step ----------
+// When the impl head carries is_current and no kid does, the head's ◐ must be the
+// ONLY active row. The kids-lead fallback must NOT double-mark a kid (e.g. the
+// open/ready "Plan reviewed / ready to execute" kid) alongside the head's ◐.
+{
+  const headCurrentState = {
+    ...implState,
+    current_step: {
+      id: "mol-9.i",
+      title: "Implement Superpowers widget changes",
+      status: "in_progress",
+      issue_type: "task",
+    },
+    steps: implState.steps.map((s) => ({
+      ...s,
+      is_current: s.id === "mol-9.i",
+      ...(s.id === "mol-9.i.2" ? { status: "open", step_status: "pending" } : {}),
+    })),
+  };
+  const hcLines = moleculeWidgetLines(headCurrentState, 200);
+  const hcHead = hcLines.findIndex((l) => l.includes("Implement Superpowers widget changes"));
+  assert.ok(hcHead !== -1, `impl head row rendered: ${hcLines.join(" | ")}`);
+  assert.ok(hcLines[hcHead].includes("\u25d0"), `impl head (is_current) stays the active row: ${hcLines[hcHead]}`);
+  const hcActive = hcLines.filter((l) => l.includes("\u25d0")).length;
+  assert.equal(hcActive, 1, `head's ◐ is the only active row, got ${hcActive}: ${hcLines.join(" | ")}`);
 }
 
 console.log("beads-molecule-widget: all assertions passed");
