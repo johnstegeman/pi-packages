@@ -776,7 +776,7 @@ export default function piBeadsLean(pi: any) {
     name: TOOL.createList,
     label: "Beads create list",
     description:
-      "Create a gate bead (optional) and then a sequence of task beads under one parent, each via a sequential `bd create --parent` call so ids come out parent.1..N in declared order, then wire the blocks-chain (every task → gate; task N → task N-1). One call replaces N beads_create + beads_dep + beads_gate_create rounds. Tasks array order is the plan order. Partial failures report ids created so far.",
+      "Create a gate bead (optional) and then a sequence of task beads under one parent, each via a sequential `bd create --parent` call so ids come out parent.1..N in declared order, then wire the blocks-chain (every task → gate; task N → task N-1). One call replaces N beads_create + beads_dep + beads_gate_create rounds. Tasks array order is the plan order. Returns `gate:` (task bead) and `human-gate:` ids when a gate is requested, then `t1:..tN:` in plan order. Partial failures report ids created so far.",
     parameters: {
       type: "object",
       properties: {
@@ -817,6 +817,7 @@ export default function piBeadsLean(pi: any) {
       const gateReason = params.gate?.reason ?? "Plan approval";
       // (1) gate bead + human gate (abort on failure — nothing partial)
       let gateId: string | null = null;
+      let humanGateId: string | null = null;
       if (params.gate) {
         const gArgs = ["create", gateTitle, "--parent", String(params.parent), "-t", "task"];
         if (params.gate.description) gArgs.push("-d", String(params.gate.description));
@@ -824,8 +825,23 @@ export default function piBeadsLean(pi: any) {
         const g = await bd(gArgs, repoDir);
         if (!g.ok) return textResult(`gate create failed before any task: ${g.err}`);
         gateId = lastId(g.out);
-        const gc = await bd(["gate", "create", "--blocks", gateId, "--type", "human", "--reason", gateReason], repoDir);
+        const gc = await bd(
+          ["gate", "create", "--blocks", gateId, "--type", "human", "--reason", gateReason, "--json"],
+          repoDir,
+        );
         if (!gc.ok) return textResult(`gate created (${gateId}) but human-gate setup failed: ${gc.err}`);
+        // bd gate create --json prints the gate issue with an `id` field (the human-gate
+        // id); fall back to the text form's "Resolve with: bd gate resolve <id>" line.
+        try {
+          const gateJson = JSON.parse(gc.out);
+          if (gateJson && typeof gateJson.id === "string") humanGateId = gateJson.id;
+        } catch {
+          /* not JSON — try the text fallback below */
+        }
+        if (!humanGateId) {
+          const m = gc.out.match(/Resolve with: bd gate resolve (\S+)/);
+          if (m) humanGateId = m[1];
+        }
       }
       // (2) sequential create of every task, awaiting each so ids come out parent.1..N in order
       const taskIds: string[] = [];
@@ -856,6 +872,7 @@ export default function piBeadsLean(pi: any) {
       }
       await afterWrite(repoDir);
       const lines = gateId ? [`gate: ${gateId}`] : [];
+      if (humanGateId) lines.push(`human-gate: ${humanGateId}`);
       taskIds.forEach((id, i) => lines.push(`t${i + 1}: ${id}`));
       return textResult(lines.join("\n"));
     },

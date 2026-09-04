@@ -54,8 +54,8 @@ Reads (`beads_ready`, `beads_list`, `beads_show`, `beads_deps` and the prime) ru
 against the aggregate, so the agent sees the issues of every repository at once, and an
 issue's owner is read off its id prefix: `crmback-1a2` belongs to `crm-backend`.
 
-Writes (`beads_create`, `beads_update`, `beads_close`, `beads_reopen`,
-`beads_dep`, `beads_undep`, `beads_comment`, `beads_gate_create`,
+Writes (`beads_create`, `beads_create_list`, `beads_update`, `beads_close`,
+`beads_reopen`, `beads_dep`, `beads_undep`, `beads_comment`, `beads_gate_create`,
 `beads_gate_resolve`, `beads_mol_pour`) are routed to the owning repository by
 that same prefix; afterwards the repository's JSONL is re-exported, the aggregate
 re-synced, and the `beads:changed` event published (see Events). Writing straight
@@ -118,7 +118,7 @@ Commands are run by a person and their output never reaches the model's context.
 | `/beads-init` | Quiet initialization of beads in the current project (see below) |
 | `/beads-mode` | Current mode, umbrella, default repository, prefix table, context economics |
 
-The agent gets sixteen tools. All of them are direct in-process `bd` calls with no
+The agent gets eighteen tools. All of them are direct in-process `bd` calls with no
 MCP transport, and what comes back is a digest rather than raw JSON.
 
 | Tool | What it does |
@@ -128,6 +128,7 @@ MCP transport, and what comes back is a digest rather than raw JSON.
 | `beads_show` | The essential fields of one issue: status, priority, type, dependencies; `full: true` includes the whole description body |
 | `beads_deps` | Blockers or dependents: a tree for one id, compact lines for several |
 | `beads_create` | Create an issue in the right repository (`repo` is a folder name or a prefix), return its id |
+| `beads_create_list` | Create an optional gate bead + its human gate, then the task beads sequentially under one parent in declared (plan) order, then wire the blocks-chain; returns `gate:`/`human-gate:` ids and `t1:..tN:` in plan order |
 | `beads_update` | Status, priority, title, parent, notes, labels; plus `claim`, `setMetadata` (`key=value,...`), `description` (replaces the body); routed by id prefix |
 | `beads_close` | Close one or more ids, with a reason |
 | `beads_reopen` | Reopen one or more closed ids, with an optional reason |
@@ -154,8 +155,8 @@ The extension publishes a cross-extension event any other extension can subscrib
 with `pi.events.on("beads:changed", handler)`:
 
 - **`beads:changed`** — emitted with no payload after every successful mutating
-tool call: `beads_create`, `beads_update`, `beads_close`, `beads_reopen`,
-`beads_dep`, `beads_undep`, `beads_comment`, `beads_gate_create`,
+tool call: `beads_create`, `beads_create_list`, `beads_update`, `beads_close`,
+`beads_reopen`, `beads_dep`, `beads_undep`, `beads_comment`, `beads_gate_create`,
 `beads_gate_resolve` (once for the resolve, plus once per gated step it closes), and
 `beads_mol_pour`. Read tools (`beads_ready`, `beads_list`, `beads_show`,
 `beads_deps`, `beads_mol_show`, `beads_mol_current`) never emit.

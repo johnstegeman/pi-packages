@@ -13,7 +13,7 @@
 // The fixture answers are mode-dependent (read from FAKE_BD_MODE) so one suite
 // drives both single-repo and umbrella topology.
 import assert from "node:assert/strict";
-import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, realpathSync } from "node:fs";
+import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, realpathSync, existsSync } from "node:fs";
 import { join, delimiter } from "node:path";
 import { tmpdir } from "node:os";
 
@@ -199,6 +199,16 @@ case "$1" in
     printf '%s\n' '[]'
     exit 0
     ;;
+  gate)
+    if [ "$2" = "create" ]; then
+      # mirrors real bd gate create --json (a gate issue with an id field);
+      # beads_create_list parses it to return the human-gate id
+      printf '%s\\n' '{"id":"proj-gate-1","issue_type":"gate","status":"open","title":"Gate: human"}'
+      exit 0
+    fi
+    echo "ok"; exit 0
+    ;;
+
   close)
     if [ "$2" = "proj-bad-step" ]; then
       echo "boom" >&2
@@ -207,6 +217,24 @@ case "$1" in
     echo "ok"; exit 0
     ;;
   create)
+    if [ "\${FAKE_BD_CONC:-0}" = "1" ]; then
+      # concurrency-aware mode: detect two creates in flight at once — the exact
+      # regression beads_create_list's awaited loop exists to prevent. Write
+      # CONCURRENT to the marker and exit non-zero if overlap is observed.
+      mkdir -p "$FAKE_BD_CONC_DIR"
+      CLAIM="$FAKE_BD_CONC_DIR/$$"
+      mkdir "$CLAIM" 2>/dev/null || { echo "cannot claim" >&2; exit 1; }
+      N="$(ls -A "$FAKE_BD_CONC_DIR" | wc -l | tr -d ' ')"
+      if [ "$N" -gt 1 ]; then
+        mkdir -p "$(dirname "$FAKE_BD_CONC_MARKER")"
+        printf 'CONCURRENT\\n' >> "$FAKE_BD_CONC_MARKER"
+        rmdir "$CLAIM" 2>/dev/null
+        echo "concurrent create detected" >&2
+        exit 1
+      fi
+      sleep 0.05
+      rmdir "$CLAIM" 2>/dev/null
+    fi
     case "$2" in
       "Plan reviewed / ready to execute") printf 'proj-m1-imp.1\\n'; exit 0 ;;
       "Task 1: setup") printf 'proj-m1-imp.2\\n'; exit 0 ;;
@@ -379,70 +407,98 @@ test("single-repo: beads_create_list creates sequentially, wires gate+chain deps
   const s = await openSession("single", repoDir);
   const before = s.emitted.length;
   resetLog();
-  const r = await s.byName.get("beads_create_list").execute("c", {
-    parent: "proj-m1-imp",
-    gate: {
-      title: "Plan reviewed / ready to execute",
-      description: "constraints",
-      reason: "Plan approval",
-    },
-    tasks: [
-      { title: "Task 1: setup", description: "d1" },
-      { title: "Task 2: build", description: "d2", type: "feature" },
-      { title: "Task 3: verify", description: "d3", labels: "a,b" },
-    ],
-  });
-  assert.ok(okResult(r), JSON.stringify(r));
 
-  // exact argv of every bd call: gate bead, human gate, three tasks, then the blocks chain
-  findInvocation(["create", "Plan reviewed / ready to execute", "--parent", "proj-m1-imp", "-t", "task", "-d", "constraints", "--silent"]);
-  findInvocation(["gate", "create", "--blocks", "proj-m1-imp.1", "--type", "human", "--reason", "Plan approval"]);
-  findInvocation(["create", "Task 1: setup", "--parent", "proj-m1-imp", "-d", "d1", "--silent"]);
-  findInvocation(["create", "Task 2: build", "--parent", "proj-m1-imp", "-t", "feature", "-d", "d2", "--silent"]);
-  findInvocation(["create", "Task 3: verify", "--parent", "proj-m1-imp", "-d", "d3", "-l", "a,b", "--silent"]);
-  findInvocation(["link", "proj-m1-imp.2", "proj-m1-imp.1", "--type", "blocks"]); // task1 blocks gate
-  findInvocation(["link", "proj-m1-imp.3", "proj-m1-imp.1", "--type", "blocks"]); // task2 blocks gate
-  findInvocation(["link", "proj-m1-imp.3", "proj-m1-imp.2", "--type", "blocks"]); // task2 blocks task1
-  findInvocation(["link", "proj-m1-imp.4", "proj-m1-imp.1", "--type", "blocks"]); // task3 blocks gate
-  findInvocation(["link", "proj-m1-imp.4", "proj-m1-imp.3", "--type", "blocks"]); // task3 blocks task2
+  // concurrency instrumentation: with a buggy Promise.all implementation two creates
+  // would be in flight at once and the fixture would write the marker + fail. A
+  // correct sequential (awaited) loop never overlaps, so the marker must stay absent.
+  const concDir = join(root, "conc");
+  const concMarker = join(root, "conc.marker");
+  process.env.FAKE_BD_CONC = "1";
+  process.env.FAKE_BD_CONC_DIR = concDir;
+  process.env.FAKE_BD_CONC_MARKER = concMarker;
+  try {
+    const r = await s.byName.get("beads_create_list").execute("c", {
+      parent: "proj-m1-imp",
+      gate: {
+        title: "Plan reviewed / ready to execute",
+        description: "constraints",
+        reason: "Plan approval",
+      },
+      tasks: [
+        { title: "Task 1: setup", description: "d1" },
+        { title: "Task 2: build", description: "d2", type: "feature" },
+        { title: "Task 3: verify", description: "d3", labels: "a,b" },
+      ],
+    });
+    assert.ok(okResult(r), JSON.stringify(r));
 
-  // the whole point: one atomic call, creates issued SEQUENTIALLY in gate -> t1 -> t2 -> t3 order
-  // (each awaited before the next) so ids come out parent.1..N in plan order.
-  const seq = invocations().map((inv) => {
-    if (inv[0] === "create") {
-      if (inv[1] === "Plan reviewed / ready to execute") return "GATE_CREATE";
-      if (inv[1] === "Task 1: setup") return "T1_CREATE";
-      if (inv[1] === "Task 2: build") return "T2_CREATE";
-      if (inv[1] === "Task 3: verify") return "T3_CREATE";
-      return "OTHER_CREATE";
+    // exact argv of every bd call: gate bead, human gate, three tasks, then the blocks chain
+    findInvocation(["create", "Plan reviewed / ready to execute", "--parent", "proj-m1-imp", "-t", "task", "-d", "constraints", "--silent"]);
+    findInvocation(["gate", "create", "--blocks", "proj-m1-imp.1", "--type", "human", "--reason", "Plan approval", "--json"]);
+    findInvocation(["create", "Task 1: setup", "--parent", "proj-m1-imp", "-d", "d1", "--silent"]);
+    findInvocation(["create", "Task 2: build", "--parent", "proj-m1-imp", "-t", "feature", "-d", "d2", "--silent"]);
+    findInvocation(["create", "Task 3: verify", "--parent", "proj-m1-imp", "-d", "d3", "-l", "a,b", "--silent"]);
+    findInvocation(["link", "proj-m1-imp.2", "proj-m1-imp.1", "--type", "blocks"]); // task1 blocks gate
+    findInvocation(["link", "proj-m1-imp.3", "proj-m1-imp.1", "--type", "blocks"]); // task2 blocks gate
+    findInvocation(["link", "proj-m1-imp.3", "proj-m1-imp.2", "--type", "blocks"]); // task2 blocks task1
+    findInvocation(["link", "proj-m1-imp.4", "proj-m1-imp.1", "--type", "blocks"]); // task3 blocks gate
+    findInvocation(["link", "proj-m1-imp.4", "proj-m1-imp.3", "--type", "blocks"]); // task3 blocks task2
+
+    // the whole point: one atomic call, creates issued SEQUENTIALLY in gate -> t1 -> t2 -> t3 order
+    // (each awaited before the next) so ids come out parent.1..N in plan order.
+    const seq = invocations().map((inv) => {
+      if (inv[0] === "create") {
+        if (inv[1] === "Plan reviewed / ready to execute") return "GATE_CREATE";
+        if (inv[1] === "Task 1: setup") return "T1_CREATE";
+        if (inv[1] === "Task 2: build") return "T2_CREATE";
+        if (inv[1] === "Task 3: verify") return "T3_CREATE";
+        return "OTHER_CREATE";
+      }
+      if (inv[0] === "gate") return "GATE";
+      if (inv[0] === "link") return "LINK";
+      return "OTHER";
+    });
+    assert.deepEqual(seq, [
+      "GATE_CREATE",
+      "GATE",
+      "T1_CREATE",
+      "T2_CREATE",
+      "T3_CREATE",
+      "LINK",
+      "LINK",
+      "LINK",
+      "LINK",
+      "LINK",
+    ]);
+
+    // output maps the input task index -> minted id (gate first, then human gate)
+    const text = r.content[0].text;
+    assert.match(text, /gate: proj-m1-imp\.1/);
+    assert.match(text, /human-gate: proj-gate-1/);
+    assert.match(text, /t1: proj-m1-imp\.2/);
+    assert.match(text, /t2: proj-m1-imp\.3/);
+    assert.match(text, /t3: proj-m1-imp\.4/);
+
+    // a single afterWrite at the very end (gate/task creates are raw bd, not tool calls)
+    assert.equal(s.emitted.length, before + 1);
+    assert.equal(s.emitted.at(-1), "beads:changed");
+
+    // prove the instrumentation was active (conc dir is mkdir -p'd on the first
+    // FAKE_BD_CONC=1 create) — otherwise the marker guard below would be vacuous.
+    assert.ok(existsSync(concDir), `concurrency instrumentation never ran (${concDir} missing)`);
+    // concurrency guard: no two creates were ever in flight — the marker must be empty/absent
+    let marker = "";
+    try {
+      marker = readFileSync(concMarker, "utf8");
+    } catch {
+      /* never written: no concurrency — the sequential semantics held */
     }
-    if (inv[0] === "gate") return "GATE";
-    if (inv[0] === "link") return "LINK";
-    return "OTHER";
-  });
-  assert.deepEqual(seq, [
-    "GATE_CREATE",
-    "GATE",
-    "T1_CREATE",
-    "T2_CREATE",
-    "T3_CREATE",
-    "LINK",
-    "LINK",
-    "LINK",
-    "LINK",
-    "LINK",
-  ]);
-
-  // output maps the input task index -> minted id (gate first)
-  const text = r.content[0].text;
-  assert.match(text, /gate: proj-m1-imp\.1/);
-  assert.match(text, /t1: proj-m1-imp\.2/);
-  assert.match(text, /t2: proj-m1-imp\.3/);
-  assert.match(text, /t3: proj-m1-imp\.4/);
-
-  // a single afterWrite at the very end (gate/task creates are raw bd, not tool calls)
-  assert.equal(s.emitted.length, before + 1);
-  assert.equal(s.emitted.at(-1), "beads:changed");
+    assert.equal(marker.trim(), "", `concurrent creates observed: '${marker}'`);
+  } finally {
+    delete process.env.FAKE_BD_CONC;
+    delete process.env.FAKE_BD_CONC_DIR;
+    delete process.env.FAKE_BD_CONC_MARKER;
+  }
 });
 
 test("single-repo: beads_create_list reports partial failure with created-so-far ids", async () => {
@@ -458,6 +514,7 @@ test("single-repo: beads_create_list reports partial failure with created-so-far
   });
   const text = r?.content?.[0]?.text ?? "";
   assert.match(text, /1 of 3 tasks created before failure: proj-m1-imp\.2/, text);
+  assert.doesNotMatch(text, /human-gate:/, "no gate requested -> no human-gate line");
   const invs = invocations();
   assert.equal(invs.filter((iv) => iv[0] === "create").length, 2, JSON.stringify(invs));
   assert.ok(!invs.some((iv) => iv[0] === "link"), `no dep wiring after a task failure: ${JSON.stringify(invs)}`);

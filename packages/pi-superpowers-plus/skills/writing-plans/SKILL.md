@@ -149,9 +149,10 @@ RESULT = beads_create_list({
     # ... one entry per task, IN PLAN ORDER (Task 1 → Task N)
   ],
 })
-GATE_ID  = RESULT.gate
-TASK1_ID = RESULT.t1
-TASK2_ID = RESULT.t2
+GATE_ID        = RESULT.gate
+HUMAN_GATE_ID  = RESULT.human-gate   # the human gate's id (present when a gate is requested)
+TASK1_ID       = RESULT.t1
+TASK2_ID       = RESULT.t2
 # ...
 ```
 
@@ -172,19 +173,28 @@ code block, exactly as written. This bead is what
 
 **Recording the plan-approval verdict** (same revise/recheck pattern as brainstorming's
 `design-approved`/`spec-approved` gates, Task 2 Step 3): when presenting the plan for
-review, don't just wait silently on the gate. `RESULT.gate` is the gate **task bead** id
-(e.g. `parent.1`) — not the human-gate id. `beads_create_list` creates the human gate
-internally and does not return its id as a separate field, so never `beads_gate_resolve` a
-task-bead id.
-  - Approved: `beads_update({ id: GATE_ID, setMetadata: "review.verdict=done" })` with
-  `GATE_ID = RESULT.gate` (the gate task bead), then resolve the **human gate** the task
-  beads are blocked by — find it via `beads_list({ label: "step:gate-plan-approved", mol:
-  "<root-id>" })` (or the gate the tasks report as a blocker) — and
-  `beads_gate_resolve({ id: <human-gate-id> })`. This resolves the human gate and closes the
+review, don't just wait silently on the gate. Bind the ids straight from the
+`beads_create_list` result (it already returned them, so no lookup is needed):
+
+```
+GATE_ID        = RESULT.gate          # gate TASK bead id (e.g. parent.1)
+HUMAN_GATE_ID  = RESULT.human-gate    # the human gate the task beads are blocked by
+TASK1_ID       = RESULT.t1
+TASK2_ID       = RESULT.t2
+```
+
+`RESULT.gate` (`parent.1`) is the gate **task bead** — never pass it to
+`beads_gate_resolve`, and never `beads_gate_resolve` any task-bead id.
+`RESULT.human-gate` is the id of the **human gate** `beads_create_list` creates internally,
+returned only when a gate was requested — and that is the only id the verdict resolver
+resolves.
+  - Approved: `beads_update({ id: GATE_ID, setMetadata: "review.verdict=done" })`, then
+  `beads_gate_resolve({ id: HUMAN_GATE_ID })`. This resolves the human gate and closes the
   gate task bead it was gating, so dependent task beads aren't later blocked by the
   still-open gate ("blocked by open issues [..]"). Step closes are order-enforced: a blocked
   `beads_close` means a prerequisite step/gate is still open — close/resolve it first; the
-  error is the signal, not a mistake.
+  error is the signal, not a mistake. If no gate was requested, `RESULT.human-gate` is
+  absent — there is no human gate to resolve.
   - Changes requested: `beads_update({ id: GATE_ID, setMetadata: "review.verdict=iterate" })`, write
   a specific revision summary (`beads_comment({ id: GATE_ID, text: "<what needs to change>" })`), revise
   the affected task beads' descriptions in place (`beads_update({ id: "<task-id>", description:
