@@ -1,6 +1,6 @@
 # Roadmap
 
-> **Note:** The Workflow Monitor extension (TDD/debug/verification monitors, workflow phase tracker, `/superpowers`, `/workflow-next`, `/workflow-reset`, `workflow_reference`) described throughout the history below has been **removed entirely**. It caused incorrect phase-tracking behavior (see CHANGELOG) and added enforcement complexity that didn't pay for itself. Discipline now lives entirely in the skill instructions. Items below referencing the workflow monitor are historical record, not current or planned functionality.
+> **Note:** The Workflow Monitor extension (TDD/debug/verification monitors, workflow phase tracker, `/superpowers`, `/workflow-next`, `/workflow-reset`, `workflow_reference`) described throughout the history below has been **removed entirely** and **stays removed**. It caused incorrect phase-tracking behavior (see CHANGELOG) and added enforcement complexity that didn't pay for itself. Discipline now lives entirely in the skill instructions. Phase entry is **command-driven**: the phase skills are hidden from the system prompt and load on demand via the new `input` transform — `/brainstorming` (or `/brainstorm`), `/plan`, `/execute`, `/verify`, `/review`, `/finish` each rewrite to `/skill:<name>` before pi's native skill expansion (see `extensions/phase-commands.mjs`). Items below referencing the workflow monitor are historical record, not current or planned functionality.
 
 This roadmap is **directional** (not a promise). Priorities may shift based on real-world usage and feedback.
 
@@ -167,9 +167,17 @@ Still future:
 
 The originally proposed skill-detection fallback was dropped — phase advancement is command-only, since hidden skills can't be heuristically detected. `onInputText`/`onSkillFileRead` were removed accordingly.
 
+The `input`-transform mechanism for the six phase commands is now fully shipped (**v0.9.0**,
+`extensions/phase-commands.mjs`) — commands rewrite to `/skill:<name>` before pi's native skill
+expansion (`/execute` stages the implementation phase and presents the SDD-vs-executing choice in the
+editor). The skill-visibility set is **11 hidden** (`disable-model-invocation: true`): the 7 phase skills
+plus `test-driven-development`, `using-git-worktrees`, `dispatching-parallel-agents`, and
+`receiving-code-review`; `using-superpowers` and `systematic-debugging` remain visible. Hidden skills
+stay `/skill:`-invocable any time.
+
 Still future:
 - `/superpowers query "<question>"` (see above)
-- `/workflow-next` / `/workflow-reset` removal (deprecated, still present)
+- ~~`/workflow-next` / `/workflow-reset` removal~~ — historical, superseded by the extension removal (see top note; the entire extension, including `/superpowers`, `/workflow-next`, `/workflow-reset`, was removed).
 
 ### Other ideas
 
