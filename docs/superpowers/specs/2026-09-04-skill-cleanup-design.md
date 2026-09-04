@@ -6,7 +6,7 @@ Target package: `packages/pi-superpowers-plus`
 
 ## Context
 
-The phase-skill-visibility / command-layer work (epic `pi-packages-tw71`/`pi-packages-i7ar`) was
+The phase-skill-visibility / command-layer work (molecule `pi-packages-mol-tw71` / issue `pi-packages-i7ar`) was
 landed without folding in a set of deferred, non-build cleanup findings from the hand-read of
 the pi-superpowers-plus skills. Those findings are captured on epic `pi-packages-lk5q`. This
 spec scopes the cleanup cycle for them.
