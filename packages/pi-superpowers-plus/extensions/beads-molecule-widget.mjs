@@ -276,7 +276,7 @@ export function moleculeWidgetLines(state, width, theme) {
         pinned: true,
       }
     : null;
-  if (gateCurrent && awaitingLine) rows.push(awaitingLine);
+  if (gateCurrent) rows.push(awaitingLine);
 
   // The human-review step gated by a ready gate (the nearest pending/open non-gate
   // step before it) becomes the active row, leading the awaiting line.
@@ -291,17 +291,23 @@ export function moleculeWidgetLines(state, width, theme) {
     }
   }
 
-  const stepRow = (step, label) => ({
-    text: assemble(
-      [
-        { text: `${markerFor(step.status)} `, paint: (t) => fg(step.status === "closed" ? "text" : "warning", t) },
-        { text: label ?? step.title ?? "", paint: (t) => fg(step.status === "closed" ? "muted" : "text", t) },
-      ],
-      width,
-    ).text,
-    closed: step.status === "closed",
-    pinned: !!(step.is_current || step === awaitingStep),
-  });
+  const stepRow = (step, label) => {
+    const active = step === awaitingStep;
+    return {
+      text: assemble(
+        [
+          {
+            text: `${active ? "\u25d0" : markerFor(step.status)} `,
+            paint: (t) => fg(step.status === "closed" ? "text" : "warning", t),
+          },
+          { text: label ?? step.title ?? "", paint: (t) => fg(step.status === "closed" ? "muted" : "text", t) },
+        ],
+        width,
+      ).text,
+      closed: step.status === "closed",
+      pinned: !!(step.is_current || active),
+    };
+  };
 
   if (phase === "brainstorming") {
     for (const s of resolveRows(state.steps, BRAINSTORM_VIEW)) rows.push(stepRow(s.step, s.label));
@@ -323,17 +329,21 @@ export function moleculeWidgetLines(state, width, theme) {
       );
     kids.forEach((kid, i) => {
       const last = i === kids.length - 1;
+      const activeKid = kid === awaitingStep;
       rows.push({
         text: assemble(
           [
             { text: last ? "\u2514\u2500\u2500 " : "\u251c\u2500\u2500 ", paint: (t) => fg("muted", t) },
-            { text: `${markerFor(kid.status)} `, paint: (t) => fg(kid.status === "closed" ? "text" : "warning", t) },
+            {
+              text: `${activeKid ? "\u25d0" : markerFor(kid.status)} `,
+              paint: (t) => fg(kid.status === "closed" ? "text" : "warning", t),
+            },
             { text: kid.title ?? "", paint: (t) => fg(kid.status === "closed" ? "muted" : "text", t) },
           ],
           width,
         ).text,
         closed: kid.status === "closed",
-        pinned: !!kid.is_current,
+        pinned: !!(kid.is_current || activeKid),
       });
     });
   } else if (phase === "finishing") {

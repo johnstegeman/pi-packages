@@ -321,6 +321,86 @@ assert.ok(
   aIdx !== -1 && aIdx < aLines.findIndex((l) => l.includes("Waiting on you:")),
   "awaited step rendered as active row",
 );
+assert.ok(aLines[aIdx].includes("\u25d0"), `awaited row carries the active marker: ${aLines[aIdx]}`);
+
+// ---------- awaiting human: ready gate but gated step already done => no active row ----------
+const awaitNullState = {
+  ...awaitState,
+  steps: awaitState.steps.map((s) => (s.id === "a4" ? { ...s, status: "closed", step_status: "done" } : s)),
+};
+const anLines = moleculeWidgetLines(awaitNullState, 120);
+assert.ok(
+  anLines.some((l) => l.includes("Waiting on you:") && l.includes("Gate: human")),
+  `waiting line still pinned: ${anLines.join(" | ")}`,
+);
+assert.ok(
+  !anLines.some((l) => l.includes("\u25d0")),
+  `no mis-associated active row when no preceding open gated step: ${anLines.join(" | ")}`,
+);
+
+// ---------- awaiting human + overflow: awaited step and waiting line stay pinned, in order ----------
+const awaitOverflowState = {
+  molecule_id: "bd-mol-o1",
+  molecule_title: "superpowers-workflow",
+  current_step: null,
+  next_step: { id: "o.g", title: "Gate: human", status: "open", issue_type: "gate" },
+  doneCount: 2,
+  total: 30,
+  steps: [
+    {
+      id: "o.i",
+      title: "Implement overflow widget",
+      status: "open",
+      issue_type: "task",
+      created_at: "t0",
+      step_status: "current",
+      is_current: false,
+    },
+    ...Array.from({ length: 24 }, (_, i) => ({
+      id: `o.i.${i + 1}`,
+      title: `Task ${i + 1}: item ${i}`,
+      status: "open",
+      issue_type: "task",
+      created_at: `t${i + 1}`,
+      step_status: "pending",
+      is_current: false,
+    })),
+    {
+      id: "o.g",
+      title: "Gate: human",
+      status: "open",
+      issue_type: "gate",
+      created_at: "t25",
+      step_status: "ready",
+      is_current: false,
+    },
+    {
+      id: "o.done",
+      title: "Finish development branch",
+      status: "open",
+      issue_type: "task",
+      created_at: "t26",
+      step_status: "pending",
+      is_current: false,
+    },
+  ],
+};
+const aoLines = moleculeWidgetLines(awaitOverflowState, 120);
+assert.ok(aoLines.length <= 15, `overflow capped: ${aoLines.length}`);
+const aoAwaitIdx = aoLines.findIndex((l) => l.includes("Task 24: item 23"));
+const aoWaitIdx = aoLines.findIndex((l) => l.includes("Waiting on you: Gate: human"));
+assert.ok(aoAwaitIdx !== -1, `awaited step survives overflow: ${aoLines.join(" | ")}`);
+assert.ok(aoWaitIdx !== -1, `waiting line survives overflow: ${aoLines.join(" | ")}`);
+assert.ok(aoAwaitIdx < aoWaitIdx, "awaited step before the waiting line under overflow");
+assert.ok(
+  aoLines[aoAwaitIdx].includes("\u25d0"),
+  `awaited child still carries the active marker: ${aoLines[aoAwaitIdx]}`,
+);
+assert.ok(aoLines[aoLines.length - 1].includes(" more"), "overflow tail present");
+assert.ok(
+  aIdx !== -1 && aIdx < aLines.findIndex((l) => l.includes("Waiting on you:")),
+  "awaited step rendered as active row",
+);
 
 // ---------- implementing: head row + plan gate first + task beads, current pinned ----------
 const implState = {
