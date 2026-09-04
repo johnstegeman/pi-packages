@@ -372,11 +372,7 @@ export function moleculeWidgetLines(state, width, theme) {
     if (awaitingStep || gateCurrent || set.some((s) => s.is_current)) return null;
     for (let i = set.length - 1; i >= 0; i--) {
       const s = set[i];
-      if (
-        s.status === "open" &&
-        s.issue_type !== "gate" &&
-        (s.step_status === "ready" || s.step_status === "open")
-      )
+      if (s.status === "open" && s.issue_type !== "gate" && (s.step_status === "ready" || s.step_status === "open"))
         return s;
     }
     return null;
