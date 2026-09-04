@@ -129,54 +129,69 @@ git commit -m "feat: add specific feature"
 
 Once the task breakdown above is authored and has passed the
 lifecycle-duplicate check (Self-Review item 4), create the real task beads under the
-`implement` step:
+`implement` step with **one `beads_create_list` call**. The `tasks` array order IS the plan
+order — `beads_create_list` creates them sequentially (one `bd create --parent` awaited at a
+time), so ids come out `parent.1, parent.2, … ` matching Task 1..N, which is what keeps
+`bd list` and the molecule widget showing tasks in plan order.
 
 ```
-# One gate, every real task depends on it — nothing executes until the human approves
-# the plan shape.
-GATE_ID = beads_create({
-  title: "Plan reviewed / ready to execute",
+# One call creates the gate bead + human gate, then every task bead in plan order,
+# then wires the blocks-chain (each task → gate; Task N+1 → Task N).
+RESULT = beads_create_list({
   parent: "<implement-step-id>",
-  type: "task",
-  description: "## Global Constraints\n<the constraints block, authored here>",
+  gate: {
+    description: "## Global Constraints\n<the constraints block, authored here>",
+    reason: "Plan approval",
+  },
+  tasks: [
+    { title: "Task 1: <name>", description: "<the Task 1 breakdown above, verbatim>" },
+    { title: "Task 2: <name>", description: "<the Task 2 breakdown above, verbatim>" },
+    # ... one entry per task, IN PLAN ORDER (Task 1 → Task N)
+  ],
 })
-beads_gate_create({ blocks: GATE_ID, type: "human", reason: "Plan approval" })
-
-# One bead per task, in order, each depending on the gate and on its plan-declared
-# predecessor:
-TASK1_ID = beads_create({ title: "Task 1: <name>", parent: "<implement-step-id>", type: "task", description: "<the Task 1 breakdown above, verbatim>" })
-beads_dep({ issue: TASK1_ID, blocker: GATE_ID })
-
-TASK2_ID = beads_create({ title: "Task 2: <name>", parent: "<implement-step-id>", type: "task", description: "<the Task 2 breakdown above, verbatim>" })
-beads_dep({ issue: TASK2_ID, blocker: GATE_ID })
-beads_dep({ issue: TASK2_ID, blocker: TASK1_ID })   # only if the plan actually orders Task 2 after Task 1
+GATE_ID  = RESULT.gate
+TASK1_ID = RESULT.t1
+TASK2_ID = RESULT.t2
+# ...
 ```
+
+**Tasks MUST be passed in plan order (Task 1 → Task N).** `beads_create_list` creates them
+sequentially in that order so ids come out `parent.1..N`; a task listed out of order would get
+the wrong id sequence and break plan-order display in `bd list` and the widget. Never issue
+multiple `beads_create` / `beads_create_list` calls for the same plan — one call, declared in
+order.
 
 The gate bead's `description` is the **canonical Global Constraints artifact**: this is
 where the constraints block is authored (exact values, exact formats, stated component
-relationships). It stays readable after the gate is resolved/closed, and
+relationships). It stays readable after the gate is resolved/closed.
 
-Each task bead's `-d`/`--description` is the task's **entire** breakdown above — every step, every
+Each task bead's `description` is the task's **entire** breakdown above — every step, every
 code block, exactly as written. This bead is what
 `executing-plans`/`subagent-driven-development` read during execution —
 `beads_show({ id: "<task-id>" })`. It is the requirements at execution time; there is no plan.md.
 
 **Recording the plan-approval verdict** (same revise/recheck pattern as brainstorming's
 `design-approved`/`spec-approved` gates, Task 2 Step 3): when presenting the plan for
-review, don't just wait silently on the gate.
-  - Approved: `beads_update({ id: GATE_ID, setMetadata: "review.verdict=done" })`, then
-  `beads_gate_resolve({ id: <the-gate-id-beads_gate_create-returned> })` — this both
-  resolves the human gate and closes the gate task bead itself, so dependent task beads
-  aren't later blocked by the still-open gate ("blocked by open issues [..]").
-  Step closes are order-enforced: a blocked `beads_close` means a prerequisite step/gate
-  is still open — close/resolve it first; the error is the signal, not a mistake.
+review, don't just wait silently on the gate. `RESULT.gate` is the gate **task bead** id
+(e.g. `parent.1`) — not the human-gate id. `beads_create_list` creates the human gate
+internally and does not return its id as a separate field, so never `beads_gate_resolve` a
+task-bead id.
+  - Approved: `beads_update({ id: GATE_ID, setMetadata: "review.verdict=done" })` with
+  `GATE_ID = RESULT.gate` (the gate task bead), then resolve the **human gate** the task
+  beads are blocked by — find it via `beads_list({ label: "step:gate-plan-approved", mol:
+  "<root-id>" })` (or the gate the tasks report as a blocker) — and
+  `beads_gate_resolve({ id: <human-gate-id> })`. This resolves the human gate and closes the
+  gate task bead it was gating, so dependent task beads aren't later blocked by the
+  still-open gate ("blocked by open issues [..]"). Step closes are order-enforced: a blocked
+  `beads_close` means a prerequisite step/gate is still open — close/resolve it first; the
+  error is the signal, not a mistake.
   - Changes requested: `beads_update({ id: GATE_ID, setMetadata: "review.verdict=iterate" })`, write
   a specific revision summary (`beads_comment({ id: GATE_ID, text: "<what needs to change>" })`), revise
   the affected task beads' descriptions in place (`beads_update({ id: "<task-id>", description:
   "<revised instructions>" })`) or add/remove/re-order task beads as needed, and re-present
-  — do NOT resolve the gate. On resume, read the existing task beads under `implement`
-  (`beads_mol_show({ id: "<implement-step-id>" })`) plus the latest revision summary before revising,
-  rather than starting the breakdown over.
+  — do NOT resolve the human gate (nor `beads_gate_resolve` any task id). On resume, read the existing
+  task beads under `implement` (`beads_mol_show({ id: "<implement-step-id>" })`) plus the latest
+  revision summary before revising, rather than starting the breakdown over.
 
 Close each step bead in the same turn its real output exists (never batch several closes at the end of a phase) — this is what keeps `bd mol current --json` honest so the widget shows the real current step.
 **When you claim step N+1, close step N you just completed in the same turn** — every step handoff (e.g. `spec-review`→`spec-approved`, `spec-approved`→`implement`) follows this same general rule.
