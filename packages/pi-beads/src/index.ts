@@ -1037,7 +1037,11 @@ export default function piBeadsLean(pi: any) {
       // Instead close the step(s) this gate was gating (its open non-gate dependents),
       // so nothing resolved-but-left-open blocks later beads_close calls.
       const dep = await bd(["dep", "list", id, "--direction", "up", "--json"], dir);
-      const dependentList = Array.isArray(jparse(dep.out)) ? (jparse(dep.out) as any[]) : [];
+      const depList = jparse(dep.out);
+      if (!dep.ok || !Array.isArray(depList)) {
+        return textResult(`gate ${id} resolved but could not look up gated step (dep list failed)`);
+      }
+      const dependentList = depList as any[];
       const gated = dependentList.filter(
         (x: any) => x && x.id != null && x.issue_type !== "gate" && x.status !== "closed",
       );
@@ -1059,7 +1063,12 @@ export default function piBeadsLean(pi: any) {
             : `gate ${id} resolved`,
         );
       }
-      return textResult(`gate ${id} resolved and gated step ${closed.join(", ")} closed`);
+      return textResult(
+        stillBlocked.length
+          ? `gate ${id} resolved and gated step ${closed.join(", ")} closed; ` +
+              `steps still blocked: ${stillBlocked.join(", ")}`
+          : `gate ${id} resolved and gated step ${closed.join(", ")} closed`,
+      );
     },
   });
 

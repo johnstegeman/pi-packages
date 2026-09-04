@@ -186,8 +186,25 @@ case "$1" in
       printf '%s\n' '[{"id":"proj-sap","title":"User reviews written spec","issue_type":"task","status":"open","dependency_type":"blocks"}]'
       exit 0
     fi
+    # gate resolve failure path: dep list returns non-JSON (no usable dependents)
+    if [ "$3" = "proj-gx" ] && [ "$5" = "up" ]; then
+      printf '%s\n' 'not json'
+      exit 0
+    fi
+    # mixed-outcome fixture: one gated step closes, one stays blocked
+    if [ "$3" = "proj-gm" ] && [ "$5" = "up" ]; then
+      printf '%s\n' '[{"id":"proj-ok-step","title":"Ok step","issue_type":"task","status":"open","dependency_type":"blocks"},{"id":"proj-bad-step","title":"Bad step","issue_type":"task","status":"open","dependency_type":"blocks"}]'
+      exit 0
+    fi
     printf '%s\n' '[]'
     exit 0
+    ;;
+  close)
+    if [ "$2" = "proj-bad-step" ]; then
+      echo "boom" >&2
+      exit 1
+    fi
+    echo "ok"; exit 0
     ;;
   *) echo "ok"; exit 0 ;;
 esac
@@ -419,6 +436,32 @@ test("single-repo: beads_gate_resolve resolves gate then closes its gated step (
   // bd 1.2.2 gate resolve already closes the gate -> no separate close on the gate id
   assert.ok(!invs.some((iv) => iv[0] === "close" && iv[1] === "proj-g2"), "no redundant close of the gate");
   assert.equal(s.emitted.length, 2, "emits after gate resolve AND after closing the gated step");
+});
+
+test("single-repo: beads_gate_resolve reports lookup failure when dep list is non-JSON (no false success)", async () => {
+  const s = await openSession("single", repoDir);
+  resetLog();
+  const r = await s.byName.get("beads_gate_resolve").execute("c", { id: "proj-gx" });
+  assert.ok(okResult(r), JSON.stringify(r));
+  const text = r.content[0].text;
+  assert.match(text, /could not look up gated step/, `expected lookup-failure message, got: ${text}`);
+  assert.ok(!/resolved$/u.test(text.trim()), `must not report plain success, got: ${text}`);
+  assert.ok(
+    !invocations().some((iv) => iv[0] === "close"),
+    "no close attempted when dep list failed",
+  );
+});
+
+test("single-repo: beads_gate_resolve reports still-blocked steps alongside closed ones", async () => {
+  const s = await openSession("single", repoDir);
+  resetLog();
+  const r = await s.byName.get("beads_gate_resolve").execute("c", { id: "proj-gm" });
+  assert.ok(okResult(r), JSON.stringify(r));
+  const text = r.content[0].text;
+  assert.match(text, /proj-ok-step/, `expected closed step in message, got: ${text}`);
+  assert.match(text, /steps still blocked: proj-bad-step/, `expected still-blocked step in message, got: ${text}`);
+  findInvocation(["close", "proj-ok-step"]);
+  findInvocation(["close", "proj-bad-step"]);
 });
 
 test("single-repo: beads_close does NOT cascade while a sibling task is open", async () => {
