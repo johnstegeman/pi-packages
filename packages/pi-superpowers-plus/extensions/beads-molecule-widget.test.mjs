@@ -749,6 +749,15 @@ for (const line of moleculeWidgetLines(implState, 30)) assert.ok(displayWidth(li
     clarifyRow && clarifyRow.includes("pi-packages-mol-abc123.2"),
     `current step row carries its bead id (got '${clarifyRow}')`,
   );
+  // step rows lead with the bead id right after the status marker (before the title)
+  assert.ok(
+    exploreRow && exploreRow.indexOf("pi-packages-mol-abc123.1") < exploreRow.indexOf("Explore project context"),
+    `step id precedes title: '${exploreRow}'`,
+  );
+  assert.ok(
+    clarifyRow && clarifyRow.indexOf("pi-packages-mol-abc123.2") < clarifyRow.indexOf("Ask clarifying questions"),
+    `step id precedes title: '${clarifyRow}'`,
+  );
 }
 
 // implementing-view kid-task rows carry the kid's full id (starts with <impl.id>.)
@@ -761,6 +770,47 @@ for (const line of moleculeWidgetLines(implState, 30)) assert.ok(displayWidth(li
   assert.ok(
     kidLines.some((l) => l.includes("mol-9.i.3") && l.includes("Task 1: setup")),
     `impl kid row carries its full bead id: ${kidLines.join(" | ")}`,
+  );
+  // the kid id sits right after the status marker, before the title (same line)
+  const kid2Line = kidLines.find((l) => l.includes("mol-9.i.2") && l.includes("Task 2: build it"));
+  assert.ok(
+    kid2Line && kid2Line.indexOf("mol-9.i.2") < kid2Line.indexOf("Task 2: build it"),
+    `kid id precedes title: '${kid2Line}'`,
+  );
+  const kid3Line = kidLines.find((l) => l.includes("mol-9.i.3") && l.includes("Task 1: setup"));
+  assert.ok(
+    kid3Line && kid3Line.indexOf("mol-9.i.3") < kid3Line.indexOf("Task 1: setup"),
+    `kid id precedes title: '${kid3Line}'`,
+  );
+}
+
+// regression: with SEQUENTIAL ids (created in plan order), kids render Task 1..N
+{
+  const planOrderState = {
+    ...implState,
+    // drop the plan gate so the fresh two-task fixture owns mol-9.i.1
+    steps: implState.steps
+      .filter((s) => s.id !== "mol-9.i.1")
+      .map((s) => {
+        if (s.id === "mol-9.i.3") return { ...s, id: "mol-9.i.1", title: "Task 1: setup", created_at: "t1" };
+        if (s.id === "mol-9.i.2") return { ...s, id: "mol-9.i.2", title: "Task 2: build it", created_at: "t2" };
+        return s;
+      }),
+  };
+  const planLines = moleculeWidgetLines(planOrderState, 200);
+  const t1Row = planLines.find((l) => l.includes("Task 1: setup"));
+  const t2Row = planLines.find((l) => l.includes("Task 2: build it"));
+  assert.ok(
+    t1Row && t2Row && planLines.indexOf(t1Row) < planLines.indexOf(t2Row),
+    `plan order renders Task 1 before Task 2: ${planLines.join(" | ")}`,
+  );
+  assert.ok(
+    t1Row && t1Row.includes("mol-9.i.1") && t2Row && t2Row.includes("mol-9.i.2"),
+    `sequential ids carry onto their own rows: ${planLines.join(" | ")}`,
+  );
+  assert.ok(
+    t1Row && t1Row.indexOf("mol-9.i.1") < t1Row.indexOf("Task 1: setup"),
+    `plan-order kid id precedes title: '${t1Row}'`,
   );
 }
 
