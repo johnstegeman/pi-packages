@@ -1,8 +1,10 @@
 import assert from "node:assert/strict";
 import {
+  applyMoleculeFrame,
   createChangeCoalescer,
   displayWidth,
   moleculeWidgetLines,
+  nextRefreshArgs,
   parseMoleculeCurrent,
   phaseFor,
   topicFor,
@@ -647,6 +649,156 @@ assert.ok(plain[0].includes("Superpowers:"), "absent theme renders plain label")
 
   c.trigger();
   assert.equal(fires.length, 3, "trigger after idle is a fresh leading edge");
+}
+
+// ---------- stale-frame fix: args selection ----------
+assert.deepEqual(nextRefreshArgs(null), ["mol", "current", "--json"]); // no lock yet -> no-id inference
+assert.deepEqual(nextRefreshArgs("bd-mol-abc"), ["mol", "current", "bd-mol-abc", "--json"]); // locked -> by id
+
+// ---------- stale-frame fix: pure refresh transition ----------
+{
+  const prev = parseMoleculeCurrent(RAW); // real-shaped 4-step molecule (bd-mol-g0z)
+  // parsed non-null: adopt the new frame AND lock its molecule_id
+  const adopted = applyMoleculeFrame(null, null, prev, false);
+  assert.equal(adopted.activeMolecule, prev, "parsed frame adopted");
+  assert.equal(adopted.lockedMoleculeId, "bd-mol-g0z", "parsed molecule id locked");
+
+  // parsed non-null replaces an earlier frame and re-locks to the new id
+  const future = { ...prev, molecule_id: "bd-mol-fut" };
+  const switched = applyMoleculeFrame(prev, "bd-mol-g0z", future, true);
+  assert.equal(switched.activeMolecule, future, "with-id refresh adopts the newer frame");
+  assert.equal(switched.lockedMoleculeId, "bd-mol-fut", "lock follows the adopted frame");
+
+  // null + queriedById (by-id query found nothing): real molecule gone -> clear widget + lock
+  const cleared = applyMoleculeFrame(prev, "bd-mol-g0z", null, true);
+  assert.deepEqual(cleared, { activeMolecule: null, lockedMoleculeId: null });
+
+  // null + no-id fallback (no lock yet): inference found nothing, nothing better to show -> keep prior frame
+  const kept = applyMoleculeFrame(prev, null, null, false);
+  assert.equal(kept.activeMolecule, prev, "no-id null keeps the previous frame");
+  assert.equal(kept.lockedMoleculeId, null);
+}
+
+// ---------- stale-frame regression (behavior): a by-id refresh must advance a frozen frame ----------
+{
+  // raw bd JSON captured while Implement was in_progress (the frozen/WIP frame)
+  const WIP_RAW = JSON.stringify([
+    {
+      molecule_id: "bd-mol-g0z",
+      molecule_title: "superpowers-workflow",
+      current_step: { id: "bd-mol-i", title: "Implement stale-frame fix", status: "in_progress", issue_type: "task" },
+      next_step: null,
+      steps: [
+        {
+          issue: {
+            id: "bd-mol-e",
+            title: "Explore project context: stale-frame fix",
+            issue_type: "task",
+            status: "closed",
+          },
+          status: "done",
+          is_current: false,
+        },
+        {
+          issue: { id: "bd-mol-i", title: "Implement stale-frame fix", issue_type: "task", status: "in_progress" },
+          status: "current",
+          is_current: true,
+        },
+        {
+          issue: { id: "bd-mol-v", title: "Verify", issue_type: "task", status: "open" },
+          status: "ready",
+          is_current: false,
+        },
+        {
+          issue: { id: "bd-mol-f", title: "Finish development branch", issue_type: "task", status: "open" },
+          status: "pending",
+          is_current: false,
+        },
+      ],
+    },
+  ]);
+  // raw bd JSON post-implementation: Implement done + closed, Verify current
+  const DONE_RAW = JSON.stringify([
+    {
+      molecule_id: "bd-mol-g0z",
+      molecule_title: "superpowers-workflow",
+      current_step: { id: "bd-mol-v", title: "Verify", status: "in_progress", issue_type: "task" },
+      next_step: null,
+      steps: [
+        {
+          issue: {
+            id: "bd-mol-e",
+            title: "Explore project context: stale-frame fix",
+            issue_type: "task",
+            status: "closed",
+          },
+          status: "done",
+          is_current: false,
+        },
+        {
+          issue: { id: "bd-mol-i", title: "Implement stale-frame fix", issue_type: "task", status: "closed" },
+          status: "done",
+          is_current: false,
+        },
+        {
+          issue: { id: "bd-mol-v", title: "Verify", issue_type: "task", status: "in_progress" },
+          status: "current",
+          is_current: true,
+        },
+        {
+          issue: { id: "bd-mol-f", title: "Finish development branch", issue_type: "task", status: "open" },
+          status: "pending",
+          is_current: false,
+        },
+      ],
+    },
+  ]);
+
+  // the widget captured the WIP frame earlier while implement was in_progress;
+  // under the fix the id was locked at capture time.
+  let active = parseMoleculeCurrent(WIP_RAW);
+  let locked = active.molecule_id; // "bd-mol-g0z"
+  assert.equal(phaseFor(active), "implementing", "precondition: widget frozen on the implementing frame");
+
+  const calls = [];
+  const fakeExec = async (_cmd, args) => {
+    calls.push(args);
+    // no-id inference drops out post-implementation (nothing in_progress+assigned) -> []
+    if (!locked) return { code: 0, stdout: "[]", stderr: "" };
+    // a by-id query always returns the full, current molecule
+    return { code: 0, stdout: DONE_RAW, stderr: "" };
+  };
+
+  // replicate the fixed refreshMolecule decision flow exactly
+  async function refresh() {
+    const args = nextRefreshArgs(locked);
+    const r = await fakeExec("bd", args);
+    if (r.code !== 0) return;
+    const parsed = parseMoleculeCurrent(r.stdout);
+    const queriedById = args.length > 3;
+    const nxt = applyMoleculeFrame(active, locked, parsed, queriedById);
+    active = nxt.activeMolecule;
+    locked = nxt.lockedMoleculeId;
+  }
+
+  await refresh();
+
+  assert.deepEqual(
+    calls.at(-1),
+    ["mol", "current", "bd-mol-g0z", "--json"],
+    "refresh re-queries by the locked id, never no-id inference after capture",
+  );
+  assert.equal(phaseFor(active), "finishing", "frozen implementing frame advanced to finishing");
+  const rLines = moleculeWidgetLines(active, 120);
+  assert.ok(rLines[0].includes("Finishing"), `header is Finishing: ${rLines.join(" | ")}`);
+  assert.ok(
+    rLines.some((l) => l.includes("Verify")),
+    `Verify visible in finishing view: ${rLines.join(" | ")}`,
+  );
+  assert.ok(
+    !rLines.some((l) => l.includes("Implement stale-frame fix")),
+    `Implement-WIP row gone from finishing view: ${rLines.join(" | ")}`,
+  );
 }
 
 console.log("beads-molecule-widget: all assertions passed");

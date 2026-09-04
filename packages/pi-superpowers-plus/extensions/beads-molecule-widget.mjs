@@ -101,6 +101,30 @@ export function parseMoleculeCurrent(json) {
   };
 }
 
+/**
+ * Choose the `bd mol current` args for a refresh. Once a molecule id is known,
+ * query by id — with-id mode always returns the full molecule even when every
+ * step is done — instead of the no-id inference call, which drops out to [] in
+ * the post-implementation window (nothing in_progress+assigned to infer from).
+ */
+export function nextRefreshArgs(lockedMoleculeId) {
+  return lockedMoleculeId ? ["mol", "current", lockedMoleculeId, "--json"] : ["mol", "current", "--json"];
+}
+
+/**
+ * Pure transition for one refresh result. Returns the next
+ * `{ activeMolecule, lockedMoleculeId }`:
+ * - parsed non-null: adopt the new frame and lock its molecule id;
+ * - parsed null + queriedById: real "molecule gone" — clear the widget and the lock;
+ * - parsed null + no-id fallback (no lock yet): inference found nothing, keep the
+ *   previous frame as-is (nothing better to show).
+ */
+export function applyMoleculeFrame(prevActiveMolecule, prevLockedId, parsed, queriedById) {
+  if (parsed) return { activeMolecule: parsed, lockedMoleculeId: parsed.molecule_id };
+  if (queriedById) return { activeMolecule: null, lockedMoleculeId: null };
+  return { activeMolecule: prevActiveMolecule, lockedMoleculeId: prevLockedId };
+}
+
 const EXPLORE_PREFIX = "Explore project context: ";
 
 // ---- topic + phase helpers (superpowers-workflow formula coupling) ----
