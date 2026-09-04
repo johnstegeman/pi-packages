@@ -1,7 +1,6 @@
 ---
 name: finishing-a-development-branch
 description: Use when implementation is complete, all tests pass, and you need to decide how to integrate the work
-disable-model-invocation: true
 ---
 
 > **Related skills:** Verify tests pass with `/skill:verification-before-completion`. Consider `/skill:requesting-code-review` before merging.

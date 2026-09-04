@@ -1,7 +1,6 @@
 ---
 name: writing-plans
 description: Use when you have a spec or requirements for a multi-step task, before touching code
-disable-model-invocation: true
 ---
 
 > **Related skills:** Did you `/skill:brainstorming` first? Ready to implement? Use `/skill:executing-plans` or `/skill:subagent-driven-development`.
@@ -200,6 +199,8 @@ review, don't just wait silently on the gate.
   — do NOT resolve the gate. On resume, read the existing task beads under `implement`
   (`beads_mol_show({ id: "<implement-step-id>" })`) plus the latest revision summary before revising,
   rather than starting the breakdown over.
+
+Close each step bead in the same turn its real output exists (never batch several closes at the end of a phase) — this is what keeps `bd mol current --json` honest so the widget shows the real current step.
 
 ## Task Separation
 

@@ -246,6 +246,162 @@ const gLines = moleculeWidgetLines(gateCurrent, 120);
 assert.ok(gLines.some((l) => l.includes("Waiting on you:") && l.includes("Gate: human")));
 assert.ok(gLines.some((l) => l.includes("Ask clarifying questions")));
 
+// ---------- awaiting human: no current step, ready Human gate -> Waiting on you line ----------
+const awaitState = {
+  molecule_id: "bd-mol-a1",
+  molecule_title: "superpowers-workflow",
+  current_step: null,
+  next_step: { id: "bd-mol-g2", title: "Gate: human", status: "open", issue_type: "gate" },
+  doneCount: 6,
+  total: 8,
+  steps: [
+    {
+      id: "a1",
+      title: "Explore project context: widget fixes",
+      status: "closed",
+      issue_type: "task",
+      created_at: "",
+      step_status: "done",
+      is_current: false,
+    },
+    {
+      id: "a2",
+      title: "Write spec to docs/superpowers/specs/",
+      status: "closed",
+      issue_type: "task",
+      created_at: "",
+      step_status: "done",
+      is_current: false,
+    },
+    {
+      id: "a3",
+      title: "Spec self-review",
+      status: "closed",
+      issue_type: "task",
+      created_at: "",
+      step_status: "done",
+      is_current: false,
+    },
+    {
+      id: "a4",
+      title: "User reviews written spec",
+      status: "open",
+      issue_type: "task",
+      created_at: "",
+      step_status: "pending",
+      is_current: false,
+    },
+    {
+      id: "a5",
+      title: "Gate: human",
+      status: "open",
+      issue_type: "gate",
+      created_at: "",
+      step_status: "ready",
+      is_current: false,
+    },
+    {
+      id: "a6",
+      title: "Implement widget fixes",
+      status: "open",
+      issue_type: "task",
+      created_at: "",
+      step_status: "pending",
+      is_current: false,
+    },
+  ],
+};
+const aLines = moleculeWidgetLines(awaitState, 120);
+assert.ok(
+  aLines.some((l) => l.includes("Waiting on you:") && l.includes("Gate: human")),
+  aLines.join(" | "),
+);
+const aIdx = aLines.findIndex((l) => l.includes("User reviews written spec"));
+assert.ok(
+  aIdx !== -1 && aIdx < aLines.findIndex((l) => l.includes("Waiting on you:")),
+  "awaited step rendered as active row",
+);
+assert.ok(aLines[aIdx].includes("\u25d0"), `awaited row carries the active marker: ${aLines[aIdx]}`);
+
+// ---------- awaiting human: ready gate but gated step already done => no active row ----------
+const awaitNullState = {
+  ...awaitState,
+  steps: awaitState.steps.map((s) => (s.id === "a4" ? { ...s, status: "closed", step_status: "done" } : s)),
+};
+const anLines = moleculeWidgetLines(awaitNullState, 120);
+assert.ok(
+  anLines.some((l) => l.includes("Waiting on you:") && l.includes("Gate: human")),
+  `waiting line still pinned: ${anLines.join(" | ")}`,
+);
+assert.ok(
+  !anLines.some((l) => l.includes("\u25d0")),
+  `no mis-associated active row when no preceding open gated step: ${anLines.join(" | ")}`,
+);
+
+// ---------- awaiting human + overflow: awaited step and waiting line stay pinned, in order ----------
+const awaitOverflowState = {
+  molecule_id: "bd-mol-o1",
+  molecule_title: "superpowers-workflow",
+  current_step: null,
+  next_step: { id: "o.g", title: "Gate: human", status: "open", issue_type: "gate" },
+  doneCount: 2,
+  total: 30,
+  steps: [
+    {
+      id: "o.i",
+      title: "Implement overflow widget",
+      status: "open",
+      issue_type: "task",
+      created_at: "t0",
+      step_status: "current",
+      is_current: false,
+    },
+    ...Array.from({ length: 24 }, (_, i) => ({
+      id: `o.i.${i + 1}`,
+      title: `Task ${i + 1}: item ${i}`,
+      status: "open",
+      issue_type: "task",
+      created_at: `t${i + 1}`,
+      step_status: "pending",
+      is_current: false,
+    })),
+    {
+      id: "o.g",
+      title: "Gate: human",
+      status: "open",
+      issue_type: "gate",
+      created_at: "t25",
+      step_status: "ready",
+      is_current: false,
+    },
+    {
+      id: "o.done",
+      title: "Finish development branch",
+      status: "open",
+      issue_type: "task",
+      created_at: "t26",
+      step_status: "pending",
+      is_current: false,
+    },
+  ],
+};
+const aoLines = moleculeWidgetLines(awaitOverflowState, 120);
+assert.ok(aoLines.length <= 15, `overflow capped: ${aoLines.length}`);
+const aoAwaitIdx = aoLines.findIndex((l) => l.includes("Task 24: item 23"));
+const aoWaitIdx = aoLines.findIndex((l) => l.includes("Waiting on you: Gate: human"));
+assert.ok(aoAwaitIdx !== -1, `awaited step survives overflow: ${aoLines.join(" | ")}`);
+assert.ok(aoWaitIdx !== -1, `waiting line survives overflow: ${aoLines.join(" | ")}`);
+assert.ok(aoAwaitIdx < aoWaitIdx, "awaited step before the waiting line under overflow");
+assert.ok(
+  aoLines[aoAwaitIdx].includes("\u25d0"),
+  `awaited child still carries the active marker: ${aoLines[aoAwaitIdx]}`,
+);
+assert.ok(aoLines[aoLines.length - 1].includes(" more"), "overflow tail present");
+assert.ok(
+  aIdx !== -1 && aIdx < aLines.findIndex((l) => l.includes("Waiting on you:")),
+  "awaited step rendered as active row",
+);
+
 // ---------- implementing: head row + plan gate first + task beads, current pinned ----------
 const implState = {
   molecule_id: "mol-9",
@@ -313,6 +469,14 @@ assert.ok(iGate > iHead, "plan gate after implement head");
 assert.ok(iLines[iTask2].includes("◐"), "current task marker ◐");
 assert.ok(iLines[iTask1].includes("✓"), "closed task marker ✓");
 assert.ok(!iLines.some((l) => l.includes("Finish development branch")), "finishing steps hidden during implementing");
+// ---------- implementing = tree: impl head, then ├──/└── task rows ----------
+const iC1 = iLines.findIndex((l) => l.includes("├──"));
+const iC2 = iLines.findIndex((l) => l.includes("└──"));
+assert.ok(iHead < iC1 && iC1 < iC2, `tree rows after impl head: ${iLines.join(" | ")}`);
+assert.ok(iLines[iC1].includes("├──"), "first child connector ├──");
+assert.ok(iLines[iC2].includes("└──"), "last child connector └──");
+assert.ok(iLines[iTask2].includes("◐"), "current child keeps ◐ marker");
+assert.ok(iLines[iTask1].includes("✓"), "closed child keeps ✓ marker");
 
 // ---------- finishing: verify/smoke/finish rows only ----------
 const finState = {

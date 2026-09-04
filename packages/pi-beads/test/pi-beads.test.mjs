@@ -147,6 +147,65 @@ case "$1" in
     fi
     exit 0
     ;;
+  dep)
+    # canned dependents for beads_gate_resolve / beads_close cascade tests
+    if [ "$3" = "proj-g1" ] && [ "$5" = "up" ]; then
+      printf '%s\n' '[{"id":"proj-apr","title":"User approves design","issue_type":"task","status":"open","dependency_type":"blocks"}]'
+      exit 0
+    fi
+    # cascade fixtures (Task 2): proj-imp has children proj-t1, proj-t2
+    if [ "$3" = "proj-t1" ] && [ "$5" = "down" ]; then
+      printf '%s\n' '[{"id":"proj-imp","title":"Implement","issue_type":"task","status":"open","dependency_type":"parent-child"}]'
+      exit 0
+    fi
+    if [ "$3" = "proj-t2" ] && [ "$5" = "down" ]; then
+      printf '%s\n' '[{"id":"proj-imp","title":"Implement","issue_type":"task","status":"open","dependency_type":"parent-child"}]'
+      exit 0
+    fi
+    if [ "$3" = "proj-imp" ] && [ "$5" = "up" ]; then
+      printf '%s\n' '[{"id":"proj-t1","title":"Task 1","issue_type":"task","status":"open","dependency_type":"parent-child"},{"id":"proj-t2","title":"Task 2","issue_type":"task","status":"open","dependency_type":"parent-child"}]'
+      exit 0
+    fi
+    if [ "$3" = "proj-imp" ] && [ "$5" = "down" ]; then
+      printf '%s\n' '[{"id":"proj-m1","title":"m1","issue_type":"molecule","status":"open","dependency_type":"parent-child"}]'
+      exit 0
+    fi
+    if [ "$3" = "proj-t9" ] && [ "$5" = "down" ]; then
+      printf '%s\n' '[{"id":"proj-imp2","title":"Implement 2","issue_type":"task","status":"open","dependency_type":"parent-child"}]'
+      exit 0
+    fi
+    if [ "$3" = "proj-imp2" ] && [ "$5" = "up" ]; then
+      printf '%s\n' '[{"id":"proj-t9","title":"Task 9","issue_type":"task","status":"open","dependency_type":"parent-child"}]'
+      exit 0
+    fi
+    if [ "$3" = "proj-imp2" ] && [ "$5" = "down" ]; then
+      printf '%s\n' '[{"id":"proj-m1","title":"m1","issue_type":"molecule","status":"open","dependency_type":"parent-child"}]'
+      exit 0
+    fi
+    if [ "$3" = "proj-g2" ] && [ "$5" = "up" ]; then
+      printf '%s\n' '[{"id":"proj-sap","title":"User reviews written spec","issue_type":"task","status":"open","dependency_type":"blocks"}]'
+      exit 0
+    fi
+    # gate resolve failure path: dep list returns non-JSON (no usable dependents)
+    if [ "$3" = "proj-gx" ] && [ "$5" = "up" ]; then
+      printf '%s\n' 'not json'
+      exit 0
+    fi
+    # mixed-outcome fixture: one gated step closes, one stays blocked
+    if [ "$3" = "proj-gm" ] && [ "$5" = "up" ]; then
+      printf '%s\n' '[{"id":"proj-ok-step","title":"Ok step","issue_type":"task","status":"open","dependency_type":"blocks"},{"id":"proj-bad-step","title":"Bad step","issue_type":"task","status":"open","dependency_type":"blocks"}]'
+      exit 0
+    fi
+    printf '%s\n' '[]'
+    exit 0
+    ;;
+  close)
+    if [ "$2" = "proj-bad-step" ]; then
+      echo "boom" >&2
+      exit 1
+    fi
+    echo "ok"; exit 0
+    ;;
   *) echo "ok"; exit 0 ;;
 esac
 `;
@@ -362,20 +421,74 @@ test("single-repo: beads_show --full changes only the digest, not argv; no emit"
   assert.equal(s.emitted.length, before, "beads_show must not emit");
 });
 
-test("single-repo: beads_gate_resolve runs gate resolve THEN close and emits twice", async () => {
+test("single-repo: beads_gate_resolve resolves gate then closes its gated step (no double-close)", async () => {
   const s = await openSession("single", repoDir);
-  const before = s.emitted.length;
   resetLog();
-  const r = await s.byName.get("beads_gate_resolve").execute("c", { id: "proj-g1" });
+  const r = await s.byName.get("beads_gate_resolve").execute("c", { id: "proj-g2" });
   assert.ok(okResult(r), JSON.stringify(r));
   const invs = invocations();
-  const resolved = invs.findIndex(
-    (iv) => iv[0] === "gate" && iv[1] === "resolve" && iv[2] === "proj-g1",
+  findInvocation(["gate", "resolve", "proj-g2"]);
+  findInvocation(["dep", "list", "proj-g2", "--direction", "up", "--json"]);
+  const closeAt = invs.findIndex((iv) => iv[0] === "close" && iv[1] === "proj-sap");
+  const depAt = invs.findIndex((iv) => iv[0] === "dep" && iv[1] === "list");
+  assert.ok(closeAt >= 0, `expected close of gated step, got ${JSON.stringify(invs)}`);
+  assert.ok(closeAt > depAt, "close AFTER dep list");
+  // bd 1.2.2 gate resolve already closes the gate -> no separate close on the gate id
+  assert.ok(!invs.some((iv) => iv[0] === "close" && iv[1] === "proj-g2"), "no redundant close of the gate");
+  assert.equal(s.emitted.length, 2, "emits after gate resolve AND after closing the gated step");
+});
+
+test("single-repo: beads_gate_resolve reports lookup failure when dep list is non-JSON (no false success)", async () => {
+  const s = await openSession("single", repoDir);
+  resetLog();
+  const r = await s.byName.get("beads_gate_resolve").execute("c", { id: "proj-gx" });
+  assert.ok(okResult(r), JSON.stringify(r));
+  const text = r.content[0].text;
+  assert.match(text, /could not look up gated step/, `expected lookup-failure message, got: ${text}`);
+  assert.ok(!/resolved$/u.test(text.trim()), `must not report plain success, got: ${text}`);
+  assert.ok(
+    !invocations().some((iv) => iv[0] === "close"),
+    "no close attempted when dep list failed",
   );
-  const closed = invs.findIndex((iv) => iv[0] === "close" && iv[1] === "proj-g1");
-  assert.ok(resolved >= 0 && closed >= 0, `expected gate resolve + close in ${JSON.stringify(invs)}`);
-  assert.ok(resolved < closed, "close must come after gate resolve");
-  assert.equal(s.emitted.length, before + 2, "gate_resolve emits after resolve AND after close");
+});
+
+test("single-repo: beads_gate_resolve reports still-blocked steps alongside closed ones", async () => {
+  const s = await openSession("single", repoDir);
+  resetLog();
+  const r = await s.byName.get("beads_gate_resolve").execute("c", { id: "proj-gm" });
+  assert.ok(okResult(r), JSON.stringify(r));
+  const text = r.content[0].text;
+  assert.match(text, /proj-ok-step/, `expected closed step in message, got: ${text}`);
+  assert.match(text, /steps still blocked: proj-bad-step/, `expected still-blocked step in message, got: ${text}`);
+  findInvocation(["close", "proj-ok-step"]);
+  findInvocation(["close", "proj-bad-step"]);
+});
+
+test("single-repo: beads_close does NOT cascade while a sibling task is open", async () => {
+  const s = await openSession("single", repoDir);
+  resetLog();
+  const r = await s.byName.get("beads_close").execute("c", { ids: "proj-t1", reason: "done" });
+  assert.ok(okResult(r), JSON.stringify(r));
+  const invs = invocations();
+  findInvocation(["close", "proj-t1", "-r", "done"]);
+  assert.ok(!invs.some((iv) => iv[0] === "close" && iv[1] === "proj-imp"), "no cascade while sibling open");
+});
+
+test("single-repo: beads_close cascades to close the parent step when its last child closes", async () => {
+  const s = await openSession("single", repoDir);
+  resetLog();
+  // proj-t9 is the only child of proj-imp2 -> closing it closes proj-imp2, but NOT the root
+  const r = await s.byName.get("beads_close").execute("c", { ids: "proj-t9", reason: "done" });
+  assert.ok(okResult(r), JSON.stringify(r));
+  const invs = invocations();
+  findInvocation(["close", "proj-t9", "-r", "done"]);
+  findInvocation(["close", "proj-imp2"]);
+  assert.ok(!invs.some((iv) => iv[0] === "close" && iv[1] === "proj-m1"), "never closes the molecule root");
+  assert.ok(
+    invs.findIndex((iv) => iv[0] === "close" && iv[1] === "proj-imp2") >
+      invs.findIndex((iv) => iv[0] === "close" && iv[1] === "proj-t9"),
+    "parent closed after child",
+  );
 });
 
 test("single-repo: beads_mol_pour builds argv (--var split) and emits", async () => {
@@ -651,14 +764,16 @@ test("umbrella: update/close/reopen/gate create/mol pour route to owning repo an
   assert.ok(s.emitted.every((e) => e === "beads:changed"), `all emits are beads:changed: ${s.emitted}`);
 });
 
-test("umbrella: gate_resolve two-step emits twice (one per afterWrite)", async () => {
+test("umbrella: gate_resolve resolves, lists dependents, closes none when dep list empty, one emit", async () => {
   const s = await openSession("umbrella", projDir);
   const before = s.emitted.length;
   resetLog();
   await s.byName.get("beads_gate_resolve").execute("c", { id: "crmback-g1" });
   findInvocation(["gate", "resolve", "crmback-g1"]);
-  findInvocation(["close", "crmback-g1"]);
-  assert.equal(s.emitted.length, before + 2);
+  findInvocation(["dep", "list", "crmback-g1", "--direction", "up", "--json"]);
+  // no canned dependents for crmback-g1 -> no gated step to close, no redundant gate close
+  assertNoInvocation(["close", "crmback-g1"]);
+  assert.equal(s.emitted.length, before + 1);
 });
 
 test("umbrella: read tools never emit beads:changed", async () => {

@@ -135,16 +135,18 @@ MCP transport, and what comes back is a digest rather than raw JSON.
 | `beads_undep` | Remove a dependency |
 | `beads_comment` | Add a progress comment to an issue |
 | `beads_gate_create` | Open an async gate (`human\|timer\|gh:run\|gh:pr`) blocking an issue until resolved |
-| `beads_gate_resolve` | Resolve a gate and close the gate bead in one call (see below) |
+| `beads_gate_resolve` | Resolve a gate and close the gated step(s) it was blocking in one call (see below) |
 | `beads_mol_pour` | Instantiate a proto formula as a persistent molecule (`bd mol pour`) |
 | `beads_mol_show` | Show a molecule/proto structure (`bd mol show ... --json`), read-only |
 | `beads_mol_current` | Show the current position in a molecule's workflow (`bd mol current ... --json`), read-only |
 
 On current bd (1.2.2) `bd gate resolve` already closes the gate bead — it is
-`bd close <gate>` under a more explicit name. `beads_gate_resolve` still issues a
-second `bd close` afterwards as harmless, idempotent hardening, so the same single
-tool call also works on older bd where resolving only unblocks dependents and the
-gate bead stays open.
+`bd close <gate>` under a more explicit name. `beads_gate_resolve` then looks up
+the gate's open, non-gate dependents with `bd dep list` and closes each one, so a
+resolved gate never leaves its gated step open to fail a later `beads_close`. If
+that lookup comes back unusable (dep list failed), the tool says so instead of
+reporting a success it did not achieve. Separately, `beads_close` cascades to
+close a parent step once no open task-children remain, never the molecule root.
 
 ## Events
 
@@ -154,7 +156,7 @@ with `pi.events.on("beads:changed", handler)`:
 - **`beads:changed`** — emitted with no payload after every successful mutating
 tool call: `beads_create`, `beads_update`, `beads_close`, `beads_reopen`,
 `beads_dep`, `beads_undep`, `beads_comment`, `beads_gate_create`,
-`beads_gate_resolve` (once per step: resolve, then the hardening close), and
+`beads_gate_resolve` (once for the resolve, plus once per gated step it closes), and
 `beads_mol_pour`. Read tools (`beads_ready`, `beads_list`, `beads_show`,
 `beads_deps`, `beads_mol_show`, `beads_mol_current`) never emit.
 

@@ -257,32 +257,57 @@ export function moleculeWidgetLines(state, width, theme) {
 
   const rows = [];
 
-  // A gate as the current step is always shown, pinned, as the waiting line.
-  if (state.current_step && state.current_step.issue_type === "gate") {
-    rows.push({
+  // Awaiting-the-user line: fires whether a gate is the current step OR a ready
+  // Human gate is the next actionable item (no current_step present).
+  const gateCurrent = state.current_step && state.current_step.issue_type === "gate";
+  const readyGate = gateCurrent
+    ? state.current_step
+    : state.steps.find((s) => s.issue_type === "gate" && s.step_status === "ready" && s.status === "open");
+  const awaitingLine = readyGate
+    ? {
+        text: assemble(
+          [
+            { text: "\u23f8 Waiting on you: ", paint: (t) => fg("warning", t) },
+            { text: readyGate.title ?? "", paint: (t) => fg("text", t) },
+          ],
+          width,
+        ).text,
+        closed: false,
+        pinned: true,
+      }
+    : null;
+  if (gateCurrent) rows.push(awaitingLine);
+
+  // The human-review step gated by a ready gate (the nearest pending/open non-gate
+  // step before it) becomes the active row, leading the awaiting line.
+  let awaitingStep = null;
+  if (readyGate && !gateCurrent) {
+    for (let i = state.steps.indexOf(readyGate) - 1; i >= 0; i--) {
+      const s = state.steps[i];
+      if (s.issue_type !== "gate" && s.step_status !== "done" && s.status === "open") {
+        awaitingStep = s;
+        break;
+      }
+    }
+  }
+
+  const stepRow = (step, label) => {
+    const active = step === awaitingStep;
+    return {
       text: assemble(
         [
-          { text: "\u23f8 Waiting on you: ", paint: (t) => fg("warning", t) },
-          { text: state.current_step.title ?? "", paint: (t) => fg("text", t) },
+          {
+            text: `${active ? "\u25d0" : markerFor(step.status)} `,
+            paint: (t) => fg(step.status === "closed" ? "text" : "warning", t),
+          },
+          { text: label ?? step.title ?? "", paint: (t) => fg(step.status === "closed" ? "muted" : "text", t) },
         ],
         width,
       ).text,
-      closed: false,
-      pinned: true,
-    });
-  }
-
-  const stepRow = (step, label) => ({
-    text: assemble(
-      [
-        { text: `${markerFor(step.status)} `, paint: (t) => fg(step.status === "closed" ? "text" : "warning", t) },
-        { text: label ?? step.title ?? "", paint: (t) => fg(step.status === "closed" ? "muted" : "text", t) },
-      ],
-      width,
-    ).text,
-    closed: step.status === "closed",
-    pinned: !!step.is_current,
-  });
+      closed: step.status === "closed",
+      pinned: !!(step.is_current || active),
+    };
+  };
 
   if (phase === "brainstorming") {
     for (const s of resolveRows(state.steps, BRAINSTORM_VIEW)) rows.push(stepRow(s.step, s.label));
@@ -302,10 +327,33 @@ export function moleculeWidgetLines(state, width, theme) {
                 ? 1
                 : 0,
       );
-    for (const kid of kids) rows.push(stepRow(kid));
+    kids.forEach((kid, i) => {
+      const last = i === kids.length - 1;
+      const activeKid = kid === awaitingStep;
+      rows.push({
+        text: assemble(
+          [
+            { text: last ? "\u2514\u2500\u2500 " : "\u251c\u2500\u2500 ", paint: (t) => fg("muted", t) },
+            {
+              text: `${activeKid ? "\u25d0" : markerFor(kid.status)} `,
+              paint: (t) => fg(kid.status === "closed" ? "text" : "warning", t),
+            },
+            { text: kid.title ?? "", paint: (t) => fg(kid.status === "closed" ? "muted" : "text", t) },
+          ],
+          width,
+        ).text,
+        closed: kid.status === "closed",
+        pinned: !!(kid.is_current || activeKid),
+      });
+    });
   } else if (phase === "finishing") {
     for (const s of resolveRows(state.steps, FINISH_VIEW)) rows.push(stepRow(s.step, s.label));
   }
+
+  // Awaiting line when nothing is in progress goes after the view rows, so the
+  // awaited human-review step reads as the active row (a gate that IS the current
+  // step keeps its top placement above the checklist).
+  if (!gateCurrent && awaitingLine) rows.push(awaitingLine);
 
   const { kept, more } = fitRows(rows);
   const lines = [header, ...kept.map((r) => r.text)];

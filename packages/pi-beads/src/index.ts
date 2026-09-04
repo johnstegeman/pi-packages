@@ -850,6 +850,29 @@ export default function piBeadsLean(pi: any) {
     },
   });
 
+  /**
+   * After closing childId, decide whether its parent step should close too.
+   * Returns the parent's id to close, or null. Rules: parent must be a task step
+   * (never molecule root, never a gate); it closes only when no open task-child
+   * remains (the just-closed child excluded). Walks one level per call.
+   */
+  async function parentStepToClose(childId: string, repoDir: string): Promise<string | null> {
+    const r = await bd(["dep", "list", childId, "--direction", "down", "--json"], repoDir);
+    const blockers = Array.isArray(jparse(r.out)) ? (jparse(r.out) as any[]) : [];
+    const parent = blockers.find(
+      (b: any) =>
+        b && b.dependency_type === "parent-child" && b.issue_type === "task" && b.status !== "closed",
+    );
+    if (!parent) return null;
+    const k = await bd(["dep", "list", String(parent.id), "--direction", "up", "--json"], repoDir);
+    const children = Array.isArray(jparse(k.out)) ? (jparse(k.out) as any[]) : [];
+    const openTaskChildren = children.filter(
+      (c: any) =>
+        c && c.dependency_type === "parent-child" && c.issue_type === "task" && c.status !== "closed" && c.id !== childId,
+    );
+    return openTaskChildren.length === 0 ? String(parent.id) : null;
+  }
+
   pi.registerTool({
     name: TOOL.close,
     label: "Beads close",
@@ -893,6 +916,18 @@ export default function piBeadsLean(pi: any) {
         }
         await afterWrite(dir);
         closedIds.push(...rids);
+        // cascade: closing a task may close its parent step once no open task-children remain
+        for (const cid of rids) {
+          let nxt = await parentStepToClose(cid, dir);
+          while (nxt) {
+            const rc = await bd(["close", nxt], dir);
+            if (!rc.ok) break; // defensively stop: another worker may have closed it
+            await afterWrite(dir);
+            closedIds.push(nxt);
+            const prev = nxt;
+            nxt = await parentStepToClose(prev, dir);
+          }
+        }
       }
       if (failure) return textResult(failure);
       return textResult(`closed ${closedIds.join(", ")}`);
@@ -984,7 +1019,7 @@ export default function piBeadsLean(pi: any) {
     name: TOOL.gateResolve,
     label: "Beads gate resolve",
     description:
-      "Resolve a human gate (unblocks dependents) and close the gate bead itself in one call, so dependents' later beads_close never fails with 'blocked by open issues'.",
+      "Resolve a human gate (unblocks dependents) and close the gated step(s) it was blocking in one call, so dependents' later beads_close never fails with 'blocked by open issues'.",
     parameters: {
       type: "object",
       properties: { id: { type: "string", description: "Gate issue id" } },
@@ -992,18 +1027,48 @@ export default function piBeadsLean(pi: any) {
     },
     async execute(_id: string, params: any) {
       if (!params?.id) return textResult("id is required");
-      const dir = dirForPrefix(String(params.id));
-      if (!dir) return textResult(`unknown repo for id '${params.id}'`);
-      const rr = await bd(["gate", "resolve", String(params.id)], dir);
+      const id = String(params.id);
+      const dir = dirForPrefix(id);
+      if (!dir) return textResult(`unknown repo for id '${id}'`);
+      const rr = await bd(["gate", "resolve", id], dir);
       if (!rr.ok) return textResult(`bd gate resolve failed: ${rr.err}`);
       await afterWrite(dir);
-      const rc = await bd(["close", String(params.id)], dir);
-      if (!rc.ok)
+      // bd 1.2.2: `gate resolve` already closes the gate. Don't double-close.
+      // Instead close the step(s) this gate was gating (its open non-gate dependents),
+      // so nothing resolved-but-left-open blocks later beads_close calls.
+      const dep = await bd(["dep", "list", id, "--direction", "up", "--json"], dir);
+      const depList = jparse(dep.out);
+      if (!dep.ok || !Array.isArray(depList)) {
+        return textResult(`gate ${id} resolved but could not look up gated step (dep list failed)`);
+      }
+      const dependentList = depList as any[];
+      const gated = dependentList.filter(
+        (x: any) => x && x.id != null && x.issue_type !== "gate" && x.status !== "closed",
+      );
+      const closed: string[] = [];
+      const stillBlocked: string[] = [];
+      for (const g of gated) {
+        const rc = await bd(["close", String(g.id)], dir);
+        if (rc.ok) {
+          closed.push(String(g.id));
+          await afterWrite(dir);
+        } else {
+          stillBlocked.push(String(g.id));
+        }
+      }
+      if (closed.length === 0) {
         return textResult(
-          `gate resolved but close failed (retry beads_close on ${params.id}): ${rc.err}`,
+          stillBlocked.length
+            ? `gate ${id} resolved; gated step(s) still blocked: ${stillBlocked.join(", ")}`
+            : `gate ${id} resolved`,
         );
-      await afterWrite(dir);
-      return textResult(`gate ${params.id} resolved and closed`);
+      }
+      return textResult(
+        stillBlocked.length
+          ? `gate ${id} resolved and gated step ${closed.join(", ")} closed; ` +
+              `steps still blocked: ${stillBlocked.join(", ")}`
+          : `gate ${id} resolved and gated step ${closed.join(", ")} closed`,
+      );
     },
   });
 
