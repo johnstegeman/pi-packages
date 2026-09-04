@@ -6,7 +6,7 @@
     "pi-package"
   ],
   "scripts": {
-    "test": "biome check . && node extensions/beads-molecule-widget.test.mjs",
+    "test": "biome check . && node extensions/beads-molecule-widget.test.mjs && node extensions/phase-commands.test.mjs",
     "lint": "biome check .",
     "check": "biome check ."
   },
