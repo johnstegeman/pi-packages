@@ -246,6 +246,82 @@ const gLines = moleculeWidgetLines(gateCurrent, 120);
 assert.ok(gLines.some((l) => l.includes("Waiting on you:") && l.includes("Gate: human")));
 assert.ok(gLines.some((l) => l.includes("Ask clarifying questions")));
 
+// ---------- awaiting human: no current step, ready Human gate -> Waiting on you line ----------
+const awaitState = {
+  molecule_id: "bd-mol-a1",
+  molecule_title: "superpowers-workflow",
+  current_step: null,
+  next_step: { id: "bd-mol-g2", title: "Gate: human", status: "open", issue_type: "gate" },
+  doneCount: 6,
+  total: 8,
+  steps: [
+    {
+      id: "a1",
+      title: "Explore project context: widget fixes",
+      status: "closed",
+      issue_type: "task",
+      created_at: "",
+      step_status: "done",
+      is_current: false,
+    },
+    {
+      id: "a2",
+      title: "Write spec to docs/superpowers/specs/",
+      status: "closed",
+      issue_type: "task",
+      created_at: "",
+      step_status: "done",
+      is_current: false,
+    },
+    {
+      id: "a3",
+      title: "Spec self-review",
+      status: "closed",
+      issue_type: "task",
+      created_at: "",
+      step_status: "done",
+      is_current: false,
+    },
+    {
+      id: "a4",
+      title: "User reviews written spec",
+      status: "open",
+      issue_type: "task",
+      created_at: "",
+      step_status: "pending",
+      is_current: false,
+    },
+    {
+      id: "a5",
+      title: "Gate: human",
+      status: "open",
+      issue_type: "gate",
+      created_at: "",
+      step_status: "ready",
+      is_current: false,
+    },
+    {
+      id: "a6",
+      title: "Implement widget fixes",
+      status: "open",
+      issue_type: "task",
+      created_at: "",
+      step_status: "pending",
+      is_current: false,
+    },
+  ],
+};
+const aLines = moleculeWidgetLines(awaitState, 120);
+assert.ok(
+  aLines.some((l) => l.includes("Waiting on you:") && l.includes("Gate: human")),
+  aLines.join(" | "),
+);
+const aIdx = aLines.findIndex((l) => l.includes("User reviews written spec"));
+assert.ok(
+  aIdx !== -1 && aIdx < aLines.findIndex((l) => l.includes("Waiting on you:")),
+  "awaited step rendered as active row",
+);
+
 // ---------- implementing: head row + plan gate first + task beads, current pinned ----------
 const implState = {
   molecule_id: "mol-9",
