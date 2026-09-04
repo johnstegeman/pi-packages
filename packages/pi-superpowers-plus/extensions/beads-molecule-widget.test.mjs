@@ -247,10 +247,12 @@ assert.ok(headerLines[order[0]].includes("✓"), "done explore row: ✓");
 assert.ok(headerLines[order[1]].includes("◐"), "current clarify row: ◐");
 
 // ---------- gate as current => waiting line, checklist still shown ----------
-const gateCurrent = { ...bstate, current_step: { id: "g", title: "Gate: human", issue_type: "gate" } };
+const gateCurrent = { ...bstate, current_step: { id: "gate-g", title: "Gate: human", issue_type: "gate" } };
 const gLines = moleculeWidgetLines(gateCurrent, 120);
 assert.ok(gLines.some((l) => l.includes("Waiting on you:") && l.includes("Gate: human")));
 assert.ok(gLines.some((l) => l.includes("Ask clarifying questions")));
+const gWait = gLines.find((l) => l.includes("Waiting on you:"));
+assert.ok(gWait && gWait.includes("gate-g"), `gate-current footer falls back to gate id (got '${gWait}')`);
 
 // ---------- awaiting human: no current step, ready Human gate -> Waiting on you line ----------
 const awaitState = {
@@ -318,10 +320,10 @@ const awaitState = {
   ],
 };
 const aLines = moleculeWidgetLines(awaitState, 120);
-assert.ok(
-  aLines.some((l) => l.includes("Waiting on you:") && l.includes("Gate: human")),
-  aLines.join(" | "),
-);
+const aWait = aLines.find((l) => l.includes("Waiting on you:"));
+assert.ok(aWait && aWait.includes("User reviews written spec"), `footer shows gated step title (got '${aWait}')`);
+assert.ok(aWait && !aWait.includes("Gate: human"), `footer does not expose raw gate title (got '${aWait}')`);
+assert.ok(aWait && aWait.includes("a4"), `footer carries the gated step id (got '${aWait}')`);
 const aIdx = aLines.findIndex((l) => l.includes("User reviews written spec"));
 assert.ok(
   aIdx !== -1 && aIdx < aLines.findIndex((l) => l.includes("Waiting on you:")),
@@ -339,10 +341,42 @@ assert.ok(
   anLines.some((l) => l.includes("Waiting on you:") && l.includes("Gate: human")),
   `waiting line still pinned: ${anLines.join(" | ")}`,
 );
+const anWait = anLines.find((l) => l.includes("Waiting on you:"));
+assert.ok(
+  anWait && anWait.includes("a5"),
+  `no-precursor awaiting line falls back to the gate id (got '${anWait}')`,
+);
 assert.ok(
   !anLines.some((l) => l.includes("\u25d0")),
   `no mis-associated active row when no preceding open gated step: ${anLines.join(" | ")}`,
 );
+
+// ---------- Finding 6: footer shows the gated human-review step, not raw gate title ----------
+{
+  const approveState = {
+    molecule_id: "pi-packages-mol-27qs",
+    molecule_title: "superpowers-workflow",
+    current_step: null,
+    next_step: { id: "g.1", title: "Gate: human", status: "open", issue_type: "gate" },
+    doneCount: 4,
+    total: 7,
+    steps: [
+      { id: "t1", title: "Explore project context: footer test", status: "closed", issue_type: "task", created_at: "", step_status: "done", is_current: false },
+      { id: "t2", title: "Ask clarifying questions", status: "closed", issue_type: "task", created_at: "", step_status: "done", is_current: false },
+      { id: "t3", title: "Propose approaches", status: "closed", issue_type: "task", created_at: "", step_status: "done", is_current: false },
+      { id: "t4", title: "Present design sections", status: "closed", issue_type: "task", created_at: "", step_status: "done", is_current: false },
+      { id: "t5", title: "User approves design", status: "open", issue_type: "task", created_at: "", step_status: "pending", is_current: false },
+      { id: "g.1", title: "Gate: human", status: "open", issue_type: "gate", created_at: "", step_status: "ready", is_current: false },
+      { id: "t6", title: "Write spec to docs/superpowers/specs/", status: "open", issue_type: "task", created_at: "", step_status: "pending", is_current: false },
+    ],
+  };
+  const approveLines = moleculeWidgetLines(approveState, 200);
+  const foot = approveLines.find((l) => l.includes("Waiting on you:"));
+  assert.ok(foot, `awaiting footer present: ${approveLines.join(" | ")}`);
+  assert.ok(foot.includes("User approves design"), `footer shows gated step title (got '${foot}')`);
+  assert.ok(!foot.includes("Gate: human"), `footer does not expose raw gate title (got '${foot}')`);
+  assert.ok(foot.includes("t5"), `footer carries the gated step id (got '${foot}')`);
+}
 
 // ---------- awaiting human + overflow: awaited step and waiting line stay pinned, in order ----------
 const awaitOverflowState = {
@@ -394,9 +428,13 @@ const awaitOverflowState = {
 const aoLines = moleculeWidgetLines(awaitOverflowState, 120);
 assert.ok(aoLines.length <= 15, `overflow capped: ${aoLines.length}`);
 const aoAwaitIdx = aoLines.findIndex((l) => l.includes("Task 24: item 23"));
-const aoWaitIdx = aoLines.findIndex((l) => l.includes("Waiting on you: Gate: human"));
+const aoWaitIdx = aoLines.findIndex((l) => l.includes("Waiting on you:"));
 assert.ok(aoAwaitIdx !== -1, `awaited step survives overflow: ${aoLines.join(" | ")}`);
 assert.ok(aoWaitIdx !== -1, `waiting line survives overflow: ${aoLines.join(" | ")}`);
+const aoWait = aoLines[aoWaitIdx];
+assert.ok(aoWait.includes("Task 24: item 23"), `footer shows gated step title (got '${aoWait}')`);
+assert.ok(!aoWait.includes("Gate: human"), `footer does not expose raw gate title (got '${aoWait}')`);
+assert.ok(aoWait.includes("o.i.24"), `footer carries the gated step id (got '${aoWait}')`);
 assert.ok(aoAwaitIdx < aoWaitIdx, "awaited step before the waiting line under overflow");
 assert.ok(
   aoLines[aoAwaitIdx].includes("\u25d0"),
@@ -678,7 +716,7 @@ for (const line of moleculeWidgetLines(implState, 30)) assert.ok(displayWidth(li
   const awaitLines2 = moleculeWidgetLines(awaitState, 200);
   const waitLine = awaitLines2.find((l) => l.includes("Waiting on you:"));
   assert.ok(waitLine, `awaiting footer present: ${awaitLines2.join(" | ")}`);
-  assert.ok(waitLine.includes("a5"), `awaiting footer carries gate id (got '${waitLine}')`);
+  assert.ok(waitLine.includes("a4"), `awaiting footer carries gated step id (got '${waitLine}')`);
 }
 
 // ---------- theme passthrough ----------

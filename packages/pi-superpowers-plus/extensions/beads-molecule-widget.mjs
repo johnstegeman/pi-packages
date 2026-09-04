@@ -326,24 +326,11 @@ export function moleculeWidgetLines(state, width, theme) {
   const readyGate = gateCurrent
     ? state.current_step
     : state.steps.find((s) => s.issue_type === "gate" && s.step_status === "ready" && s.status === "open");
-  const awaitingLine = readyGate
-    ? {
-        text: assemble(
-          [
-            { text: "\u23f8 Waiting on you: ", paint: (t) => fg("warning", t) },
-            { text: readyGate.title ?? "", paint: (t) => fg("text", t) },
-            { text: `  ${readyGate.id ?? ""}`, paint: (t) => fg("muted", t) },
-          ],
-          width,
-        ).text,
-        closed: false,
-        pinned: true,
-      }
-    : null;
-  if (gateCurrent) rows.push(awaitingLine);
 
   // The human-review step gated by a ready gate (the nearest pending/open non-gate
-  // step before it) becomes the active row, leading the awaiting line.
+  // step before it) becomes the active row, leading the awaiting line. Compute it
+  // BEFORE the awaiting line so the footer can name this step (what the user must
+  // actually do) instead of the raw "Gate: human" auto-title.
   let awaitingStep = null;
   if (readyGate && !gateCurrent) {
     for (let i = state.steps.indexOf(readyGate) - 1; i >= 0; i--) {
@@ -354,6 +341,25 @@ export function moleculeWidgetLines(state, width, theme) {
       }
     }
   }
+
+  const awaitingLine = readyGate
+    ? {
+        text: assemble(
+          [
+            { text: "\u23f8 Waiting on you: ", paint: (t) => fg("warning", t) },
+            // Name the gated human-review step; fall back to the gate title/id only
+            // when no pending open non-gate step precedes it (e.g. the gate IS the
+            // current step).
+            { text: (awaitingStep ?? readyGate).title ?? "", paint: (t) => fg("text", t) },
+            { text: `  ${(awaitingStep ?? readyGate).id ?? ""}`, paint: (t) => fg("muted", t) },
+          ],
+          width,
+        ).text,
+        closed: false,
+        pinned: true,
+      }
+    : null;
+  if (gateCurrent) rows.push(awaitingLine);
 
   const stepRow = (step, label) => {
     const active = step === awaitingStep;
