@@ -332,6 +332,7 @@ export function moleculeWidgetLines(state, width, theme) {
           [
             { text: "\u23f8 Waiting on you: ", paint: (t) => fg("warning", t) },
             { text: readyGate.title ?? "", paint: (t) => fg("text", t) },
+            { text: `  ${readyGate.id ?? ""}`, paint: (t) => fg("muted", t) },
           ],
           width,
         ).text,
@@ -364,6 +365,7 @@ export function moleculeWidgetLines(state, width, theme) {
             paint: (t) => fg(step.status === "closed" ? "text" : "warning", t),
           },
           { text: label ?? step.title ?? "", paint: (t) => fg(step.status === "closed" ? "muted" : "text", t) },
+          { text: `  ${step.id ?? ""}`, paint: (t) => fg("muted", t) },
         ],
         width,
       ).text,
@@ -402,6 +404,7 @@ export function moleculeWidgetLines(state, width, theme) {
               paint: (t) => fg(kid.status === "closed" ? "text" : "warning", t),
             },
             { text: kid.title ?? "", paint: (t) => fg(kid.status === "closed" ? "muted" : "text", t) },
+            { text: `  ${kid.id ?? ""}`, paint: (t) => fg("muted", t) },
           ],
           width,
         ).text,

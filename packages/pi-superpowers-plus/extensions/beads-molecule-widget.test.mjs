@@ -611,6 +611,76 @@ for (const line of manyLines) assert.ok(displayWidth(line) <= 300);
 // width truncation still enforced at narrow width
 for (const line of moleculeWidgetLines(implState, 30)) assert.ok(displayWidth(line) <= 30);
 
+// ---------- Finding 7: bead ids on step rows ----------
+// stepRow rows (brainstorming formula steps) append the bead id after the title
+{
+  const idState = {
+    molecule_id: "pi-packages-mol-abc123",
+    molecule_title: "superpowers-workflow",
+    current_step: {
+      id: "pi-packages-mol-abc123.2",
+      title: "Ask clarifying questions",
+      status: "in_progress",
+      issue_type: "task",
+    },
+    next_step: null,
+    doneCount: 1,
+    total: 3,
+    steps: [
+      {
+        id: "pi-packages-mol-abc123.1",
+        title: "Explore project context: bead ids restore",
+        status: "closed",
+        issue_type: "task",
+        created_at: "",
+        step_status: "done",
+        is_current: false,
+      },
+      {
+        id: "pi-packages-mol-abc123.2",
+        title: "Ask clarifying questions",
+        status: "in_progress",
+        issue_type: "task",
+        created_at: "",
+        step_status: "current",
+        is_current: true,
+      },
+    ],
+  };
+  const idLines = moleculeWidgetLines(idState, 200);
+  const exploreRow = idLines.find((l) => l.includes("Explore project context"));
+  assert.ok(
+    exploreRow && exploreRow.includes("pi-packages-mol-abc123.1"),
+    `done step row carries its bead id (got '${exploreRow}')`,
+  );
+  const clarifyRow = idLines.find((l) => l.includes("Ask clarifying questions"));
+  assert.ok(
+    clarifyRow && clarifyRow.includes("pi-packages-mol-abc123.2"),
+    `current step row carries its bead id (got '${clarifyRow}')`,
+  );
+}
+
+// implementing-view kid-task rows carry the kid's full id (starts with <impl.id>.)
+{
+  const kidLines = moleculeWidgetLines(implState, 200);
+  assert.ok(
+    kidLines.some((l) => l.includes("mol-9.i.2") && l.includes("Task 2: build it")),
+    `impl kid row carries its full bead id: ${kidLines.join(" | ")}`,
+  );
+  assert.ok(
+    kidLines.some((l) => l.includes("mol-9.i.3") && l.includes("Task 1: setup")),
+    `impl kid row carries its full bead id: ${kidLines.join(" | ")}`,
+  );
+}
+
+// awaiting footer line carries the ready gate's bead id
+{
+  const awaitLines2 = moleculeWidgetLines(awaitState, 200);
+  const waitLine = awaitLines2.find((l) => l.includes("Waiting on you:"));
+  assert.ok(waitLine, `awaiting footer present: ${awaitLines2.join(" | ")}`);
+  assert.ok(waitLine.includes("a5"), `awaiting footer carries gate id (got '${waitLine}')`);
+}
+
 // ---------- theme passthrough ----------
 const THEME = { fg: (color, t) => (color === "accent" ? t.toUpperCase() : t) };
 const themed = moleculeWidgetLines(bstate, 120, THEME);
