@@ -439,7 +439,7 @@ assert.ok(
   assert.ok(foot.includes("t5"), `footer carries the gated step id (got '${foot}')`);
 }
 
-// ---------- awaiting human + overflow: awaited step and waiting line stay pinned, in order ----------
+// ---------- implementing mid-work + overflow: no waiting line, deepest ready kid leads, tail present ----------
 const awaitOverflowState = {
   molecule_id: "bd-mol-o1",
   molecule_title: "superpowers-workflow",
@@ -1419,5 +1419,80 @@ assert.equal(
   assert.ok(
     midLines.some((l) => l.includes("\u25d0")),
     `in-progress step still leads: ${midLines.join(" | ")}`,
+  );
+}
+
+// ---------- finishing: genuine wait on the smoke-test gate => waiting line ----------
+{
+  const smokeWaitState = {
+    molecule_id: "bd-mol-sw",
+    molecule_title: "superpowers-workflow",
+    current_step: null,
+    next_step: { id: "sw.g", title: "Gate: human", status: "open", issue_type: "gate" },
+    doneCount: 4,
+    total: 7,
+    steps: [
+      {
+        id: "sw.1",
+        title: "Implement widget fixes",
+        status: "closed",
+        issue_type: "task",
+        created_at: "",
+        step_status: "done",
+        is_current: false,
+        labels: [],
+      },
+      {
+        id: "sw.2",
+        title: "Verify",
+        status: "closed",
+        issue_type: "task",
+        created_at: "",
+        step_status: "done",
+        is_current: false,
+        labels: [],
+      },
+      {
+        id: "sw.3",
+        title: "Smoke test / manual QA sign-off",
+        status: "open",
+        issue_type: "task",
+        created_at: "",
+        step_status: "pending",
+        is_current: false,
+        labels: [],
+      },
+      {
+        id: "sw.g",
+        title: "Gate: human",
+        status: "open",
+        issue_type: "gate",
+        created_at: "",
+        step_status: "ready",
+        is_current: false,
+        labels: ["step:gate-smoke-test-approved"],
+      },
+      {
+        id: "sw.4",
+        title: "Finish development branch",
+        status: "open",
+        issue_type: "task",
+        created_at: "",
+        step_status: "pending",
+        is_current: false,
+        labels: [],
+      },
+    ],
+  };
+  const swLines = moleculeWidgetLines(smokeWaitState, 120);
+  const swWait = swLines.find((l) => l.includes("Waiting on you:"));
+  assert.ok(swWait, `smoke wait footer present: ${swLines.join(" | ")}`);
+  assert.ok(swWait.includes("Smoke test / manual QA sign-off"), `footer names smoke step (got '${swWait}')`);
+  assert.ok(!swWait.includes("Gate: human"), `footer does not expose raw gate title (got '${swWait}')`);
+  assert.ok(swWait.includes("sw.3"), `footer carries smoke step id (got '${swWait}')`);
+  const swIdx = swLines.findIndex((l) => l.includes("Smoke test / manual QA sign-off"));
+  assert.ok(
+    swIdx !== -1 && swLines[swIdx].includes("\u25d0"),
+    `smoke row carries the active marker: ${swLines[swIdx]}`,
   );
 }
