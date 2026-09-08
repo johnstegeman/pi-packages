@@ -253,6 +253,30 @@ const PHASE_LABEL = {
   finishing: "Finishing",
 };
 
+/** Plan-order chain for the current phase (brainstorm/finish views; implement head + kids). */
+function chainForPhase(state, phase) {
+  if (phase === "brainstorming") return resolveRows(state.steps, BRAINSTORM_VIEW).map((v) => v.step);
+  if (phase === "finishing") return resolveRows(state.steps, FINISH_VIEW).map((v) => v.step);
+  const impl = state.steps.find((s) => /^Implement( |$)/.test(s.title ?? ""));
+  if (!impl) return [];
+  return [
+    impl,
+    ...state.steps
+      .filter((s) => s.id.startsWith(`${impl.id}.`))
+      .sort((a, b) =>
+        (a.created_at ?? "") < (b.created_at ?? "")
+          ? -1
+          : (a.created_at ?? "") > (b.created_at ?? "")
+            ? 1
+            : a.id < b.id
+              ? -1
+              : a.id > b.id
+                ? 1
+                : 0,
+      ),
+  ];
+}
+
 /** Human gates (by formula label) → the review step each one blocks. */
 export const GATE_TO_REVIEW_STEP = {
   "step:gate-design-approved": "User approves design",
@@ -348,45 +372,28 @@ export function moleculeWidgetLines(state, width, theme) {
 
   const rows = [];
 
-  // Awaiting-the-user line: fires whether a gate is the current step OR a ready
-  // Human gate is the next actionable item (no current_step present).
+  // Awaiting-the-user line: a genuine wait only — either the current step IS a
+  // human gate, or a gated human-review step is the actual next open step with
+  // nothing in progress (order-independent; gates are "ready" whenever open, so
+  // gate readiness alone never proves a wait).
   const gateCurrent = state.current_step && state.current_step.issue_type === "gate";
-  const readyGate = gateCurrent
-    ? state.current_step
-    : state.steps.find((s) => s.issue_type === "gate" && s.step_status === "ready" && s.status === "open");
-
-  // The human-review step gated by a ready gate (the nearest pending/open non-gate
-  // step before it) becomes the active row, leading the awaiting line. Compute it
-  // BEFORE the awaiting line so the footer can name this step (what the user must
-  // actually do) instead of the raw "Gate: human" auto-title.
-  let awaitingStep = null;
-  if (readyGate && !gateCurrent) {
-    for (let i = state.steps.indexOf(readyGate) - 1; i >= 0; i--) {
-      const s = state.steps[i];
-      if (s.issue_type !== "gate" && s.step_status !== "done" && s.status === "open") {
-        awaitingStep = s;
-        break;
-      }
-    }
-  }
-
-  const awaitingLine = readyGate
-    ? {
-        text: assemble(
-          [
-            { text: "\u23f8 Waiting on you: ", paint: (t) => fg("warning", t) },
-            // Name the gated human-review step; fall back to the gate title/id only
-            // when no pending open non-gate step precedes it (e.g. the gate IS the
-            // current step).
-            { text: (awaitingStep ?? readyGate).title ?? "", paint: (t) => fg("text", t) },
-            { text: `  ${(awaitingStep ?? readyGate).id ?? ""}`, paint: (t) => fg("muted", t) },
-          ],
-          width,
-        ).text,
-        closed: false,
-        pinned: true,
-      }
-    : null;
+  const chainOrder = chainForPhase(state, phase);
+  const awaitingStep = gateCurrent ? null : waitingReviewStep(state, chainOrder);
+  const awaitingLine =
+    gateCurrent || awaitingStep
+      ? {
+          text: assemble(
+            [
+              { text: "\u23f8 Waiting on you: ", paint: (t) => fg("warning", t) },
+              { text: (awaitingStep ?? state.current_step)?.title ?? "", paint: (t) => fg("text", t) },
+              { text: `  ${(awaitingStep ?? state.current_step)?.id ?? ""}`, paint: (t) => fg("muted", t) },
+            ],
+            width,
+          ).text,
+          closed: false,
+          pinned: true,
+        }
+      : null;
 
   // Close-as-you-go fallback "current" step: when the previous step was just closed
   // and its successor isn't claimed yet, bd reports NO is_current step for a moment
@@ -431,21 +438,8 @@ export function moleculeWidgetLines(state, width, theme) {
     const lead = leadCandidate(view.map((v) => v.step));
     for (const s of view) rows.push(stepRow(s.step, s.label, lead));
   } else if (phase === "implementing") {
-    const impl = state.steps.find((s) => /^Implement( |$)/.test(s.title ?? ""));
+    const [impl, ...kids] = chainOrder;
     if (impl) rows.push(stepRow(impl));
-    const kids = state.steps
-      .filter((s) => impl && s.id.startsWith(`${impl.id}.`))
-      .sort((a, b) =>
-        (a.created_at ?? "") < (b.created_at ?? "")
-          ? -1
-          : (a.created_at ?? "") > (b.created_at ?? "")
-            ? 1
-            : a.id < b.id
-              ? -1
-              : a.id > b.id
-                ? 1
-                : 0,
-      );
     // Kids only ever lead when the impl head is NOT the current step — when the
     // head carries is_current its ◐ must be the only active row.
     const lead = impl.is_current ? null : leadCandidate(kids);

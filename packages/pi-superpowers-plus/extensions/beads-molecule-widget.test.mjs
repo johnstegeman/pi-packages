@@ -50,7 +50,13 @@ const RAW = JSON.stringify([
         is_current: true,
       },
       {
-        issue: { id: "bd-mol-8y2", title: "Gate: human", issue_type: "gate", status: "open", labels: ["step:gate-design-approved"] },
+        issue: {
+          id: "bd-mol-8y2",
+          title: "Gate: human",
+          issue_type: "gate",
+          status: "open",
+          labels: ["step:gate-design-approved"],
+        },
         status: "ready",
         is_current: false,
       },
@@ -306,6 +312,7 @@ const awaitState = {
       title: "Gate: human",
       status: "open",
       issue_type: "gate",
+      labels: ["step:gate-spec-approved"],
       created_at: "",
       step_status: "ready",
       is_current: false,
@@ -340,11 +347,9 @@ const awaitNullState = {
 };
 const anLines = moleculeWidgetLines(awaitNullState, 120);
 assert.ok(
-  anLines.some((l) => l.includes("Waiting on you:") && l.includes("Gate: human")),
-  `waiting line still pinned: ${anLines.join(" | ")}`,
+  !anLines.some((l) => l.includes("Waiting on you:")),
+  `stale gate (gated step done) must NOT show a waiting line: ${anLines.join(" | ")}`,
 );
-const anWait = anLines.find((l) => l.includes("Waiting on you:"));
-assert.ok(anWait && anWait.includes("a5"), `no-precursor awaiting line falls back to the gate id (got '${anWait}')`);
 assert.ok(
   !anLines.some((l) => l.includes("\u25d0")),
   `no mis-associated active row when no preceding open gated step: ${anLines.join(" | ")}`,
@@ -410,6 +415,7 @@ assert.ok(
         title: "Gate: human",
         status: "open",
         issue_type: "gate",
+        labels: ["step:gate-design-approved"],
         created_at: "",
         step_status: "ready",
         is_current: false,
@@ -456,8 +462,8 @@ const awaitOverflowState = {
       title: `Task ${i + 1}: item ${i}`,
       status: "open",
       issue_type: "task",
-      created_at: `t${i + 1}`,
-      step_status: "pending",
+      created_at: `t${String(i + 1).padStart(2, "0")}`,
+      step_status: "ready",
       is_current: false,
     })),
     {
@@ -482,19 +488,13 @@ const awaitOverflowState = {
 };
 const aoLines = moleculeWidgetLines(awaitOverflowState, 120);
 assert.ok(aoLines.length <= 15, `overflow capped: ${aoLines.length}`);
-const aoAwaitIdx = aoLines.findIndex((l) => l.includes("Task 24: item 23"));
-const aoWaitIdx = aoLines.findIndex((l) => l.includes("Waiting on you:"));
-assert.ok(aoAwaitIdx !== -1, `awaited step survives overflow: ${aoLines.join(" | ")}`);
-assert.ok(aoWaitIdx !== -1, `waiting line survives overflow: ${aoLines.join(" | ")}`);
-const aoWait = aoLines[aoWaitIdx];
-assert.ok(aoWait.includes("Task 24: item 23"), `footer shows gated step title (got '${aoWait}')`);
-assert.ok(!aoWait.includes("Gate: human"), `footer does not expose raw gate title (got '${aoWait}')`);
-assert.ok(aoWait.includes("o.i.24"), `footer carries the gated step id (got '${aoWait}')`);
-assert.ok(aoAwaitIdx < aoWaitIdx, "awaited step before the waiting line under overflow");
 assert.ok(
-  aoLines[aoAwaitIdx].includes("\u25d0"),
-  `awaited child still carries the active marker: ${aoLines[aoAwaitIdx]}`,
+  !aoLines.some((l) => l.includes("Waiting on you:")),
+  `in-progress implementing phase with open ready gate is NOT a wait: ${aoLines.join(" | ")}`,
 );
+const aoKidIdx = aoLines.findIndex((l) => l.includes("Task 24: item 23"));
+assert.ok(aoKidIdx !== -1, `deepest kid still rendered: ${aoLines.join(" | ")}`);
+assert.ok(aoLines[aoKidIdx].includes("\u25d0"), `deepest open kid still leads: ${aoLines[aoKidIdx]}`);
 assert.ok(aoLines[aoLines.length - 1].includes(" more"), "overflow tail present");
 assert.ok(
   aIdx !== -1 && aIdx < aLines.findIndex((l) => l.includes("Waiting on you:")),
@@ -1327,14 +1327,39 @@ console.log("beads-molecule-widget: all assertions passed");
 // ---------- waitingReviewStep: genuine waits only ----------
 const reviewState = {
   steps: [
-    { id: "r1", title: "Explore project context: x", status: "closed", issue_type: "task", step_status: "done", labels: [] },
+    {
+      id: "r1",
+      title: "Explore project context: x",
+      status: "closed",
+      issue_type: "task",
+      step_status: "done",
+      labels: [],
+    },
     { id: "r2", title: "User approves design", status: "open", issue_type: "task", step_status: "pending", labels: [] },
-    { id: "r3", title: "Gate: human", status: "open", issue_type: "gate", step_status: "ready", labels: ["step:gate-design-approved"] },
-    { id: "r4", title: "Write spec to docs/superpowers/specs/", status: "open", issue_type: "task", step_status: "pending", labels: [] },
+    {
+      id: "r3",
+      title: "Gate: human",
+      status: "open",
+      issue_type: "gate",
+      step_status: "ready",
+      labels: ["step:gate-design-approved"],
+    },
+    {
+      id: "r4",
+      title: "Write spec to docs/superpowers/specs/",
+      status: "open",
+      issue_type: "task",
+      step_status: "pending",
+      labels: [],
+    },
   ],
 };
 const reviewChain = [reviewState.steps[0], reviewState.steps[1], reviewState.steps[3]]; // view/plan order, gates excluded
-assert.equal(waitingReviewStep(reviewState, reviewChain), reviewState.steps[1], "gated review step is the awaited step");
+assert.equal(
+  waitingReviewStep(reviewState, reviewChain),
+  reviewState.steps[1],
+  "gated review step is the awaited step",
+);
 
 // in-progress task => not waiting
 assert.equal(
@@ -1351,7 +1376,11 @@ assert.equal(
 );
 
 // first open step is not a review step => not waiting
-assert.equal(waitingReviewStep(reviewState, [reviewState.steps[0], reviewState.steps[3]]), null, "non-review first open step is no wait");
+assert.equal(
+  waitingReviewStep(reviewState, [reviewState.steps[0], reviewState.steps[3]]),
+  null,
+  "non-review first open step is no wait",
+);
 
 // stale gate: review step already done => not waiting
 {
@@ -1373,3 +1402,22 @@ assert.equal(
   null,
   "closed gate is no wait",
 );
+
+// ---------- regression: task in_progress + open ready gate => NO waiting line ----------
+{
+  const midWorkState = {
+    ...awaitState,
+    steps: awaitState.steps.map((s) =>
+      s.id === "a1" ? { ...s, status: "in_progress", step_status: "current", is_current: true } : s,
+    ),
+  };
+  const midLines = moleculeWidgetLines(midWorkState, 120);
+  assert.ok(
+    !midLines.some((l) => l.includes("Waiting on you:")),
+    `mid-work must not show the waiting line: ${midLines.join(" | ")}`,
+  );
+  assert.ok(
+    midLines.some((l) => l.includes("\u25d0")),
+    `in-progress step still leads: ${midLines.join(" | ")}`,
+  );
+}
