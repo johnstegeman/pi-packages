@@ -10,6 +10,7 @@ import {
   parseMoleculeCurrent,
   phaseFor,
   topicFor,
+  waitingReviewStep,
 } from "./beads-molecule-widget.mjs";
 
 // ---------- parser: malformed input never throws ----------
@@ -49,7 +50,7 @@ const RAW = JSON.stringify([
         is_current: true,
       },
       {
-        issue: { id: "bd-mol-8y2", title: "Gate: human", issue_type: "gate", status: "open" },
+        issue: { id: "bd-mol-8y2", title: "Gate: human", issue_type: "gate", status: "open", labels: ["step:gate-design-approved"] },
         status: "ready",
         is_current: false,
       },
@@ -69,6 +70,7 @@ assert.equal(parsed.steps[0].title, "Explore project context: Superpowers widget
 assert.equal(parsed.steps[1].step_status, "current");
 assert.equal(parsed.steps[1].is_current, true);
 assert.equal(parsed.steps[0].created_at, "");
+assert.deepEqual(parsed.steps[2].labels, ["step:gate-design-approved"]);
 
 // ---------- topic + phase helpers ----------
 assert.equal(topicFor(parsed), "Superpowers widget changes");
@@ -1321,3 +1323,53 @@ assert.deepEqual(nextRefreshArgs("bd-mol-abc"), ["mol", "current", "bd-mol-abc",
 }
 
 console.log("beads-molecule-widget: all assertions passed");
+
+// ---------- waitingReviewStep: genuine waits only ----------
+const reviewState = {
+  steps: [
+    { id: "r1", title: "Explore project context: x", status: "closed", issue_type: "task", step_status: "done", labels: [] },
+    { id: "r2", title: "User approves design", status: "open", issue_type: "task", step_status: "pending", labels: [] },
+    { id: "r3", title: "Gate: human", status: "open", issue_type: "gate", step_status: "ready", labels: ["step:gate-design-approved"] },
+    { id: "r4", title: "Write spec to docs/superpowers/specs/", status: "open", issue_type: "task", step_status: "pending", labels: [] },
+  ],
+};
+const reviewChain = [reviewState.steps[0], reviewState.steps[1], reviewState.steps[3]]; // view/plan order, gates excluded
+assert.equal(waitingReviewStep(reviewState, reviewChain), reviewState.steps[1], "gated review step is the awaited step");
+
+// in-progress task => not waiting
+assert.equal(
+  waitingReviewStep(
+    {
+      steps: reviewState.steps.map((s) =>
+        s.id === "r1" ? { ...s, status: "in_progress", step_status: "current" } : s,
+      ),
+    },
+    reviewChain,
+  ),
+  null,
+  "in-progress step means not waiting",
+);
+
+// first open step is not a review step => not waiting
+assert.equal(waitingReviewStep(reviewState, [reviewState.steps[0], reviewState.steps[3]]), null, "non-review first open step is no wait");
+
+// stale gate: review step already done => not waiting
+{
+  // chainOrder is derived from the state under test (as the renderer's
+  // chainForPhase will), so it must reflect the remapped r2 -> closed/done.
+  const staleState = {
+    steps: reviewState.steps.map((s) => (s.id === "r2" ? { ...s, status: "closed", step_status: "done" } : s)),
+  };
+  const staleChain = [staleState.steps[0], staleState.steps[1], staleState.steps[3]];
+  assert.equal(waitingReviewStep(staleState, staleChain), null, "stale gate with done review step is no wait");
+}
+
+// gate closed => not waiting
+assert.equal(
+  waitingReviewStep(
+    { steps: reviewState.steps.map((s) => (s.id === "r3" ? { ...s, status: "closed", step_status: "done" } : s)) },
+    reviewChain,
+  ),
+  null,
+  "closed gate is no wait",
+);

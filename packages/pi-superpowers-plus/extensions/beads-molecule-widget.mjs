@@ -84,6 +84,7 @@ export function parseMoleculeCurrent(json) {
       title: s.issue.title ?? "",
       priority: s.issue.priority,
       issue_type: s.issue.issue_type ?? "task",
+      labels: Array.isArray(s.issue.labels) ? s.issue.labels : [],
       status: s.issue.status ?? "open",
       created_at: s.issue.created_at ?? "",
       step_status: s.status ?? "pending",
@@ -251,6 +252,33 @@ const PHASE_LABEL = {
   implementing: "Implementing",
   finishing: "Finishing",
 };
+
+/** Human gates (by formula label) → the review step each one blocks. */
+export const GATE_TO_REVIEW_STEP = {
+  "step:gate-design-approved": "User approves design",
+  "step:gate-spec-approved": "User reviews written spec",
+  "step:gate-smoke-test-approved": "Smoke test / manual QA sign-off",
+};
+
+/**
+ * The step the workflow is genuinely waiting on the user to review, or null.
+ * Order-independent: uses the phase's chain order (not bd's array order) and the
+ * gate labels to associate a gate with its gated review step. Returns null whenever
+ * any task step is in progress, the first open step isn't a gated review step,
+ * or the gated review step's gate is closed.
+ */
+export function waitingReviewStep(state, chainOrder) {
+  if (!state || !Array.isArray(state.steps)) return null;
+  const inProgress = state.steps.some((s) => s.step_status === "current" || s.status === "in_progress");
+  if (inProgress) return null;
+  const firstOpen = chainOrder.find((s) => s.step_status !== "done" && s.status !== "closed");
+  if (!firstOpen) return null;
+  const label = Object.keys(GATE_TO_REVIEW_STEP).find((l) => GATE_TO_REVIEW_STEP[l] === firstOpen.title);
+  if (!label) return null;
+  const gate = state.steps.find((s) => s.issue_type === "gate" && Array.isArray(s.labels) && s.labels.includes(label));
+  if (!gate || gate.status !== "open") return null;
+  return firstOpen;
+}
 
 const MAX_LINES = 15;
 
