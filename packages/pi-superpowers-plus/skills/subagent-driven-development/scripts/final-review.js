@@ -14,7 +14,15 @@ export const meta = {
 
 // Defensive: some hosts deliver `args` to the sandbox as a JSON string
 // rather than the documented object (smoke-test discovery, pi-packages-1fjq).
-const ARGS = (typeof args === 'string' ? JSON.parse(args) : args) ?? {}
+let parsedArgs
+try {
+  parsedArgs = typeof args === 'string' ? JSON.parse(args) : args
+} catch {
+  // Malformed args string degrades to an empty object, never a fatal throw
+  // (same fail-safe direction as every other guard in this file).
+  parsedArgs = null
+}
+const ARGS = parsedArgs ?? {}
 
 const FINDINGS_SCHEMA = {
   type: 'object',
@@ -139,7 +147,7 @@ const deduped = dedupe(all)
 // issues — never report a clean pass over silently missing coverage.
 const dimStatus = DIMENSIONS.map((d) => {
   const hit = results.find((r) => r !== null && r !== undefined && r.dimension === d)
-  const r = hit && hit.r !== null ? hit.r : null
+  const r = hit && hit.r != null ? hit.r : null // loose: covers null AND undefined resolutions
   const ok = r !== null && Array.isArray(r.findings)
   return { dimension: d, ok, findings: ok ? r.findings : [] }
 })

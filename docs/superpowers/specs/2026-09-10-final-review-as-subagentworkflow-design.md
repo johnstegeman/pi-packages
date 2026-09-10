@@ -70,6 +70,11 @@ SubagentWorkflow({
 })
 ```
 
+The script normalizes `args` defensively first: some hosts deliver it as a JSON
+string.
+`ARGS = (typeof args === 'string' ? JSON.parse(args) : args) ?? {}`; a malformed
+string degrades to `{}` (fail-safe, never a fatal throw).
+
 ### 3. Stage 1 — Find (parallel, 5 dimension finders)
 
 - `parallel(dimensions.map(d => () => agent(promptFor(d), { agentType: "code-reviewer", label: \`find:\${d}\`, phase: "Find", schema: FINDINGS_SCHEMA })))`
@@ -81,12 +86,20 @@ SubagentWorkflow({
 - `FINDINGS_SCHEMA` (JSON Schema, object root):
   `{ findings: [{ file: string, line?: integer, severity: "critical"|"important"|"minor", description: string }] }`
   (required: `file`, `severity`, `description`).
+- `dimensions` is validated against the five lens keys (`FOCUS`): unknown/
+  typo'd entries are silently dropped; an empty or all-invalid override falls
+  back to the default five (never a vacuously clean pass on a degenerate list).
 - `.filter(Boolean)`: a failed/skipped dimension contributes nothing.
 
 ### 4. Stage 2 — Dedupe (deterministic plain JS)
 
-- Key = `file:line?:severity:normalizedDescription` (description lowercased,
-  whitespace-collapsed); when `line` absent, `file:severity:normalizedDescription`.
+- Key = `file:line?:normalizedDescription` (description lowercased,
+  whitespace-collapsed); when `line` absent, `file:normalizedDescription`.
+  **Severity is deliberately excluded** — the same file+line+description flagged
+  at two severities must merge (cross-severity dupes collapse). This resolves
+  this draft's own internal inconsistency: the draft key included severity yet
+  prescribed higher-severity-wins, which cross-severity keys could never
+  exercise; the shipped code drops severity from the key so the merge fires.
 - Collision: keep the higher-severity entry, merge dimension tags
   (`dimensions: [...]`). Pure string ops.
 
@@ -105,8 +118,15 @@ SubagentWorkflow({
 ```
 { base, head, dimensions: [...], findings: [
   { file, line?, severity, dimensions: [...], description,
-    verification: { isReal, reason } } ] }
+    verification: { isReal, reason } } ],
+  degraded, dimStatus: [{ dimension, ok, findings }] }
 ```
+
+`degraded` is `null` when every finder succeeded, else `"N of M dimension
+finders failed: <dims>"` (§8); `dimStatus` reports each dimension's finder
+outcome (`ok`: resolved envelope present and schema-valid) with its raw
+`findings`, so partial coverage loss is explicit to the controller. Both the
+empty-findings envelope and the verified envelope carry these two fields.
 
 ### 7. Controller flow (SKILL.md Final Review, dual path)
 
@@ -123,9 +143,12 @@ SubagentWorkflow({
 
 ### 8. Error handling
 
-- All dimension finders fail → return `{ findings: [], degraded: "all dimension
-  finders failed" }` → controller falls back to the single-reviewer path (never
-  a silent clean pass).
+- **Any** dimension finder fails → `degraded = "N of M dimension finders
+  failed: <dims>"` (partial coverage loss degrades the whole review, even when
+  surviving dimensions found real issues — never a clean pass over silently
+  missing coverage). All M fail → findings empty; controller falls back to the
+  single-reviewer path (never a silent clean pass). Both envelopes carry the
+  per-dimension `dimStatus` array (§6).
 - Zero findings → clean path: no fix dispatch, straight to finishing.
 - Runtime script exception → run reports failure; controller falls back.
 - Agent failures never throw the script (`parallel` folds them to `null`).
