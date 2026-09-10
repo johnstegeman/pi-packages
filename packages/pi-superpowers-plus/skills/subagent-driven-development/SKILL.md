@@ -335,6 +335,16 @@ Before the loop starts, two routes leave it immediately:
 Everything else enters the loop. A fix round is one fix dispatch plus one
 scoped re-review. Five rounds maximum per task:
 
+**Covering-test command known — the gated path.** When the implementer's report names a re-runnable covering-test command (or the task's package has a test script to fall back to), a fix round runs as a `SubagentWorkflow` script so the suite verifies the fix instead of prose:
+
+```
+SubagentWorkflow({ scriptPath: "<skill>/scripts/fix-loop.js", args: { taskBeadId, reportFilePath, findings, gate, fixBase, head, gateBeadId, packagePath, reviewPackage } })
+```
+
+The script gates the fix agent on `gate` — a non-zero exit fails the agent and its output becomes the error — resumes the same child once on rejection (`resume: 'fix'`; `gate` and `resume` cannot combine), then re-verifies with a fresh gated call. One round = one invocation. When the gate still fails after the one resume, the script returns `{ passed: false }`: **adjudicate now** per the breaker rules below — continuing would burn guaranteed-failing rounds. The round's scoped re-review runs as the script's pipeline stage 2 (the child builds the review package itself via the `reviewPackage` path). Re-review verdicts ride back in the envelope; a `null` re-review means the controller re-runs the scoped re-review once on the prose path — never assume a clean round. Rounds ≥ 2 of a multi-round gated loop are fresh children fed the report file (the within-round resume replaces rounds 1-3's controller resume for this task). If `SubagentWorkflow` is absent (pi <0.84 / disabled / stand-down) or a `passed: false` envelope's `reason` is `'bad-args'` or the gate command itself is broken (exit 127 / "command not found" — confirm by re-running `gate` once yourself), repair or drop the gate and continue on the prose path; the fix is not at fault.
+
+**No covering-test command — the prose path below is unchanged.**
+
 **Rounds 1-3 — resume the original implementer.** Dispatch it with
 `Agent({ subagent_type: "implementer", resume: <agent_id>, prompt:
 "<open findings verbatim>" })`, where `<agent_id>` is the identity you
@@ -355,7 +365,10 @@ and returns the short contract. Before re-dispatching the reviewer, confirm
 the fix report contains the covering tests, the command run, and the
 output; dispatch the re-review once all three are present. Name the
 covering test files in the fix message — a one-line fix does not need the
-whole suite.
+whole suite. On the gated path the "confirm the fix report contains the
+covering tests, the command run, and the output" check is superseded —
+the script's gate result is the test evidence; on the prose path it
+applies as written.
 
 **The re-review is scoped.** Run `scripts/review-package <implement-step-id> FIX_BASE HEAD`
 where FIX_BASE is the head the previous review saw, and dispatch
@@ -368,6 +381,8 @@ minors — they never extend the loop.
 
 **After each round,** append to the ledger:
 `Task <N>: fix round <R>/5 (<X> addressed, <Y> open — <finding one-liners>; commits <a7>..<b7>)`
+
+Gated rounds use one of these instead: `Task <N>: fix round <R>/5 gated: <cmd> passed — <X> addressed, <Y> open; commits <base>..<head>`, and on a failed gate `Task <N>: fix round <R>/5 GATE FAILED (<cmd>) — <output tail>; <ruling>`. `passed: false` rulings use the existing breaker entries unchanged (parked / deferred / `Task <N>: BLOCKED — <reason>`).
 
 Never fix findings yourself in the controller session — your context stays
 clean for coordination, and controller fixes skip review.

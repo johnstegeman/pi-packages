@@ -8,7 +8,10 @@ Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ---
 
 ## [Unreleased]
-_Nothing yet beyond 0.9.0 — all prior work is released._
+
+### Added
+
+- **Gated fix loop** — when a task's implementer report names a re-runnable covering-test command, SDD fix rounds run as a `SubagentWorkflow` (`scripts/fix-loop.js`) that gates the fix agent on that command (one `gate` call, one `resume: 'fix'`, one re-gated verify), then runs the round's scoped re-review as the pipeline's second stage. `{ passed: false }` triggers the existing breaker adjudication immediately. The prose-path fix loop is unchanged for tasks without a covering-test command. `implementer-prompt.md` now requires a `Covering-test command` line in the report contract.
 
 ---
 
