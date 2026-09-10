@@ -66,6 +66,14 @@ jobs:
       - name: Typecheck subtree
         run: npm run typecheck
 
+  sim:
+    name: Sync-loop simulation
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Run sync sim (happy path + failure scenarios)
+        run: bash scripts/sim/simulate-sync.sh
+
   workflow-lint:
     name: Actionlint workflows
     runs-on: ubuntu-latest
