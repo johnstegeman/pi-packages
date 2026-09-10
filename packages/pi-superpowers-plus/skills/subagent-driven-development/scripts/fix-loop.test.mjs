@@ -8,6 +8,7 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
+import { Script } from "node:vm";
 
 const scriptPath = join(dirname(fileURLToPath(import.meta.url)), "fix-loop.js");
 const src = readFileSync(scriptPath, "utf8");
@@ -92,6 +93,21 @@ test("no sandbox-forbidden globals", () => {
   for (const forbidden of ["Date.now(", "Math.random(", "eval(", "new Date"]) {
     assert.ok(!src.includes(forbidden), `forbidden global present: ${forbidden}`);
   }
+});
+
+test("script parses as valid JS (vm: runtime wrapper compile)", () => {
+  // Bare `node --check` is not a valid parse gate for this format: the
+  // pi-subagents loader strips the `export ` keyword (extractMeta) and then
+  // compiles the body inside its async wrapper via new vm.Script, where the
+  // canonical top-level `return` envelope is legal — the platform's own
+  // example workflow scripts fail `node --check` for the same reason. Mirror
+  // the loader's compile here so a syntax error (like the unescaped quote
+  // that broke final-review.js in a live run) fails this test instead.
+  const metaAt = src.indexOf("export const meta");
+  const body = src.slice(0, metaAt) + "      " + src.slice(metaAt + 6);
+  assert.doesNotThrow(() => {
+    new Script("(async () => {\n" + body + "\n})()", { filename: scriptPath });
+  }, "script must compile under the runtime's async wrapper");
 });
 
 run();

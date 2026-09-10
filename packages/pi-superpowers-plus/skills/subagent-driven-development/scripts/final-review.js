@@ -127,7 +127,7 @@ const requirement = (dimension) => {
       "cat >> '" + ARGS.findingsFile + "' <<'EOF'",
       '{"kind":"find","dimension":"' + dimension + '","findings":[...]}',
       'EOF',
-      'Replace [...] with your findings array (valid JSON). The heredoc delimiter is quoted (\'EOF'), so the shell performs no interpolation — single quotes, shell metacharacters, and spaces inside your JSON are safe. The file receives exactly one line. If the file cannot be written, say so in your final message.',
+      'Replace [...] with your findings array (valid JSON). The heredoc delimiter is quoted (\'EOF\'), so the shell performs no interpolation — single quotes, shell metacharacters, and spaces inside your JSON are safe. The file receives exactly one line. If the file cannot be written, say so in your final message.',
     )
   }
   return lines.join('\n')
@@ -159,7 +159,7 @@ const refutation = (f, i) => {
       "cat >> '" + ARGS.findingsFile + "' <<'EOF'",
       '{"kind":"verify","file":F_FILE,"line":F_LINE,"severity":F_SEV,"description":F_DESC,"verdict":PLACEHOLDER}',
       'EOF',
-      'Replace F_FILE with the file path, F_LINE with the line number or null, F_SEV with the severity, F_DESC with the description (copy all four verbatim from the finding data above; JSON-quote the strings), and PLACEHOLDER with your schema object (valid JSON). The heredoc delimiter is quoted (\'EOF'), so the shell performs no interpolation — single quotes and shell metacharacters inside your JSON are safe. The file receives exactly one line. If the file cannot be written, say so in your final message.',
+      'Replace F_FILE with the file path, F_LINE with the line number or null, F_SEV with the severity, F_DESC with the description (copy all four verbatim from the finding data above; JSON-quote the strings), and PLACEHOLDER with your schema object (valid JSON). The heredoc delimiter is quoted (\'EOF\'), so the shell performs no interpolation — single quotes and shell metacharacters inside your JSON are safe. The file receives exactly one line. If the file cannot be written, say so in your final message.',
     )
   }
   return lines.join('\n')
