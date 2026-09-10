@@ -70,8 +70,9 @@ and schema-validated returns — the natural home for a batched implementation p
 2. Claim every wave task bead (wave-level fidelity), ledger cursor:
    `Wave <W>: dispatched — <task ids> on <base>`.
 3. Run `SubagentWorkflow({ scriptPath: "<skill>/scripts/wave-parallel.js", args: {
-   wave: [{ taskBeadId, gate?, files: [...] }], base, head, reportDir, gateBeadId,
-   reviewPackage } })` — `base` = current HEAD.
+   wave: [{ taskBeadId, gate?, files: [...] }], base, reportDir, gateBeadId,
+   reviewPackage } })` — `base` = current HEAD (the review stage resolves HEAD
+   itself at review time; `head` is deliberately not an arg — see §3).
 4. Process the envelope per task (close / fix loop / Q&A / breaker).
 5. Re-read the ready frontier; repeat until the implement step's tasks are closed;
    then the normal final whole-branch review runs once over the branch (it diffs
@@ -79,12 +80,13 @@ and schema-validated returns — the natural home for a batched implementation p
 
 ### 3. Script contract: `wave-parallel.js`
 
-- **`meta`:** `{ name: 'sdd-wave-parallel', description: 'Wave-parallel implementation...',
+- **`meta`:** `{ name: 'sdd-wave-parallel', description: 'Wave-parallel implementation: concurrent disjoint-file implementations gated by declared covering tests, schema-validated per-task reviews',
   phases: [{ title: 'Implement' }, { title: 'Review' }] }`. Standard guards: JSON-string
   `args` normalization; malformed args → empty wave, never a bare throw; no
   sandbox-forbidden globals (`Date.now(`, `Math.random(`, `eval(`, `new Date`).
-- **Args in:** `{ wave: [{ taskBeadId, gate?, files: string[] }], base, head,
-  reportDir, gateBeadId, reviewPackage }`.
+- **Args in:** `{ wave: [{ taskBeadId, gate?, files: string[] }], base,
+  reportDir, gateBeadId, reviewPackage }` — NO `head`: HEAD moves as implementers
+  commit, so the review child resolves the current HEAD itself at review time.
 - **Schemas:**
   - `IMPLEMENT_RESULT_SCHEMA`: `{ status: enum[done, done_with_concerns,
     needs_context, blocked], commits?, testSummary?, coveringTestCommand?, concerns?,
@@ -104,8 +106,9 @@ and schema-validated returns — the natural home for a batched implementation p
   (`{ skipped: true, reason: status }`) — `needs_context`/`blocked` come back
   un-reviewed for controller Q&A/re-dispatch.
 - **Stage 2 — review (per done item):** the review child builds the scoped package
-  itself: `bash: <reviewPackage> <taskBeadId> <base> <head> -- <files...>` (the
-  file-scoping is the interleaving protection), reads it plus the task bead and
+  itself: `bash: <reviewPackage> <taskBeadId> <base> $(git rev-parse HEAD) -- <files...>`
+  (the child resolves HEAD at review time; the file-scoping is the interleaving
+  protection), reads it plus the task bead and
   report file, returns `REVIEW_SCHEMA` (`agentType: 'task-reviewer'`). A null review
   → `{ status: 'review-failed' }` → controller re-runs that review on the plain path
   once.
