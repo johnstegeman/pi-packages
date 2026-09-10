@@ -4,7 +4,7 @@ Use this template when dispatching an implementer subagent.
 
 ```
 Dispatch a subagent with this prompt:
-  Agent({ subagent_type: "implementer", prompt: `
+  Agent({ subagent_type: "implementer", description: "Implement task bead:<TASK_ID>", prompt: `
     You are implementing Task N: [task name]
 
     ## Task Description

@@ -27,13 +27,15 @@
   ],
   "files": [
     "src/index.ts",
+    "src/cost-tracking.ts",
     "skills",
     "README.md",
     "LICENSE"
   ],
   "pi": {
     "extensions": [
-      "./src/index.ts"
+      "./src/index.ts",
+      "./src/cost-tracking.ts"
     ],
     "skills": [
       "./skills"
@@ -49,7 +51,7 @@
     "access": "public"
   },
   "scripts": {
-    "test": "node test/pi-beads.test.mjs"
+    "test": "node test/pi-beads.test.mjs && node test/cost-tracking.test.mjs"
   },
   "main": "./src/index.ts",
   "exports": "./src/index.ts"

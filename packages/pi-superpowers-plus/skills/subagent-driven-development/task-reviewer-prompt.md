@@ -9,7 +9,7 @@ more, nothing less) and is well-built (clean, tested, maintainable)
 
 ```
 Dispatch a subagent with this prompt:
-  Agent({ subagent_type: "task-reviewer", prompt: `
+  Agent({ subagent_type: "task-reviewer", description: "Review task bead:<TASK_ID>", prompt: `
     You are reviewing one task's implementation: first whether it matches its
     requirements, then whether it is well-built. This is a task-scoped gate,
     not a merge review — a broad whole-branch review happens separately after

@@ -75,6 +75,23 @@ export const DEP_LINK_TYPES = [
 ];
 export const GATE_TYPES = ["human", "timer", "gh:run", "gh:pr"];
 
+export interface BeadsRuntime {
+  bd: (
+    args: string[],
+    cwd?: string,
+    timeout?: number,
+  ) => Promise<{ ok: boolean; out: string; err: string }>;
+  dirForPrefix: (id: string) => string | null;
+  afterWrite: (repoDir: string) => Promise<void>;
+}
+
+// shared runtime for sibling extensions (e.g. cost-tracking): populated when
+// the factory runs so a separate extension module can write beads safely.
+let beadsRuntime: BeadsRuntime | null = null;
+export function getBeadsRuntime(): BeadsRuntime | null {
+  return beadsRuntime;
+}
+
 export default function piBeadsLean(pi: any) {
   let activeCwd: string = process.cwd();
 
@@ -1486,4 +1503,7 @@ export default function piBeadsLean(pi: any) {
       ctx?.ui?.notify?.(lines.join("\n"), "info");
     },
   });
+
+  // ---- shared runtime for sibling extensions (e.g. cost-tracking) ----
+  beadsRuntime = { bd, dirForPrefix, afterWrite };
 }

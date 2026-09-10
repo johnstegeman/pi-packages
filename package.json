@@ -29,6 +29,7 @@
       "./packages/hashline-edit/src/index.ts",
       "./packages/langfuse/index.ts",
       "./packages/pi-beads/src/index.ts",
+      "./packages/pi-beads/src/cost-tracking.ts",
       "./packages/pi-subagents/src/index.ts",
       "./packages/pi-superpowers-plus/extensions"
     ],

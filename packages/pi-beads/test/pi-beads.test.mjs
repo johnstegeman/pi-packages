@@ -252,7 +252,7 @@ writeFileSync(join(binDir, "bd"), stub, { mode: 0o755 });
 process.env.PATH = `${binDir}${delimiter}${process.env.PATH}`;
 process.env.FAKE_BD_LOG = logFile;
 
-const { default: piBeadsLean } = await import("../src/index.ts");
+const { default: piBeadsLean, getBeadsRuntime } = await import("../src/index.ts");
 const { DEP_LINK_TYPES, GATE_TYPES } = await import("../src/index.ts");
 
 // ---------------------------------------------------------------------------
@@ -381,6 +381,21 @@ test("type allowlists are exactly the bd-verified sets", async () => {
     "discovered-from",
   ]);
   assert.deepEqual(GATE_TYPES, ["human", "timer", "gh:run", "gh:pr"]);
+});
+
+test("runtime: getBeadsRuntime exposes bd/dirForPrefix/afterWrite after factory init", async () => {
+  makePi(); // runs piBeadsLean(pi), which must populate the registry
+  const rt = getBeadsRuntime();
+  assert.equal(typeof rt?.bd, "function");
+  assert.equal(typeof rt?.dirForPrefix, "function");
+  assert.equal(typeof rt?.afterWrite, "function");
+});
+
+test("runtime: dirForPrefix routes ids to owning repo in umbrella mode", async () => {
+  await openSession("umbrella", projDir);
+  const rt = getBeadsRuntime();
+  assert.equal(rt.dirForPrefix("crmback-1"), backendDir); // crmback-* -> backendDir per the fixture
+  assert.equal(rt.dirForPrefix("nosuch-1"), null);
 });
 
 // ---------------------------------------------------------------------------
