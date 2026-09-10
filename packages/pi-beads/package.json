@@ -27,13 +27,15 @@
   ],
   "files": [
     "src/index.ts",
+    "src/cost-tracking.ts",
     "skills",
     "README.md",
     "LICENSE"
   ],
   "pi": {
     "extensions": [
-      "./src/index.ts"
+      "./src/index.ts",
+      "./src/cost-tracking.ts"
     ],
     "skills": [
       "./skills"

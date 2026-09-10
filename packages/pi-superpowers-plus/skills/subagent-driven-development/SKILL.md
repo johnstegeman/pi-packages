@@ -203,6 +203,7 @@ and fix-round diffs need it.
   gives no `in_progress` signal, so the widget's deepest-open fallback can't
   tell "being worked" from "next up"; claim it at dispatch so ◐ means a real
   claimed step.
+- **Cost attribution:** include the task's bead id as a `bead:<task-id>` token in the Agent dispatch's `description` (e.g. `description: "Implement task bead:pi-packages-l8x9.2"`). The pi-beads cost-tracking extension parses `bead:<id>` out of the `subagents:completed`/`subagents:failed` event payload and writes the run's spend to the task bead's `cost.*` metadata (see docs/superpowers/specs/2026-09-10-cost-tracking-on-task-beads-design.md). Apply the token to implementer, task-reviewer, and re-review dispatches aimed at a tracked task bead; omit it for agents not aimed at a bead — cost tracking simply skips them.
 - **Report file:** name the implementer's report file after its task id
   (`<workspace>/<task-id>-report.md`) and put it in the dispatch prompt. The
   implementer writes the full report there and returns only status, commits,

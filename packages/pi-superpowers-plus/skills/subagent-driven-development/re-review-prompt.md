@@ -9,7 +9,7 @@ that the fix itself broke nothing.
 
 ```
 Dispatch a subagent with this prompt:
-  Agent({ subagent_type: "code-reviewer", prompt: `
+  Agent({ subagent_type: "code-reviewer", description: "Re-review task bead:<TASK_ID>", prompt: `
     You are re-reviewing one task's fix round. A previous review produced
     findings; an implementer has attempted to fix them. Your job is to
     verdict each finding and inspect the fix diff — nothing else.
