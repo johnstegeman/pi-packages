@@ -13,7 +13,13 @@ SCRIPT="$ROOT/scripts/sync/sync-subtree.sh"
 [ -x "$SCRIPT" ] || chmod +x "$SCRIPT"
 
 fail() { echo "FAIL: $1" >&2; exit 1; }
-pass() { echo "SIM PASS: (a) human commit preserved, (b) fast-forward push, (c) no-op pushes nothing"; exit 0; }
+pass() { echo "SIM PASS: (a) human commit preserved, (b) fast-forward push, (c) no-op pushes nothing, S2 loud conflict"; exit 0; }
+
+# Deterministic git identity for ALL commits in this script (raw git in the
+# scenario clones does not inherit the dev machine's global config; on CI it
+# is unset).
+export GIT_AUTHOR_NAME=Sim GIT_AUTHOR_EMAIL=sim@example.com
+export GIT_COMMITTER_NAME=Sim GIT_COMMITTER_EMAIL=sim@example.com
 
 BASE="$(mktemp -d /tmp/sim-sync.XXXXXX)"
 trap 'rm -rf "$BASE"' EXIT
@@ -94,5 +100,34 @@ pushd "$BASE/work2" >/dev/null
 popd >/dev/null
 REMOTE_AFTER="$(git ls-remote "$ORIGIN" refs/heads/bot/update-pi-subagents | awk '{print $1}')"
 [ "$REMOTE_BEFORE" = "$REMOTE_AFTER" ] || fail "(c) no-op run pushed unexpectedly"
+
+# --- scenario S2: loud subtree-pull conflict (RC != 0) ------------------------
+# A committed human edit conflicting with upstream must fail the sync loudly
+# (designed manual-resolution escape hatch), never be silently clobbered.
+# Deterministic: both sides edit the SAME line of extra.ts.
+git clone -q --branch bot/update-pi-subagents "$ORIGIN" "$BASE/s2-human"
+pushd "$BASE/s2-human" >/dev/null
+  sed -i '' 's/export const two = 2;/export const two = 2; \/\/ S2 human fix/' packages/pi-subagents/src/extra.ts
+  git add packages/pi-subagents/src/extra.ts
+  git commit -qm "fix: S2 human edit on extra.ts (sync branch)"
+  git push -q origin bot/update-pi-subagents
+popd >/dev/null
+
+pushd "$BASE/upstream-src" >/dev/null
+  sed -i '' 's/export const two = 2;/export const two = 2; \/\/ S2 upstream change/' src/extra.ts
+  git add -A; git commit -qm "r3: upstream edits extra.ts (same line)"
+  git push -q origin master
+popd >/dev/null
+
+git clone -q --branch main "$ORIGIN" "$BASE/s2-run"
+pushd "$BASE/s2-run" >/dev/null
+  set +e
+  S2_OUT="$(UPSTREAM_REPO="$UPSTREAM" UPSTREAM_REF=master BOT_BRANCH=bot/update-pi-subagents "$SCRIPT" 2>&1)"
+  S2_RC=$?
+  set -e
+  echo "$S2_OUT"
+  [ $S2_RC -ne 0 ] || fail "S2: expected non-zero exit on subtree-pull conflict"
+  echo "$S2_OUT" | grep -q "Manual resolution required" || fail "S2: expected loud ERROR message"
+popd >/dev/null
 
 pass
