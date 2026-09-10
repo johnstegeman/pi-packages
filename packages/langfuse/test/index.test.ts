@@ -659,3 +659,28 @@ test("README documents the headless score shutdown timeout", async () => {
   assert.match(readme, /PI_LANGFUSE_SCORE_SHUTDOWN_TIMEOUT/);
   assert.match(readme, /2 seconds/);
 });
+
+test("factory never prints the terminal banner (removed; status via /langfuse-status)", async () => {
+  const logs: unknown[][] = [];
+  const originalLog = console.log;
+  console.log = (...args: unknown[]) => {
+    logs.push(args);
+  };
+  try {
+    const fakePi = {
+      registerCommand() {},
+      events: { emit() {}, on() { return () => {}; } },
+      on() {},
+    } as any;
+    const previousConfig = state.config;
+    state.config = { publicKey: "pk_test", secretKey: "sk_test", host: "https://example.com" };
+    await registerExtension(fakePi);
+    state.config = null;
+    await registerExtension(fakePi);
+    const bannerLines = logs.filter((l) => String(l[0]).includes("📊 Langfuse"));
+    assert.deepEqual(bannerLines, [], `banner still printed: ${JSON.stringify(bannerLines)}`);
+    state.config = previousConfig;
+  } finally {
+    console.log = originalLog;
+  }
+});

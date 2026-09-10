@@ -41,12 +41,6 @@ export default async function (pi: ExtensionAPI) {
     state.config = loadConfig();
   }
 
-  if (state.config) {
-    console.log("📊 Langfuse: Tracing enabled →", state.config.host);
-  } else {
-    console.log("📊 Langfuse: Waiting for first-run setup");
-  }
-
   pi.registerCommand("langfuse-setup", {
     description: "Configure Langfuse API keys for this extension",
     handler: async (_args, ctx) => {
