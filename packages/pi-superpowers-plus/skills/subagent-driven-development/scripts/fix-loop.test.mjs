@@ -1,0 +1,80 @@
+// Structural regression test for scripts/fix-loop.js. The script cannot be
+// executed outside a live pi session (bare top-level return in a vm sandbox),
+// so this guards its source shape: meta literal, args normalization + bad-args
+// envelope, the gated-fix mechanism (gate on first call, resume without gate,
+// re-gated verify), the single-round pipeline with re-review as stage 2, the
+// failure envelope, and the sandbox-forbidden globals.
+import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
+import { join, dirname } from "node:path";
+import { fileURLToPath } from "node:url";
+
+const scriptPath = join(dirname(fileURLToPath(import.meta.url)), "fix-loop.js");
+const src = readFileSync(scriptPath, "utf8");
+
+let failures = 0;
+const tests = [];
+function test(name, fn) { tests.push([name, fn]); }
+async function run() {
+  for (const [name, fn] of tests) {
+    try { fn(); console.log(`ok - ${name}`); }
+    catch (e) { failures++; console.error(`FAIL - ${name}\n${e.stack ?? e}`); }
+  }
+  if (failures) { console.error(`\nfix-loop: ${failures} test(s) failed`); process.exit(1); }
+  console.log("\nfix-loop: all assertions passed");
+}
+
+test("meta: pure literal with name/description/phases", () => {
+  assert.match(src, /export const meta = \{\n\s*name: 'sdd-fix-loop'/);
+  assert.match(src, /description: 'Gated fix round/);
+  assert.match(src, /phases: \[\{ title: 'Fix' \}, \{ title: 'Re-review' \}\]/);
+});
+
+test("args normalization + bad-args envelope guard", () => {
+  assert.match(src, /typeof args === 'string'/);
+  assert.match(src, /reason: 'bad-args'/);
+  assert.match(src, /!ARGS\.taskBeadId \|\| !ARGS\.gate/);
+});
+
+test("stage 1: first fix agent is gated + labelled", () => {
+  assert.match(src, /agent\(fixPrompt, \{ label: 'fix', gate: gateCommand, phase: 'Fix' \}\)/);
+});
+
+test("resume rule: resume: 'fix' without gate, then re-gated verify", () => {
+  assert.match(src, /label: 'fix', resume: 'fix', phase: 'Fix'/);
+  assert.match(src, /label: 'verify', gate: gateCommand, effort: 'low', phase: 'Fix'/);
+  // gate appears exactly on the first fix call and the verify call — never on the resume
+  assert.equal((src.match(/gate: /g) ?? []).length, 2);
+});
+
+test("retry budget: a throw after failed verify drops the item", () => {
+  assert.match(src, /throw new Error\('gate still failing after one resume/);
+});
+
+test("single-round pipeline: one item, re-review is stage 2", () => {
+  assert.match(src, /await pipeline\(\[\{\}\], fixStage, reReviewStage\)/);
+  assert.match(src, /phase\('Re-review'\)/);
+  assert.match(src, /fixStage, reReviewStage\)\)\[0\]/);
+});
+
+test("re-review: agentType code-reviewer, review-package + ADDRESSED verdicts", () => {
+  assert.match(src, /agentType: 'code-reviewer', label: 're-review'/);
+  assert.match(src, /ADDRESSED \| NOT ADDRESSED/);
+  assert.match(src, /ARGS\.reviewPackage/);
+});
+
+test("failure envelope: passed:false + reason", () => {
+  assert.match(src, /passed: false, reason: 'gate-failed'/);
+});
+
+test("success envelope: passed:true + summary + reReview", () => {
+  assert.match(src, /passed: true, summary: round\.summary, reReview: round\.reReview/);
+});
+
+test("no sandbox-forbidden globals", () => {
+  for (const forbidden of ["Date.now(", "Math.random(", "eval(", "new Date"]) {
+    assert.ok(!src.includes(forbidden), `forbidden global present: ${forbidden}`);
+  }
+});
+
+run();
