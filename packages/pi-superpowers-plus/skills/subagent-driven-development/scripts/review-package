@@ -4,12 +4,31 @@
 # call. Using the recorded per-task BASE (not HEAD~1) keeps multi-commit
 # tasks intact.
 #
-# Usage: review-package SLUG BASE HEAD [OUTFILE]
+# Usage: review-package SLUG BASE HEAD [OUTFILE] [-- FILE...]
+#   A trailing '-- <files...>' scopes the stat and diff to those paths —
+#   wave-parallel (wave-parallel.js) uses this so a task's review shows only
+#   its own files when implementers commit concurrently on one branch. The
+#   commit list stays unfiltered for context.
 # Default OUTFILE: <repo-root>/.superpowers/sdd/<slug>/review-<base7>..<head7>.diff
 set -euo pipefail
 
+# Split positional args from a trailing '-- <files...>' list.
+positional=()
+files=()
+after_dash=false
+for a in "$@"; do
+  if [ "$after_dash" = true ]; then
+    files+=("$a")
+  elif [ "$a" = "--" ]; then
+    after_dash=true
+  else
+    positional+=("$a")
+  fi
+done
+set -- "${positional[@]}"
+
 if [ $# -lt 3 ] || [ $# -gt 4 ]; then
-  echo "usage: review-package SLUG BASE HEAD [OUTFILE]" >&2
+  echo "usage: review-package SLUG BASE HEAD [OUTFILE] [-- FILE...]" >&2
   exit 2
 fi
 
@@ -27,17 +46,27 @@ else
   out="$dir/review-$(git rev-parse --short "$base")..$(git rev-parse --short "$head").diff"
 fi
 
+diff_args=()
+if [ "${#files[@]}" -gt 0 ]; then
+  diff_args+=(-- "${files[@]}")
+fi
+
 {
   echo "# Review package: ${base}..${head}"
   echo
   echo "## Commits"
   git log --oneline "${base}..${head}"
   echo
-  echo "## Files changed"
-  git diff --stat "${base}..${head}"
+  if [ "${#files[@]}" -gt 0 ]; then
+    echo "## Files changed (scoped to ${#files[@]} path(s))"
+  else
+    echo "## Files changed"
+  fi
+  # ${arr[@]+...} for bash 3.x: expands an empty diff_args safely under set -u.
+  git diff --stat "${base}..${head}" ${diff_args[@]+"${diff_args[@]}"}
   echo
   echo "## Diff"
-  git diff -U10 "${base}..${head}"
+  git diff -U10 "${base}..${head}" ${diff_args[@]+"${diff_args[@]}"}
 } > "$out"
 
 commits=$(git rev-list --count "${base}..${head}")
