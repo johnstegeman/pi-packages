@@ -443,7 +443,7 @@ After generating the package, choose the review path:
         },
       })
 
-  It runs in the background — wait for the completion notification. The run's return value is the schema-validated findings envelope: each finding carries `file`, `severity`, `description`, `dimensions`, and an adversarial `verification { isReal, reason }`. Findings with `isReal: false` are refuted — not open — unless the refutation's reason is contestable, in which case re-adjudicate it yourself (never silently drop). If the envelope reports `degraded: "all dimension finders failed"` or the run errors, fall back to the single-reviewer path.
+  It runs in the background — wait for the completion notification. The run's return value is the schema-validated findings envelope: each finding carries `file`, `severity`, `description`, `dimensions`, and an adversarial `verification { isReal, reason }`. Findings with `isReal: false` are refuted — not open — unless the refutation's reason is contestable, in which case re-adjudicate it yourself (never silently drop). If the envelope reports `degraded` — set whenever any dimension finder fails (partial or total, e.g. `degraded: "N of M dimension finders failed"`) — or the run errors, fall back to the single-reviewer path.
 
 - **Single-reviewer path** (fallback — `SubagentWorkflow` absent, a small plan, or a degraded workflow run): dispatch the `code-reviewer` agent with the [code-reviewer.md](../requesting-code-review/code-reviewer.md) template, passing the printed package path.
 
