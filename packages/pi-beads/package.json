@@ -49,7 +49,7 @@
     "access": "public"
   },
   "scripts": {
-    "test": "node test/pi-beads.test.mjs"
+    "test": "node test/pi-beads.test.mjs && node test/cost-tracking.test.mjs"
   },
   "main": "./src/index.ts",
   "exports": "./src/index.ts"
