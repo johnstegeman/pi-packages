@@ -428,6 +428,7 @@ Final review findings get ONE fix dispatch (a fresh implementer) plus one
 scoped re-review, then adjudicate any residuals with the breaker rules
 above. When the final review is clean, delete this plan's workspace (the
 record now lives in git) and use `/skill:finishing-a-development-branch`.
+For large branches, the whole-branch review can fan out as a `SubagentWorkflow` per the Workflows section — the phases (review dimensions, verification fan-out) and the fallback rule apply unchanged.
 
 ## When a Subagent Fails
 
@@ -462,6 +463,7 @@ If an implementer subagent fails, errors out, or produces incomplete work:
 - Pre-judge findings for a reviewer ("do not flag", "at most Minor")
 - Silently discard a finding — every adjudication is a ledger entry
 - Fix findings yourself in the controller session
+- Emulate workflows with parallel `Agent` dispatch when `SubagentWorkflow` is absent (the fallback is the sequential loop, not fake parallelism)
 
 ## Integration
 
