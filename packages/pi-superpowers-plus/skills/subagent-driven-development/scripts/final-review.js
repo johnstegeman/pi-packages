@@ -67,7 +67,8 @@ const DEFAULT_DIMENSIONS = ['correctness', 'security', 'performance', 'plan', 'm
 // Unknown/typo'd dimension names are dropped against FOCUS; an empty or
 // all-invalid override falls back to the default five (never vacuously
 // succeed on a degenerate dimension list).
-const DIMENSIONS = (ARGS.dimensions ?? DEFAULT_DIMENSIONS).filter((d) => Object.hasOwn(FOCUS, d))
+const requested = Array.isArray(ARGS.dimensions) ? ARGS.dimensions : []
+const DIMENSIONS = requested.filter((d) => Object.hasOwn(FOCUS, d))
 if (DIMENSIONS.length === 0) DIMENSIONS.push(...DEFAULT_DIMENSIONS)
 
 const SEVERITY_RANK = { minor: 1, important: 2, critical: 3 }
@@ -123,8 +124,10 @@ const requirement = (dimension) => {
     lines.push(
       '',
       'After assembling your schema object, append ONE JSON line for your dimension to the findings file with a single bash command:',
-      'node -e \'const fs=require("fs");fs.appendFileSync(process.argv[1], JSON.stringify({kind:"find",dimension:DIM,findings:PLACEHOLDER})+"\\n")\' ' + ARGS.findingsFile,
-      'Replace DIM with "' + dimension + '" and PLACEHOLDER with your findings array (valid JSON). The file receives exactly one line. If the file cannot be written, say so in your final message.',
+      "cat >> '" + ARGS.findingsFile + "' <<'EOF'",
+      '{"kind":"find","dimension":"' + dimension + '","findings":[...]}',
+      'EOF',
+      'Replace [...] with your findings array (valid JSON). The heredoc delimiter is quoted (\'EOF'), so the shell performs no interpolation — single quotes, shell metacharacters, and spaces inside your JSON are safe. The file receives exactly one line. If the file cannot be written, say so in your final message.',
     )
   }
   return lines.join('\n')
@@ -153,8 +156,10 @@ const refutation = (f, i) => {
     lines.push(
       '',
       'After assembling your schema object, append ONE JSON line for this finding to the findings file with a single bash command:',
-      'node -e \'const fs=require("fs");fs.appendFileSync(process.argv[1], JSON.stringify({kind:"verify",file:F_FILE,line:F_LINE,severity:F_SEV,description:F_DESC,verdict:PLACEHOLDER})+"\\n")\' ' + ARGS.findingsFile,
-      'Replace F_FILE with the file path, F_LINE with the line number or null, F_SEV with the severity, F_DESC with the description (copy all four verbatim from the finding data above; JSON-quote the strings), and PLACEHOLDER with your schema object (valid JSON). The file receives exactly one line. If the file cannot be written, say so in your final message.',
+      "cat >> '" + ARGS.findingsFile + "' <<'EOF'",
+      '{"kind":"verify","file":F_FILE,"line":F_LINE,"severity":F_SEV,"description":F_DESC,"verdict":PLACEHOLDER}',
+      'EOF',
+      'Replace F_FILE with the file path, F_LINE with the line number or null, F_SEV with the severity, F_DESC with the description (copy all four verbatim from the finding data above; JSON-quote the strings), and PLACEHOLDER with your schema object (valid JSON). The heredoc delimiter is quoted (\'EOF'), so the shell performs no interpolation — single quotes and shell metacharacters inside your JSON are safe. The file receives exactly one line. If the file cannot be written, say so in your final message.',
     )
   }
   return lines.join('\n')
@@ -188,6 +193,15 @@ const degraded = failedDims.length === 0
   : failedDims.length + ' of ' + dimStatus.length + ' dimension finders failed: ' + failedDims.map((s) => s.dimension).join(', ')
 
 if (deduped.length === 0) {
+  if (ARGS.findingsFile) {
+    // Clean run still honors findingsFile: the compact envelope, count 0
+    // (no find/verify lines were appended), so the caller always parses
+    // the same shape regardless of whether findings were found.
+    return {
+      base: ARGS.base, head: ARGS.head, dimensions: DIMENSIONS, count: 0,
+      findingsFile: ARGS.findingsFile, degraded, dimStatus, refuted: 0,
+    }
+  }
   return {
     base: ARGS.base, head: ARGS.head, dimensions: DIMENSIONS, findings: [],
     degraded, dimStatus,

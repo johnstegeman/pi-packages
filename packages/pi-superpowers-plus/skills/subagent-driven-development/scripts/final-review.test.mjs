@@ -55,6 +55,8 @@ test("defensive args normalization present", () => {
 
 test("dimensions: DEFAULT_DIMENSIONS + membership guard + fallback", () => {
   assert.match(src, /const DEFAULT_DIMENSIONS = \['correctness', 'security', 'performance', 'plan', 'maintainability'\]/);
+  // type-safe: non-array `dimensions` (e.g. a JSON-string args delivery) degrades to []
+  assert.match(src, /Array\.isArray\(ARGS\.dimensions\)/);
   assert.match(src, /Object\.hasOwn\(FOCUS, d\)/);
   assert.match(src, /DIMENSIONS\.length === 0\) DIMENSIONS\.push\(\.\.\.DEFAULT_DIMENSIONS\)/);
 });
@@ -100,9 +102,23 @@ test("findingsFile: both finder and refuter prompts append ONE JSONL line", () =
   assert.match(builders, /const requirement = \(dimension\) => \{/);
   assert.match(builders, /const refutation = \(f, i\) => \{/);
   assert.match(builders, /ARGS\.findingsFile/);
-  assert.match(builders, /appendFileSync\(process\.argv\[1\]/);
-  assert.match(builders, /kind:"find"/);
-  assert.match(builders, /kind:"verify"/);
+  // heredoc payloads are raw JSON lines, so the keys are quoted
+  assert.match(builders, /"kind":"find"/);
+  assert.match(builders, /"kind":"verify"/);
+});
+
+test("findingsFile: children append via quoted heredoc (no node -e one-liner, path quoted)", () => {
+  assert.match(src, /<<'EOF'/);
+  assert.match(src, /cat >> '/);
+  assert.equal((src.match(/<<'EOF'/g) ?? []).length, 2);
+  assert.ok(!src.includes("appendFileSync"), "node -e persistence one-liner must be gone");
+});
+
+test("findingsFile: clean run honors findingsFile with compact envelope (count: 0)", () => {
+  assert.match(src, /if \(deduped\.length === 0\) \{\n\s*if \(ARGS\.findingsFile\)/);
+  assert.match(src, /count: 0,\n\s*findingsFile: ARGS\.findingsFile, degraded, dimStatus, refuted: 0,/);
+  // inline clean envelope retained for the no-findingsFile case
+  assert.match(src, /base: ARGS\.base, head: ARGS\.head, dimensions: DIMENSIONS, findings: \[\],\n\s*degraded, dimStatus,/);
 });
 
 test("degraded: set when ANY finder fails (N of M, named)", () => {

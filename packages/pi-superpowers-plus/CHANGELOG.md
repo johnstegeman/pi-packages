@@ -12,6 +12,7 @@ Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ### Added
 
 - **Gated fix loop** — when a task's implementer report names a re-runnable covering-test command, SDD fix rounds run as a `SubagentWorkflow` (`scripts/fix-loop.js`) that gates the fix agent on that command (one `gate` call, one `resume: 'fix'`, one re-gated verify), then runs the round's scoped re-review as the pipeline's second stage. `{ passed: false }` triggers the existing breaker adjudication immediately. The prose-path fix loop is unchanged for tasks without a covering-test command. `implementer-prompt.md` now requires a `Covering-test command` line in the report contract.
+- **Final whole-branch review as a SubagentWorkflow** — `scripts/final-review.js` fans parallel dimension reviewers over the whole-branch diff, adversarially verifies each finding in bounded waves, and persists the schema-validated findings to a JSONL (`findingsFile`) so large reviews return a compact envelope; degraded/dimStatus coverage reporting and a single-reviewer fallback.
 
 ---
 
