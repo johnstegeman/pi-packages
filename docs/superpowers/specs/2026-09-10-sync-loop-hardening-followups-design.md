@@ -42,8 +42,8 @@ Existing happy path (a: human commit survives, b: fast-forward push, c: no-op pu
 
 - New `sim` job: `actions/checkout@v4` → `bash scripts/sim/simulate-sync.sh`. Scratch repos in `mktemp`, no network beyond the checkout, ~2s. Turns the new failure-path coverage into a permanent PR gate.
 - `workflow-lint` job: replace the unpinned installer pipe with a checksum-verified download of a pinned release:
-  - `https://github.com/rhysd/actionlint/releases/download/v1.7.12/actionlint_1.7.12_linux_x86_64.tar.gz`
-  - the matching `actionlint_1.7.12_checksums.txt` entry filtered to `linux_x86_64`, verified with `sha256sum -c` (job fails on mismatch), then extract + `sudo mv actionlint /usr/local/bin/`, then `actionlint .github/workflows/*.yml`.
+  - `https://github.com/rhysd/actionlint/releases/download/v1.7.12/actionlint_1.7.12_linux_amd64.tar.gz` (asset name is `linux_amd64`, not `x86_64` — verified against the live v1.7.12 release)
+  - the matching `actionlint_1.7.12_checksums.txt` entry filtered to `linux_amd64`, verified with `sha256sum -c` (job fails on mismatch), then extract + `sudo mv actionlint /usr/local/bin/`, then `actionlint .github/workflows/*.yml`.
   - Version is an explicit constant for hand bumps; no more `@main` drift.
 
 ### 4. `.github/workflows/sync-pi-subagents.yml` — greppable PR-permission failure (C2)

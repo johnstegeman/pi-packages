@@ -5,6 +5,9 @@
 #   (a) a human commit on bot/update-pi-subagents survives the next sync
 #   (b) the sync push is a fast-forward (no --force anywhere)
 #   (c) a no-op run (upstream unchanged) pushes nothing
+# plus scenario S2 (a subtree-pull conflict with a committed human edit exits
+# loudly with the Manual-resolution ERROR) and scenario S3 (a deleted/nonexistent
+# bot branch is re-established on origin by a fresh no-op run).
 # Exit 0 on PASS; non-zero with a "FAIL: ..." message otherwise.
 set -euo pipefail
 
