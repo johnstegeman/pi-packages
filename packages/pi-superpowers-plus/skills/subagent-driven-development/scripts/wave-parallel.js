@@ -88,7 +88,11 @@ const reviewPrompt = (item) => [
   'Global Constraints (attention lens): beads_show({ id: "' + ARGS.gateBeadId + '", full: true }).',
   '',
   'Build the scoped review package yourself (resolve HEAD yourself):',
-  '  ' + ARGS.reviewPackage + ' ' + item.taskBeadId + ' ' + ARGS.base + ' $(git rev-parse HEAD) -- ' + (item.files ?? []).join(' '),
+  // Every path is single-quoted so spaces cannot split args; the shape guard
+  // (badItemShape below) already rejected any file containing a quote, so
+  // single-quoting is safe by construction. The $(git rev-parse HEAD) stays
+  // literal — the review child resolves HEAD itself at review time.
+  '  ' + "'" + ARGS.reviewPackage + "' '" + item.taskBeadId + "' '" + ARGS.base + "' $(git rev-parse HEAD) -- " + (item.files ?? []).map((f) => "'" + f + "'").join(' '),
   "Read the printed diff file once — it is scoped to this task's files. Do not re-run git commands beyond building the package. Your review is READ-ONLY: do not mutate the working tree, the index, HEAD, or branch state.",
   '',
   "Read the implementer's report: " + (ARGS.reportDir ?? '.') + '/' + item.taskBeadId + '-report.md',
@@ -102,7 +106,33 @@ const reviewPrompt = (item) => [
 
 phase('Implement')
 
+// Fail-closed item shape guard, checked before ANY dispatch: a malformed wave
+// item is the CONTROLLER's bug, so it must fail loudly as invalid-args, never
+// reach a child and never pass through unreviewed. Files must be non-empty
+// strings without single quotes — the review command single-quotes each path,
+// so a quote would break the child's bash invocation.
+const badItemShape = (item) => {
+  if (typeof item.taskBeadId !== 'string' || item.taskBeadId.length === 0) return 'taskBeadId must be a non-empty string'
+  if (!Array.isArray(item.files) || item.files.length === 0) return 'files must be a non-empty array'
+  for (const f of item.files) {
+    if (typeof f !== 'string' || f.length === 0) return 'every file must be a non-empty string'
+    if (f.includes("'")) return 'file paths must not contain single quotes'
+  }
+  return null
+}
+
 async function implementStage(item) {
+  const bad = badItemShape(item)
+  if (bad !== null) {
+    // No agent, no review, no pass-through: the malformed item is the wave's
+    // input bug and the controller must see it (and fix the wave), loudly.
+    return {
+      status: 'invalid-args',
+      skipped: true,
+      reason: 'bad item shape: ' + bad,
+      reportFile: (ARGS.reportDir ?? '.') + '/' + (typeof item.taskBeadId === 'string' ? item.taskBeadId : 'unknown') + '-report.md',
+    }
+  }
   const result = await agent(implementPrompt(item), {
     label: 'implement:' + item.taskBeadId,
     phase: 'Implement',

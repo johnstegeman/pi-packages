@@ -2,11 +2,13 @@
 // executed outside a live pi session (bare top-level return in a vm sandbox),
 // so this guards its source shape: meta literal, args normalization, the
 // pipeline(implement → review) shape, IMPLEMENT_RESULT/REVIEW schemas, the
-// gate-conditional, the non-done short-circuit, the file-scoped review package
-// build (HEAD resolved by the child), the envelope, and the sandbox-forbidden
-// globals.
+// gate-conditional, the non-done short-circuit, the fail-closed shape guard
+// (invalid-args), the quoted file-scoped review package build (HEAD resolved
+// by the child), the envelope, the sandbox-forbidden globals — plus a live
+// review-package scoping check against the spec commits in history.
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
+import { spawnSync } from "node:child_process";
+import { readFileSync, rmSync } from "node:fs";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import { Script } from "node:vm";
@@ -68,8 +70,18 @@ test("short-circuit: review stage skips non-done statuses", () => {
 
 test("review stage: file-scoped package, HEAD resolved by the child", () => {
   assert.match(src, /git rev-parse HEAD/);
-  assert.match(src, /item\.files \?\? \[\]\)\.join\(' '\)/);
+  // every interpolated path is single-quoted (reviewPackage, taskBeadId, base,
+  // each file) so spaces cannot split the child's bash command
+  assert.match(src, /\.map\(\(f\) => "'" \+ f \+ "'"\)\.join\(' '\)/);
   assert.match(src, /agentType: 'task-reviewer'/);
+});
+
+test("fail-closed shape guard: invalid-args before any dispatch, non-empty taskBeadId and files, no quotes in file paths", () => {
+  assert.match(src, /status: 'invalid-args'/);
+  assert.match(src, /reason: 'bad item shape: '/);
+  assert.match(src, /item\.taskBeadId\.length === 0/);
+  assert.match(src, /item\.files\.length === 0/);
+  assert.match(src, /f\.includes\("'"\)/);
 });
 
 test("envelope: per-task entries keyed by taskBeadId, degraded when any non-done", () => {
@@ -106,4 +118,30 @@ test("script parses as valid JS (vm: runtime wrapper compile)", () => {
   }, "script must compile under the runtime's async wrapper");
 });
 
+
+const reviewPackagePath = join(dirname(fileURLToPath(import.meta.url)), "review-package");
+
+test("review-package scoping check: literal pathspecs keep the diff file-scoped; '--' with no paths fails loud", () => {
+  // The two spec commits (ffc7028..2b263e2) are in history on this branch and
+  // touch only the wave-parallel design doc, so a file-scoped diff must contain
+  // exactly one '^diff --git' line. Pathspecs resolve against the cwd, so run
+  // review-package from the repo root (5 levels up from this test file),
+  // mirroring how the review child invokes it (bash from the repo root).
+  const repoRoot = join(dirname(fileURLToPath(import.meta.url)), "..", "..", "..", "..", "..");
+  const scopedOut = "/tmp/wpscoped.diff";
+  const emptyOut = "/tmp/wpscoped.empty.diff";
+  try {
+    const scoped = spawnSync("bash", [reviewPackagePath, "slug", "ffc7028", "2b263e2", scopedOut, "--", "docs/superpowers/specs/2026-09-10-wave-parallel-implementation-design.md"], { encoding: "utf8", cwd: repoRoot });
+    assert.equal(scoped.status, 0, "scoped review-package must exit 0: " + scoped.stdout + scoped.stderr);
+    const scopedText = readFileSync(scopedOut, "utf8");
+    assert.equal((scopedText.match(/^diff --git/gm) ?? []).length, 1, "scoped diff must contain exactly one '^diff --git' line (the design doc)");
+
+    const empty = spawnSync("bash", [reviewPackagePath, "slug", "ffc7028", "2b263e2", emptyOut, "--"], { encoding: "utf8", cwd: repoRoot });
+    assert.notEqual(empty.status, 0, "'--' with no paths must exit non-zero");
+    assert.match(empty.stderr, /'--' given with no paths/);
+  } finally {
+    rmSync(scopedOut, { force: true });
+    rmSync(emptyOut, { force: true });
+  }
+});
 run();

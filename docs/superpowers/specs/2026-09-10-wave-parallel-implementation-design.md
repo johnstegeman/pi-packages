@@ -116,7 +116,8 @@ and schema-validated returns — the natural home for a batched implementation p
   + one commit at the end; retry once after ~2s on `index.lock` races; never
   merge/rebase/push.
 - **Envelope out:** `{ wave: [{ taskBeadId, status, spec?, skipped?, reason? }],
-  degraded? }` — `degraded` set when any item is non-`done` (mirrors final-review).
+  degraded? }` — `degraded` set when any item is other than `done`/`done_with_concerns`
+  (concerns flow through the normal branches, reviewed not degraded; matches SKILL.md step 4).
   Children are read-only on beads (only `beads_show` in prompts).
 
 ### 4. Envelope processing (controller)
@@ -168,10 +169,14 @@ and schema-validated returns — the natural home for a batched implementation p
 7. Review stage passes `base`, `head`, `--`, `item.files` to `reviewPackage` (the file-scoping protection is asserted)
 8. Args normalization branch; no sandbox-forbidden globals
 
-Plus: a guard for `review-package`'s new `-- files` mode (assert the scoping branch in
-its source when it gains a test, or a bash-level check), SKILL.md self-read, and
-`npm test` wiring. Smoke-test: live wave behavior is the formula's own
-`smoke-test-approved` step.
+Plus, delivered: an automated `review-package` scoping check (added in the fix
+round, after review) — the test actually executes review-package against the two
+spec commits in history via `spawnSync` + bash and asserts the diff stays
+file-scoped (exactly one `^diff --git` line) and that `--` with no paths fails
+loudly; vm-compile parse gates in all three structural test files (final-review,
+fix-loop, wave-parallel) that compile each script under the runtime's async vm
+wrapper; and a SKILL.md self-read grep (Task 4's step 5). Smoke-test: live wave
+behavior is the formula's own `smoke-test-approved` step.
 
 ## Out of scope
 

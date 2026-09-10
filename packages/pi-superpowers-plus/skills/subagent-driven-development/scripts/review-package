@@ -27,6 +27,14 @@ for a in "$@"; do
 done
 set -- "${positional[@]}"
 
+# Belt and braces: a trailing '--' with NO paths after it would diff the whole
+# base..head range unfiltered (the empty-files fail-open). It is the
+# controller's bug, never a silent widening — fail loudly.
+if [ "$after_dash" = true ] && [ "${#files[@]}" -eq 0 ]; then
+  echo "error: '--' given with no paths" >&2
+  exit 2
+fi
+
 if [ $# -lt 3 ] || [ $# -gt 4 ]; then
   echo "usage: review-package SLUG BASE HEAD [OUTFILE] [-- FILE...]" >&2
   exit 2
@@ -47,8 +55,13 @@ else
 fi
 
 diff_args=()
+gitflags=()
 if [ "${#files[@]}" -gt 0 ]; then
   diff_args+=(-- "${files[@]}")
+  # --literal-pathspecs is a git GLOBAL flag (before the subcommand): with
+  # paths present, pathspec magic is off so a declared path like packages/*.ts
+  # or :(exclude)... is diffed literally and cannot widen the scoped diff.
+  gitflags+=(--literal-pathspecs)
 fi
 
 {
@@ -62,11 +75,11 @@ fi
   else
     echo "## Files changed"
   fi
-  # ${arr[@]+...} for bash 3.x: expands an empty diff_args safely under set -u.
-  git diff --stat "${base}..${head}" ${diff_args[@]+"${diff_args[@]}"}
+  # ${arr[@]+...} for bash 3.x: expands an empty array safely under set -u.
+  git ${gitflags[@]+"${gitflags[@]}"} diff --stat "${base}..${head}" ${diff_args[@]+"${diff_args[@]}"}
   echo
   echo "## Diff"
-  git diff -U10 "${base}..${head}" ${diff_args[@]+"${diff_args[@]}"}
+  git ${gitflags[@]+"${gitflags[@]}"} diff -U10 "${base}..${head}" ${diff_args[@]+"${diff_args[@]}"}
 } > "$out"
 
 commits=$(git rev-list --count "${base}..${head}")
