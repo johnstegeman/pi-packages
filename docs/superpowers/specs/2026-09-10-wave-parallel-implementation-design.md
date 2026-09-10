@@ -165,7 +165,7 @@ and schema-validated returns — the natural home for a batched implementation p
 3. `IMPLEMENT_RESULT_SCHEMA` status enum + `gate` applied only via the `item.gate` conditional
 4. Short-circuit: review stage guards non-done statuses
 5. `REVIEW_SCHEMA` shape (`specCompliant`, `issues[].severity` enum, `cannotVerify`)
-6. Envelope: per-task entries by `taskBeadId`; `degraded` when any non-`done`
+6. Envelope: per-task entries by `taskBeadId`; degraded when any item is other than done/done_with_concerns (done_with_concerns flows through the normal branches)
 7. Review stage passes `base`, `head`, `--`, `item.files` to `reviewPackage` (the file-scoping protection is asserted)
 8. Args normalization branch; no sandbox-forbidden globals
 
@@ -175,8 +175,9 @@ spec commits in history via `spawnSync` + bash and asserts the diff stays
 file-scoped (exactly one `^diff --git` line) and that `--` with no paths fails
 loudly; vm-compile parse gates in all three structural test files (final-review,
 fix-loop, wave-parallel) that compile each script under the runtime's async vm
-wrapper; and a SKILL.md self-read grep (Task 4's step 5). Smoke-test: live wave
-behavior is the formula's own `smoke-test-approved` step.
+wrapper. The SKILL.md insertion was verified by a manual read/grep during Task 4
+(no automated self-read check — the structural tests do not grep SKILL.md).
+Smoke-test: live wave behavior is the formula's own `smoke-test-approved` step.
 
 ## Out of scope
 

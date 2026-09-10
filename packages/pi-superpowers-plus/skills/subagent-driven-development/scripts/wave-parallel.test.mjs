@@ -65,7 +65,8 @@ test("implement stage: labelled per task, implementer agentType, no declared gat
 
 test("short-circuit: review stage skips non-done statuses", () => {
   assert.match(src, /prev\.status !== 'done' && prev\.status !== 'done_with_concerns'/);
-  assert.match(src, /skipped: true, reason: prev\.status/);
+  // the descriptive invalid-args reason survives the short-circuit (fix round 2)
+  assert.match(src, /skipped: true, reason: prev\.reason \?\? prev\.status/);
 });
 
 test("review stage: file-scoped package, HEAD resolved by the child", () => {
@@ -73,6 +74,9 @@ test("review stage: file-scoped package, HEAD resolved by the child", () => {
   // every interpolated path is single-quoted (reviewPackage, taskBeadId, base,
   // each file) so spaces cannot split the child's bash command
   assert.match(src, /\.map\(\(f\) => "'" \+ f \+ "'"\)\.join\(' '\)/);
+  // the reviewPackage operand must stay quoted too — unquoting it would let a
+  // spaced path split the child's bash command
+  assert.match(src, /"'" \+ ARGS\.reviewPackage \+ "' /);
   assert.match(src, /agentType: 'task-reviewer'/);
 });
 

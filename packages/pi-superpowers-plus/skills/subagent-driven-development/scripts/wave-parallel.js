@@ -112,6 +112,11 @@ phase('Implement')
 // strings without single quotes — the review command single-quotes each path,
 // so a quote would break the child's bash invocation.
 const badItemShape = (item) => {
+  // A null / primitive / array wave entry must fail loudly as invalid-args too,
+  // never throw while probing item.taskBeadId below.
+  if (item === null || typeof item !== 'object' || Array.isArray(item)) {
+    return { status: 'invalid-args', skipped: true, reason: 'bad item shape: item must be an object', reportFile: (ARGS.reportDir ?? '.') + '/unknown-report.md' }
+  }
   if (typeof item.taskBeadId !== 'string' || item.taskBeadId.length === 0) return 'taskBeadId must be a non-empty string'
   if (!Array.isArray(item.files) || item.files.length === 0) return 'files must be a non-empty array'
   for (const f of item.files) {
@@ -126,12 +131,17 @@ async function implementStage(item) {
   if (bad !== null) {
     // No agent, no review, no pass-through: the malformed item is the wave's
     // input bug and the controller must see it (and fix the wave), loudly.
-    return {
-      status: 'invalid-args',
-      skipped: true,
-      reason: 'bad item shape: ' + bad,
-      reportFile: (ARGS.reportDir ?? '.') + '/' + (typeof item.taskBeadId === 'string' ? item.taskBeadId : 'unknown') + '-report.md',
-    }
+    // badItemShape returns the full invalid-args entry for a null / primitive /
+    // array item (which this function's own probes could not safely touch) and
+    // a reason string otherwise — wrap the string, pass the entry through.
+    return typeof bad === 'string'
+      ? {
+          status: 'invalid-args',
+          skipped: true,
+          reason: 'bad item shape: ' + bad,
+          reportFile: (ARGS.reportDir ?? '.') + '/' + (typeof item.taskBeadId === 'string' ? item.taskBeadId : 'unknown') + '-report.md',
+        }
+      : bad
   }
   const result = await agent(implementPrompt(item), {
     label: 'implement:' + item.taskBeadId,
@@ -151,7 +161,7 @@ async function implementStage(item) {
 
 async function reviewStage(prev, item) {
   if (prev.status !== 'done' && prev.status !== 'done_with_concerns') {
-    return { ...prev, skipped: true, reason: prev.status }
+    return { ...prev, skipped: true, reason: prev.reason ?? prev.status }
   }
   phase('Review')
   const spec = await agent(reviewPrompt(item), {
