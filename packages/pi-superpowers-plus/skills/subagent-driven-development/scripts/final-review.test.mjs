@@ -48,8 +48,12 @@ test("stages: two parallel( calls + filter(Boolean) + dedupe", () => {
   assert.match(src, /function dedupe\(/);
 });
 
+test("defensive args normalization present", () => {
+  assert.match(src, /typeof args === 'string'/);
+});
+
 test("return envelope keys", () => {
-  assert.match(src, /base: args\.base, head: args\.head, dimensions: DIMENSIONS, findings,/);
+  assert.match(src, /base: ARGS\.base, head: ARGS\.head, dimensions: DIMENSIONS, findings,/);
 });
 
 test("no sandbox-forbidden globals", () => {

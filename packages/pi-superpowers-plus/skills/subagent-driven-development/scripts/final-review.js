@@ -12,7 +12,11 @@ export const meta = {
   phases: [{ title: 'Find' }, { title: 'Verify' }],
 }
 
-const DIMENSIONS = args?.dimensions ?? ['correctness', 'security', 'performance', 'plan', 'maintainability']
+// Defensive: some hosts deliver `args` to the sandbox as a JSON string
+// rather than the documented object (smoke-test discovery, pi-packages-1fjq).
+const ARGS = (typeof args === 'string' ? JSON.parse(args) : args) ?? {}
+
+const DIMENSIONS = ARGS.dimensions ?? ['correctness', 'security', 'performance', 'plan', 'maintainability']
 
 const FINDINGS_SCHEMA = {
   type: 'object',
@@ -76,17 +80,17 @@ function dedupe(all) {
 
 const requirement = (dimension) => [
   'You are a Senior Code Reviewer. Review the completed work on',
-  args.base + '..' + args.head,
+  ARGS.base + '..' + ARGS.head,
   '',
   'Read the review package ONCE at:',
-  args.packagePath,
+  ARGS.packagePath,
   '',
   'It contains the commit list, stat summary, and the full diff with context — it is your view of the change. Do not re-run git commands. Your review is READ-ONLY.',
   '',
   'What was implemented:',
-  args.description,
+  ARGS.description,
   '',
-  'Read the plan Global Constraints (they are the attention lens): beads_show({ id: "' + args.gateBeadId + '", full: true }).',
+  'Read the plan Global Constraints (they are the attention lens): beads_show({ id: "' + ARGS.gateBeadId + '", full: true }).',
   '',
   'YOUR LENS — ' + dimension + ':',
   FOCUS[dimension],
@@ -100,7 +104,7 @@ const refutation = (f) => [
   'severity: ' + f.severity,
   'description: ' + f.description,
   '',
-  'Try to REFUTE it: read the review package at ' + args.packagePath + ' and check whether the finding actually holds against the diff. Default to refuted unless the finding clearly holds. Your reason must name the specific code it does or does not apply to.',
+  'Try to REFUTE it: read the review package at ' + ARGS.packagePath + ' and check whether the finding actually holds against the diff. Default to refuted unless the finding clearly holds. Your reason must name the specific code it does or does not apply to.',
   '',
   'Return the schema object: isReal (false = refuted), reason (your judgment).',
 ].join('\n')
@@ -120,7 +124,7 @@ const deduped = dedupe(all)
 
 if (deduped.length === 0) {
   return {
-    base: args.base, head: args.head, dimensions: DIMENSIONS, findings: [],
+    base: ARGS.base, head: ARGS.head, dimensions: DIMENSIONS, findings: [],
     degraded: results.every((r) => r === null || (r && r.r === null)) ? 'all dimension finders failed' : null,
   }
 }
@@ -141,4 +145,4 @@ const findings = deduped.map((f, i) => ({
     : { isReal: true, reason: 'unverified (refuter skipped)' },
 }))
 
-return { base: args.base, head: args.head, dimensions: DIMENSIONS, findings, degraded: null }
+return { base: ARGS.base, head: ARGS.head, dimensions: DIMENSIONS, findings, degraded: null }
