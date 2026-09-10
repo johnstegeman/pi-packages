@@ -51,6 +51,27 @@ digraph when_to_use {
 
 **Dependent tasks:** Most real plans have some dependencies. For dependent tasks, include the previous task's implementation summary and relevant file paths in the next subagent's context. Track what each completed task produced so you can pass it forward.
 
+## Workflows (SubagentWorkflow)
+
+SubagentWorkflow (pi-subagents >=0.19, pi >=0.84) runs deterministic scripts that coordinate many subagents in the background — `agent()`, `parallel()`, `pipeline()`, `gate`, `resume` (see the pi-subagents README / docs/workflows.md). It is for batches, not single tasks: use `Agent` for one delegated task or a handful you can name up front.
+
+**When a workflow is right.** Prefer `SubagentWorkflow` for SDD's batch shapes:
+
+- **Final whole-branch review** — fan review dimensions (or files/findings) out and verify each independently before believing the aggregate.
+- **Verification fan-out** — any "check all N things" pass over a runtime-discovered list.
+- **Wave-parallel implementation** — per-task batches dispatched from the beads ready frontier (only with a file-conflict gate; per the wave-parallel work).
+
+The preference is judgement-based: a small plan's final review is one reviewer, a two-item fan-out is two named calls — plain Agent dispatch wins whenever the batch is small enough to name up front. A workflow costs a subprocess per agent plus ~5k tokens/turn of tool-spec context; use one only when the parallelism pays for both. Per-task implementation stays on Agent dispatch — workflow children emit no per-child cost events, so per-task cost attribution requires it.
+
+**The fallback rule.** If `SubagentWorkflow` is present (pi-subagents >=0.19, pi >=0.84, `workflowsEnabled` not off, no stand-down), use it for the shapes above. If it is absent, the existing Agent-dispatch loop is unchanged — dispatch sequentially; never emulate workflows with parallel Agent calls.
+
+**The context budget.** The tool spec costs ~5k tokens of system prompt every turn while `workflowsEnabled` is on (source: `packages/pi-subagents/src/workflow/tool-description.ts`), used or not. Spend deliberately: when the plan has no batch phase in sight, consider pinning `"workflowsEnabled": false` in `subagents.json` (or `/agents → Settings → Workflows`) and re-enabling when a batch is planned. Guidance only — never toggle a host's settings from a skill.
+
+**Stand-down semantics.** The tool stands down automatically when another extension already provides a `Workflow`/`SubagentWorkflow` tool (exact-name match, checked at session start). Stand-down is equivalent to absence; the fallback applies unchanged.
+
+**Controller-owned state.** Workflow scripts and their children are read-only on beads and the ledger — they never create/update/close beads. Results funnel back through the controller, which alone records them in the SDD ledger; the ledger stays the record of truth (workflow resume journals are session-scoped; nothing a workflow produced persists cross-session except what the controller wrote).
+
+
 ## The Process
 
 ```dot
