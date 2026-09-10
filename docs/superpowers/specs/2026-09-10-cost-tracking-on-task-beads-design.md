@@ -86,7 +86,7 @@ Per completion, one **per-agent line** under `cost.agents.<agentId>`:
 | `cost.agents.<id>.tokens.input` / `.output` | `usage.input` / `usage.output` |
 | `cost.agents.<id>.tokens.cacheRead` | `usage.cacheRead` (billed number) |
 | `cost.agents.<id>.role` | `event.type` (implementer, task-reviewer, …) |
-| `cost.agents.<id>.status` | `completed` \| `failed` |
+| `cost.agents.<id>.status` | `event.status`, default `"completed"` (failed runs carry `error` \| `stopped` \| `aborted`) |
 
 `<agentId>` is pid-style (`auth-audit-2`) — alphanumeric + dash, a valid bare key.
 

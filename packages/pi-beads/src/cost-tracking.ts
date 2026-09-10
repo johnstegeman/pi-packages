@@ -10,7 +10,7 @@ import { getBeadsRuntime } from "./index.ts";
 
 const BEAD_RE = /\bbead:\s*([A-Za-z0-9._-]+)\b/;
 const AGENT_LINE_RE = /^cost\.agents\.([^.]+)\.total$/;
-const KEY_UNSAFE = /[^A-Za-z0-9._-]/g;
+const KEY_UNSAFE = /[^A-Za-z0-9_-]/g;
 const round6 = (n: number) => Math.round(n * 1e6) / 1e6;
 
 export default function costTracking(pi: any): void {

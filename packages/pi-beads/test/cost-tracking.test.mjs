@@ -212,4 +212,21 @@ test("failed event with usage records the run (cost spent before failing)", asyn
   ]);
 });
 
+test("dotted agent id is sanitized to underscore and still counted in rollups", async () => {
+  const s = await openSession();
+  process.env.FAKE_BD_SHOW_JSON = JSON.stringify([{ id: "rep-1", metadata: {} }]);
+  resetLog();
+  await fire(s, "subagents:completed", {
+    id: "sub.agent-9", type: "implementer", status: "completed",
+    description: "Implement task bead:rep-1",
+    usage: { input: 10, output: 5, cacheRead: 0, cost: { total: 0.11 } },
+  });
+  findUpdateContaining("rep-1", [
+    "--set-metadata", "cost.agents.sub_agent-9.total=0.11",
+    "--set-metadata", "cost.agents.sub_agent-9.role=implementer",
+    "--set-metadata", "cost.total=0.11",
+    "--set-metadata", "cost.agents.count=1",
+  ]);
+});
+
 run();
