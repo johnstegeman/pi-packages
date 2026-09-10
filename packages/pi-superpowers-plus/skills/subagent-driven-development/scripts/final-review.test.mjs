@@ -208,6 +208,24 @@ test("behavior: clean run returns inline clean envelope", async () => {
   for (const s of result.dimStatus) assert.equal(s.ok, true, s.dimension + ' finder must be ok');
 })
 
+test("behavior: clean + findingsFile run writes no file; compact envelope is clean", async () => {
+  const { state, agent } = liveAgent({ empty: true })
+  const result = await runWorkflow(src, {
+    args: { base: 'a', head: 'b', packagePath: '/x', description: 'd', gateBeadId: 'g', findingsFile: '/tmp/clean.jsonl' },
+    agent,
+  })
+  // clean run honors findingsFile with the compact envelope, but the writer
+  // child must never be called — no file is written for a clean run
+  assert.equal(result.count, 0);
+  assert.equal(result.findingsFile, '/tmp/clean.jsonl');
+  assert.equal(result.degraded, null);
+  assert.equal(result.refuted, 0);
+  for (const s of result.dimStatus) assert.equal(s.ok, true, s.dimension + ' finder must be ok');
+  assert.equal(state.finderCalls, 5, 'all five dimension finders ran');
+  assert.equal(state.refuterCalls, 0, 'no refuters on a clean run');
+  assert.equal(state.writerPrompts.length, 0, 'writer agent must never be called on a clean run');
+})
+
 test("behavior: populated run dedupes + refutes", async () => {
   const { state, agent } = liveAgent()
   const result = await runWorkflow(src, {

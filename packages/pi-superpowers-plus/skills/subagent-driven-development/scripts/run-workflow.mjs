@@ -21,7 +21,7 @@ export async function runWorkflow(source, sandbox = {}) {
   const context = vm.createContext({
     args: sandbox.args ?? {},
     agent: sandbox.agent ?? (async () => null),
-    parallel: sandbox.parallel ?? (async (thunks) => Promise.all(thunks.map((t) => t()))),
+    parallel: sandbox.parallel ?? (async (thunks) => Promise.all(thunks.map((t) => t().catch(() => null)))),
     pipeline: sandbox.pipeline ?? (async (items, s1, s2) => {
       const out = [];
       for (const item of items) {

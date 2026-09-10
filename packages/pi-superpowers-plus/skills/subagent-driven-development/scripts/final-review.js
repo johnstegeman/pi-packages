@@ -141,6 +141,13 @@ const refutation = (f, i) => {
   return lines.join('\n')
 }
 
+// Shared verdict shape: a failed/skipped refuter (null wave result) degrades to
+// the same unverified fallback in BOTH the inline envelope and the on-disk
+// verify lines — the documented `verdict { isReal, reason }` contract holds
+// everywhere, never a bare null.
+const verdictShape = (v) =>
+  v ? { isReal: v.isReal, reason: v.reason } : { isReal: true, reason: 'unverified (refuter skipped)' }
+
 phase('Find')
 const results = await parallel(DIMENSIONS.map((d) => () =>
   agent(requirement(d), { agentType: 'code-reviewer', label: 'find:' + d, phase: 'Find', schema: FINDINGS_SCHEMA })
@@ -205,9 +212,7 @@ const findings = deduped.map((f, i) => ({
   severity: f.severity,
   dimensions: f.dimensions,
   description: f.description,
-  verification: verdicts[i]
-    ? { isReal: verdicts[i].isReal, reason: verdicts[i].reason }
-    : { isReal: true, reason: 'unverified (refuter skipped)' },
+  verification: verdictShape(verdicts[i]),
 }))
 
 if (ARGS.findingsFile) {
@@ -231,7 +236,7 @@ if (ARGS.findingsFile) {
       line: f.line ?? null,
       severity: f.severity,
       description: f.description,
-      verdict: verdicts[i],
+      verdict: verdictShape(verdicts[i]),
     }),
   )
   const lines = findLines.concat(verifyLines).join('\n')
