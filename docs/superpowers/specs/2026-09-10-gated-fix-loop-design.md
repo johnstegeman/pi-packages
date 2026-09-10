@@ -74,8 +74,9 @@ covering-test command:
 ### 3. Script contract: `fix-loop.js`
 
 - **Args in:** `{ taskBeadId, reportFilePath, findings, gate, fixBase, head, gateBeadId, packagePath }`
-- **Envelope out:** `{ passed: boolean, gateOutput?: string, agentSummary?: string, reReview?: verdicts }`
-  — `passed: false` means the controller adjudicates (breaker rules, unchanged).
+- **Envelope out:** `{ passed: boolean, gateOutput?: string, agentSummary?: string, reReview?: verdicts, reason?: string }`
+  — `passed: false` means the controller adjudicates (breaker rules, unchanged); `reason`
+  distinguishes `'bad-args'` (fall back to plain path) from gate/test failure (adjudicate).
 - **Shape:** `meta = { name: 'sdd-fix-loop', phases: [{ title: 'Fix' }, { title: 'Re-review' }] }`.
   One pipeline item (= one fix round) through two stages; a `null`/throw in stage 1
   drops the item, so re-review never runs on an unproven fix.
@@ -147,7 +148,8 @@ spine. `passed: false` rulings use the existing breaker entries
 | `SubagentWorkflow` unavailable (pi <0.84, disabled, or user skips) | Fall back to plain path for that task — prose evidence as today; never fake a gate |
 | `args` JSON string / malformed | Normalize / degrade to empty object, never a fatal throw; envelope `{ passed: false, reason: 'bad-args' }` → controller falls back to plain path |
 | Gate command broken (exit 127 / "command not found" in `gateOutput`) | Controller distinguishes broken-command → repair or drop the gate → plain path; genuine test-failure → adjudicate |
-| Stage-1 agent dies / workflow skipped | Envelope `passed: false` → controller adjudicates or falls back from `gateOutput`; loop must not silently end |
+| Stage-1 agent dies | Envelope `passed: false` → controller adjudicates or falls back from `gateOutput`; loop must not silently end |
+| Workflow skipped by the user / tool returns null | Same as unavailable → fall back to plain path for that task; no half-applied round |
 | Re-review stage returns null | Controller re-runs the scoped re-review on the plain path once; the round is not silently assumed clean |
 | New Critical/Important breakage in fix diff | Joins open findings → next round (same rule as today) |
 
