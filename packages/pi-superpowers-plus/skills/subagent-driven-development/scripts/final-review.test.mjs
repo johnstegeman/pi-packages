@@ -55,6 +55,8 @@ test("defensive args normalization present", () => {
 
 test("dimensions: DEFAULT_DIMENSIONS + membership guard + fallback", () => {
   assert.match(src, /const DEFAULT_DIMENSIONS = \['correctness', 'security', 'performance', 'plan', 'maintainability'\]/);
+  // type-safe: non-array `dimensions` (e.g. a JSON-string args delivery) degrades to []
+  assert.match(src, /Array\.isArray\(ARGS\.dimensions\)/);
   assert.match(src, /Object\.hasOwn\(FOCUS, d\)/);
   assert.match(src, /DIMENSIONS\.length === 0\) DIMENSIONS\.push\(\.\.\.DEFAULT_DIMENSIONS\)/);
 });
@@ -76,11 +78,47 @@ test("verify: WAVE = 6 bounded sequential waves keep verdicts in order", () => {
   assert.match(src, /i \+= WAVE/);
   assert.match(src, /deduped\.slice\(i, i \+ WAVE\)/);
   assert.match(src, /verdicts\.push\(\.\.\.waveVerdicts\)/);
+  // refutation takes the deduped index so verify lines are order-independent on disk
+  assert.match(src, /slice\.map\(\(f, j\) =>/);
+  assert.match(src, /refutation\(f, i \+ j\)/);
 });
 
 test("return envelope keys (both envelopes carry degraded + dimStatus)", () => {
   assert.match(src, /base: ARGS\.base, head: ARGS\.head, dimensions: DIMENSIONS, findings: \[\],\n\s*degraded, dimStatus,/);
   assert.match(src, /base: ARGS\.base, head: ARGS\.head, dimensions: DIMENSIONS, findings, degraded,\n\s*dimStatus,/);
+});
+
+test("findingsFile: compact envelope keys when set; inline envelope kept as fallback", () => {
+  assert.match(src, /if \(ARGS\.findingsFile\)/);
+  assert.match(src, /count: deduped\.length/);
+  assert.match(src, /findingsFile: ARGS\.findingsFile/);
+  assert.match(src, /refuted: deduped\.filter/);
+  // the old inline envelope must still appear as the back-compat fallback path
+  assert.match(src, /base: ARGS\.base, head: ARGS\.head, dimensions: DIMENSIONS, findings, degraded,\n\s*dimStatus,/);
+});
+
+test("findingsFile: both finder and refuter prompts append ONE JSONL line", () => {
+  const builders = src.slice(src.indexOf("const requirement"), src.indexOf("phase('Find')"));
+  assert.match(builders, /const requirement = \(dimension\) => \{/);
+  assert.match(builders, /const refutation = \(f, i\) => \{/);
+  assert.match(builders, /ARGS\.findingsFile/);
+  // heredoc payloads are raw JSON lines, so the keys are quoted
+  assert.match(builders, /"kind":"find"/);
+  assert.match(builders, /"kind":"verify"/);
+});
+
+test("findingsFile: children append via quoted heredoc (no node -e one-liner, path quoted)", () => {
+  assert.match(src, /<<'EOF'/);
+  assert.match(src, /cat >> '/);
+  assert.equal((src.match(/<<'EOF'/g) ?? []).length, 2);
+  assert.ok(!src.includes("appendFileSync"), "node -e persistence one-liner must be gone");
+});
+
+test("findingsFile: clean run honors findingsFile with compact envelope (count: 0)", () => {
+  assert.match(src, /if \(deduped\.length === 0\) \{\n\s*if \(ARGS\.findingsFile\)/);
+  assert.match(src, /count: 0,\n\s*findingsFile: ARGS\.findingsFile, degraded, dimStatus, refuted: 0,/);
+  // inline clean envelope retained for the no-findingsFile case
+  assert.match(src, /base: ARGS\.base, head: ARGS\.head, dimensions: DIMENSIONS, findings: \[\],\n\s*degraded, dimStatus,/);
 });
 
 test("degraded: set when ANY finder fails (N of M, named)", () => {

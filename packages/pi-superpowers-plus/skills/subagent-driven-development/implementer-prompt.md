@@ -126,6 +126,7 @@ Dispatch a subagent with this prompt:
     Write your full report to [REPORT_FILE]:
     - What you implemented (or what you attempted, if blocked)
     - What you tested and test results
+    - **Covering-test command** — the exact re-runnable command that proves your amended code works, from the repo root or with an explicit `cd` (e.g. `cd packages/statusline && npm test`, or a focused runner like `npx vitest run <file>`). Write `none` if no test covers this change (e.g. doc-only). The controller may use this as a hard gate on fix rounds.
     - **TDD Evidence** (if TDD was required for this task):
       - RED: command run, relevant failing output before implementation, and why the failure was expected
       - GREEN: command run and relevant passing output after implementation

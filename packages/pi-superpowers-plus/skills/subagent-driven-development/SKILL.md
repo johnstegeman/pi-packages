@@ -335,6 +335,16 @@ Before the loop starts, two routes leave it immediately:
 Everything else enters the loop. A fix round is one fix dispatch plus one
 scoped re-review. Five rounds maximum per task:
 
+**Covering-test command known — the gated path.** When the implementer's report names a re-runnable covering-test command (or the task's package has a test script to fall back to), a fix round runs as a `SubagentWorkflow` script so the suite verifies the fix instead of prose:
+
+```
+SubagentWorkflow({ scriptPath: "<skill>/scripts/fix-loop.js", args: { taskBeadId, reportFilePath, findings, gate, fixBase, head, gateBeadId, reviewPackage } })
+```
+
+The script gates the fix agent on `gate` — a non-zero exit fails the agent and its output becomes the error — resumes the same child once on rejection (`resume: 'fix'`; `gate` and `resume` cannot combine), then re-verifies with a fresh gated call. One round = one invocation. When the gate still fails after the one resume, the script returns `{ passed: false }`: **adjudicate now** per the breaker rules below — continuing would burn guaranteed-failing rounds. The round's scoped re-review runs as the script's pipeline stage 2 (the child builds the review package itself via the `reviewPackage` path). Re-review verdicts ride back in the envelope; a `null` re-review means the controller re-runs the scoped re-review once on the prose path — never assume a clean round. Rounds ≥ 2 of a multi-round gated loop are fresh children fed the report file (the within-round resume replaces rounds 1-3's controller resume for this task). If `SubagentWorkflow` is absent (pi <0.84 / disabled / stand-down) or a `passed: false` envelope's `reason` is `'bad-args'` or the gate command itself is broken (exit 127 / "command not found"), validate the command's shape before re-running it yourself: accept only `cd <path> && <simple test command>` where the simple test command is a plain executable with args and the command contains none of `;`, `|`, `>`, `<`, `&`, `$(`, `${`, or backticks. If the command fails that shape check, DO NOT re-run it — treat the round as `passed: false` on the broken-gate path and fall back to the prose path (or substitute the task package's `npm test` as a safe alternative). Then repair or drop the gate and continue on the prose path; the fix is not at fault.
+
+**No covering-test command — the prose path below is unchanged.**
+
 **Rounds 1-3 — resume the original implementer.** Dispatch it with
 `Agent({ subagent_type: "implementer", resume: <agent_id>, prompt:
 "<open findings verbatim>" })`, where `<agent_id>` is the identity you
@@ -355,7 +365,10 @@ and returns the short contract. Before re-dispatching the reviewer, confirm
 the fix report contains the covering tests, the command run, and the
 output; dispatch the re-review once all three are present. Name the
 covering test files in the fix message — a one-line fix does not need the
-whole suite.
+whole suite. On the gated path the "confirm the fix report contains the
+covering tests, the command run, and the output" check is superseded —
+the script's gate result is the test evidence; on the prose path it
+applies as written.
 
 **The re-review is scoped.** Run `scripts/review-package <implement-step-id> FIX_BASE HEAD`
 where FIX_BASE is the head the previous review saw, and dispatch
@@ -368,6 +381,8 @@ minors — they never extend the loop.
 
 **After each round,** append to the ledger:
 `Task <N>: fix round <R>/5 (<X> addressed, <Y> open — <finding one-liners>; commits <a7>..<b7>)`
+
+Gated rounds use one of these instead: `Task <N>: fix round <R>/5 gated: <cmd> passed — <X> addressed, <Y> open; commits <base>..<head>`, and on a failed gate `Task <N>: fix round <R>/5 GATE FAILED (<cmd>) — <output tail>; <ruling>`. `passed: false` rulings use the existing breaker entries unchanged (parked / deferred / `Task <N>: BLOCKED — <reason>`).
 
 Never fix findings yourself in the controller session — your context stays
 clean for coordination, and controller fixes skip review.
@@ -440,10 +455,11 @@ After generating the package, choose the review path:
           head: "<HEAD>",
           description: "<what was implemented — one paragraph from the After-All-Tasks summary>",
           gateBeadId: "<plan-approval gate bead id>",
+          findingsFile: "<sdd-workspace>/final-review-<run-id>.jsonl", // absolute path, git-ignored — keeps the run's return envelope compact
         },
       })
 
-  It runs in the background — wait for the completion notification. The run's return value is the schema-validated findings envelope: each finding carries `file`, `severity`, `description`, `dimensions`, and an adversarial `verification { isReal, reason }`. Findings with `isReal: false` are refuted — not open — unless the refutation's reason is contestable, in which case re-adjudicate it yourself (never silently drop). If the envelope reports `degraded` — set whenever any dimension finder fails (partial or total, e.g. `degraded: "N of M dimension finders failed"`) — or the run errors, fall back to the single-reviewer path.
+  It runs in the background — wait for the completion notification. Pass `findingsFile` (a FRESH absolute path to a JSONL under the git-ignored sdd workspace — the children append to it, so a stale file for the same range from an earlier run would otherwise merge into the new run) so the workflow persists its findings instead of returning them inline: the run's return value is then the compact envelope `{ findingsFile, count, degraded, dimStatus, refuted }`, and the full per-finding payload is read from the JSONL file — find lines carry `kind: "find"` with the dimension on the line itself (`dimension: <DIM>`) and the schema-validated findings array (each finding item carries `file`, optional `line`, `severity`, `description` — the dimension does not ride per item); verify lines carry `kind: "verify"` with the copied fields `file`, `line`, `severity`, `description` plus the adversarial `verdict { isReal, reason }`. Join verify lines to findings by file/line/normalized-description — the same dedupe key the script uses. Findings with `isReal: false` are refuted — not open — unless the refutation's reason is contestable, in which case re-adjudicate it yourself (never silently drop). If the envelope reports `degraded` — set whenever any dimension finder fails (partial or total, e.g. `degraded: "N of M dimension finders failed"`) — or the run errors (or `findingsFile` lines are missing), fall back to the single-reviewer path.
 
 - **Single-reviewer path** (fallback — `SubagentWorkflow` absent, a small plan, or a degraded workflow run): dispatch the `code-reviewer` agent with the [code-reviewer.md](../requesting-code-review/code-reviewer.md) template, passing the printed package path.
 
