@@ -22,12 +22,14 @@ git fetch subagents "$UPSTREAM_REF"
 git fetch "$ORIGIN" "refs/heads/$BOT_BRANCH:refs/remotes/$ORIGIN/$BOT_BRANCH" || true
 
 # 3. Establish the branch: existing tip (preserves human commits) or fresh off HEAD
+FRESH=0
 if git rev-parse --verify "refs/remotes/$ORIGIN/$BOT_BRANCH" >/dev/null 2>&1; then
   echo "++ Using existing $BOT_BRANCH (preserves non-main commits)"
   git switch -c "$BOT_BRANCH" "refs/remotes/$ORIGIN/$BOT_BRANCH"
 else
   echo "++ Creating fresh $BOT_BRANCH"
   git switch -c "$BOT_BRANCH"
+  FRESH=1
 fi
 
 # 4. Merge upstream onto the branch tip; a conflict fails loudly here
@@ -41,6 +43,10 @@ UPSTREAM_SHA="$(git rev-parse --short "subagents/$UPSTREAM_REF")"
 
 # 5. No-op detection: HEAD unchanged means nothing to sync (never compare vs origin/main)
 if [ "$AFTER" = "$BEFORE" ]; then
+  if [ "$FRESH" = "1" ]; then
+    echo "++ Establishing fresh $BOT_BRANCH on $ORIGIN (no upstream changes)"
+    git push "$ORIGIN" "$BOT_BRANCH"
+  fi
   echo "changed=false"
   echo "upstream_sha=$UPSTREAM_SHA"
   echo "No upstream changes — nothing to sync."
