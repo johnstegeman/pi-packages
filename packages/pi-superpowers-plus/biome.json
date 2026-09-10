@@ -2,5 +2,14 @@
   "$schema": "https://biomejs.dev/schemas/2.5.6/schema.json",
   "formatter": { "indentStyle": "space", "indentWidth": 2, "lineWidth": 120 },
   "linter": { "rules": { "preset": "recommended" } },
-  "files": { "includes": ["**", "!**/node_modules", "!**/docs", "!**/*.md", "!**/*.json"] }
+  "files": {
+    "includes": [
+      "**",
+      "!**/node_modules",
+      "!**/docs",
+      "!**/*.md",
+      "!**/*.json",
+      "!**/skills/subagent-driven-development/scripts"
+    ]
+  }
 }
