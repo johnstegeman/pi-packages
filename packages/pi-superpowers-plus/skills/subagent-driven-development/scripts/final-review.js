@@ -2,9 +2,11 @@
 // Invoked by the SDD controller during Final Review:
 //   SubagentWorkflow({ scriptPath: "<skill>/scripts/final-review.js", args: {
 //     packagePath, base, head, description, gateBeadId, dimensions?, findingsFile? } })
-// The script has no filesystem/bash — its agents do all reading and, when
-// findingsFile is set, append their schema outputs to that JSONL via the child
-// shells (the return envelope then stays compact). Read-only on beads: finders
+// The script has no filesystem/bash — its agents do all reading; when
+// findingsFile is set, the SCRIPT machine-builds every JSONL line
+// (JSON.stringify — valid by construction, no LLM JSON authorship) and ONE
+// writer child appends the pre-built lines to the file via a quoted heredoc,
+// so the return envelope stays compact. Read-only on beads: finders
 // only beads_show the gate bead for Global Constraints. Only the
 // return envelope persists (the resume journal is session-scoped).
 
@@ -117,19 +119,6 @@ const requirement = (dimension) => {
     '',
     'Find REAL issues only, at the correct severity (critical/important/minor). Return the schema object; an empty findings array when clean.',
   ]
-  if (ARGS.findingsFile) {
-    // The sandbox cannot write files, but children have bash: each finder appends
-    // ONE JSON line carrying its own schema output, so the full findings payload
-    // lives on disk and the return envelope stays compact (never truncated).
-    lines.push(
-      '',
-      'After assembling your schema object, append ONE JSON line for your dimension to the findings file with a single bash command:',
-      "cat >> '" + ARGS.findingsFile + "' <<'EOF'",
-      '{"kind":"find","dimension":"' + dimension + '","findings":[...]}',
-      'EOF',
-      'Replace [...] with your findings array (valid JSON). The heredoc delimiter is quoted (\'EOF\'), so the shell performs no interpolation — single quotes, shell metacharacters, and spaces inside your JSON are safe. The file receives exactly one line. If the file cannot be written, say so in your final message. Never write `\\\'` (backslash-quote) inside your JSON — it is invalid JSON; single quotes need no escaping. Escape only double quotes and backslashes.',
-    )
-  }
   return lines.join('\n')
 }
 
@@ -149,19 +138,6 @@ const refutation = (f, i) => {
     '',
     'Return the schema object: isReal (false = refuted), reason (your judgment).',
   ]
-  if (ARGS.findingsFile) {
-    // The deduped index pins each line to its finding, so on-disk order never
-    // depends on wave scheduling; the copied fields make the line self-identifying
-    // against the script's own dedupe key.
-    lines.push(
-      '',
-      'After assembling your schema object, append ONE JSON line for this finding to the findings file with a single bash command:',
-      "cat >> '" + ARGS.findingsFile + "' <<'EOF'",
-      '{"kind":"verify","file":F_FILE,"line":F_LINE,"severity":F_SEV,"description":F_DESC,"verdict":PLACEHOLDER}',
-      'EOF',
-      'Replace F_FILE with the file path, F_LINE with the line number or null, F_SEV with the severity, F_DESC with the description (copy all four verbatim from the finding data above; JSON-quote the strings), and PLACEHOLDER with your schema object (valid JSON). The heredoc delimiter is quoted (\'EOF\'), so the shell performs no interpolation — single quotes and shell metacharacters inside your JSON are safe. The file receives exactly one line. If the file cannot be written, say so in your final message. Never write `\\\'` (backslash-quote) inside your JSON — it is invalid JSON; single quotes need no escaping. Escape only double quotes and backslashes.',
-    )
-  }
   return lines.join('\n')
 }
 
@@ -235,9 +211,39 @@ const findings = deduped.map((f, i) => ({
 }))
 
 if (ARGS.findingsFile) {
-  // Compact envelope only: children appended the full payload to the JSONL on disk
-  // (one find line per dimension, one verify line per surviving finding), so a
-  // large review cannot truncate the run's return value.
+  // Machine-built JSONL lines: the script serializes every find and verify
+  // entry itself (deterministic, valid by construction) — children never
+  // hand-write JSON. Find lines are rebuilt per-dimension from the RAW finder
+  // outputs (pre-dedupe), so the on-disk shape stays byte-compatible with the
+  // controller's reader (one find line per dimension); verify lines mirror
+  // deduped + verdicts 1:1. ONE writer child appends the pre-built lines via
+  // a quoted heredoc, keeping the run's return envelope compact (never
+  // truncated by a large review).
+  const findLines = results
+    .filter((r) => r !== null && r !== undefined)
+    .map(({ dimension, r }) =>
+      JSON.stringify({ kind: 'find', dimension, findings: r && Array.isArray(r.findings) ? r.findings : [] }),
+    )
+  const verifyLines = deduped.map((f, i) =>
+    JSON.stringify({
+      kind: 'verify',
+      file: f.file,
+      line: f.line ?? null,
+      severity: f.severity,
+      description: f.description,
+      verdict: verdicts[i],
+    }),
+  )
+  const lines = findLines.concat(verifyLines).join('\n')
+  const writerPrompt = [
+    'Append the ' + (findLines.length + verifyLines.length) + ' JSON lines below to ' + ARGS.findingsFile +
+    ' with ONE bash command — copy the lines EXACTLY (they are valid JSON; do not reformat, reorder, or edit them). Use:',
+    "cat >> '" + ARGS.findingsFile + "' <<'EOF'",
+    lines,
+    'EOF',
+    'Then reply with the number of lines written.',
+  ].join('\n')
+  const wrote = await agent(writerPrompt, { label: 'writer', phase: 'Verify', agentType: 'general-purpose', effort: 'low' })
   return {
     base: ARGS.base, head: ARGS.head, dimensions: DIMENSIONS, count: deduped.length,
     findingsFile: ARGS.findingsFile, degraded, dimStatus,
@@ -245,6 +251,10 @@ if (ARGS.findingsFile) {
       const v = verdicts[i]
       return v !== null && v !== undefined && v.isReal === false
     }).length,
+    // The script cannot verify the FILE write; the controller audits the file
+    // post-run per SKILL.md. persisted:false means the writer child failed or
+    // was skipped (a null result) — treat the run as degraded.
+    persisted: wrote !== null,
   }
 }
 return {

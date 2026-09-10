@@ -9,6 +9,7 @@ import { readFileSync } from "node:fs";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import { Script } from "node:vm";
+import { runWorkflow } from "./run-workflow.mjs";
 
 const scriptPath = join(dirname(fileURLToPath(import.meta.url)), "fix-loop.js");
 const src = readFileSync(scriptPath, "utf8");
@@ -18,7 +19,7 @@ const tests = [];
 function test(name, fn) { tests.push([name, fn]); }
 async function run() {
   for (const [name, fn] of tests) {
-    try { fn(); console.log(`ok - ${name}`); }
+    try { await fn(); console.log(`ok - ${name}`); }
     catch (e) { failures++; console.error(`FAIL - ${name}\n${e.stack ?? e}`); }
   }
   if (failures) { console.error(`\nfix-loop: ${failures} test(s) failed`); process.exit(1); }
@@ -109,5 +110,51 @@ test("script parses as valid JS (vm: runtime wrapper compile)", () => {
     new Script("(async () => {\n" + body + "\n})()", { filename: scriptPath });
   }, "script must compile under the runtime's async wrapper");
 });
+
+
+// ----- behavior tests (executed through the vm harness) -----
+
+const passedArgs = {
+  taskBeadId: 't', gate: 'npm test', gateBeadId: 'g', reportFilePath: '/r',
+  reviewPackage: '/rp', fixBase: 'b', head: 'h', findings: 'fetched data here',
+}
+
+test("behavior: passed round returns passed:true", async () => {
+  let calls = 0
+  const agent = async (prompt, opts) => { calls++; return 'done — gate passed' }
+  const result = await runWorkflow(src, { args: passedArgs, agent })
+  assert.equal(result.passed, true);
+  assert.ok(result.agentSummary, 'agentSummary must be truthy');
+  assert.ok(result.reReview, 'reReview must be present');
+  assert.equal(calls, 2, 'fix + re-review agents');
+})
+
+test("behavior: gate-failed round returns passed:false with reason", async () => {
+  // first gated 'fix' call fails (null); the resume (ungated 'fix') succeeds;
+  // the re-gated 'verify' call fails (null) -> the round is dropped and the
+  // failure envelope carries reason 'gate-failed'
+  let fixCalls = 0
+  let verifyCalls = 0
+  const agent = async (prompt, opts) => {
+    const label = opts?.label ?? ''
+    if (label === 'fix') { fixCalls++; return fixCalls === 1 ? null : 'resumed and fixed' }
+    if (label === 'verify') { verifyCalls++; return null }
+    return 'unexpected'
+  }
+  const result = await runWorkflow(src, { args: passedArgs, agent })
+  assert.equal(result.passed, false);
+  assert.equal(result.reason, 'gate-failed');
+  assert.equal(fixCalls, 2, 'first gated fix + ungated resume');
+  assert.equal(verifyCalls, 1, 'exactly one re-gated verify');
+})
+
+test("behavior: bad-args returns passed:false reason bad-args", async () => {
+  let calls = 0
+  const agent = async () => { calls++; return 'never should be called' }
+  const result = await runWorkflow(src, { args: {}, agent })
+  assert.equal(result.passed, false);
+  assert.equal(result.reason, 'bad-args');
+  assert.equal(calls, 0, 'no agent dispatch on bad args');
+})
 
 run();

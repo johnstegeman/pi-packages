@@ -12,6 +12,7 @@ import { readFileSync, rmSync } from "node:fs";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import { Script } from "node:vm";
+import { runWorkflow } from "./run-workflow.mjs";
 
 const scriptPath = join(dirname(fileURLToPath(import.meta.url)), "wave-parallel.js");
 const src = readFileSync(scriptPath, "utf8");
@@ -21,7 +22,7 @@ const tests = [];
 function test(name, fn) { tests.push([name, fn]); }
 async function run() {
   for (const [name, fn] of tests) {
-    try { fn(); console.log(`ok - ${name}`); }
+    try { await fn(); console.log(`ok - ${name}`); }
     catch (e) { failures++; console.error(`FAIL - ${name}\n${e.stack ?? e}`); }
   }
   if (failures) { console.error(`\nwave-parallel: ${failures} test(s) failed`); process.exit(1); }
@@ -148,4 +149,62 @@ test("review-package scoping check: literal pathspecs keep the diff file-scoped;
     rmSync(emptyOut, { force: true });
   }
 });
+
+// ----- behavior tests (executed through the vm harness) -----
+
+const waveArgs = {
+  wave: [{ taskBeadId: 'a', files: ['f1'] }, { taskBeadId: 'b', files: ['f2'] }],
+  base: 'b', reportDir: '/r', gateBeadId: 'g', reviewPackage: '/rp',
+}
+
+test("behavior: done+compliant wave returns clean entries", async () => {
+  const reviewCalls = []
+  const agent = async (prompt, opts) => {
+    const label = opts?.label ?? ''
+    if (label.startsWith('implement:')) {
+      const id = label.slice('implement:'.length)
+      return { status: 'done', reportFile: '/r/' + id + '-report.md' }
+    }
+    if (label.startsWith('review:')) { reviewCalls.push(label); return { specCompliant: true, issues: [], assessment: 'ok' } }
+    return null
+  }
+  const result = await runWorkflow(src, { args: waveArgs, agent })
+  assert.equal(result.wave.length, 2);
+  for (const entry of result.wave) {
+    assert.equal(entry.status, 'done');
+    assert.equal(entry.spec.specCompliant, true);
+    assert.ok(Array.isArray(entry.spec.issues));
+  }
+  assert.equal(result.degraded, null);
+  assert.deepEqual(reviewCalls, ['review:a', 'review:b']);
+})
+
+test("behavior: needs_context short-circuits review", async () => {
+  const reviewCalls = []
+  const agent = async (prompt, opts) => {
+    const label = opts?.label ?? ''
+    if (label === 'implement:a') return { status: 'needs_context', reportFile: '/r/a-report.md' }
+    if (label.startsWith('review:')) { reviewCalls.push(label); return { specCompliant: true, issues: [], assessment: 'ok' } }
+    return null
+  }
+  const result = await runWorkflow(src, { args: waveArgs, agent })
+  const entry = result.wave.find((w) => w.taskBeadId === 'a')
+  assert.equal(entry.status, 'needs_context');
+  assert.equal(entry.skipped, true);
+  assert.ok(!('spec' in entry), 'needs_context entry must carry no spec');
+  assert.equal(reviewCalls.length, 0, 'review agent must never be called for the short-circuited item');
+})
+
+test("behavior: invalid-args reason survives", async () => {
+  const agent = async () => { throw new Error('must not be called') }
+  const result = await runWorkflow(src, {
+    args: { wave: [{ taskBeadId: 'a', files: [] }], base: 'b', reportDir: '/r', gateBeadId: 'g', reviewPackage: '/rp' },
+    agent,
+  })
+  const entry = result.wave[0]
+  assert.equal(entry.status, 'invalid-args');
+  assert.match(entry.reason, /bad item shape/);
+  assert.equal(entry.skipped, true);
+})
+
 run();
