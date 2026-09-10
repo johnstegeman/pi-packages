@@ -24,6 +24,13 @@ pass() { echo "SIM PASS: (a) human commit preserved, (b) fast-forward push, (c) 
 export GIT_AUTHOR_NAME=Sim GIT_AUTHOR_EMAIL=sim@example.com
 export GIT_COMMITTER_NAME=Sim GIT_COMMITTER_EMAIL=sim@example.com
 
+# Portable in-place edit: macOS `sed -i ''` breaks on GNU sed (a `-i ''`
+# consumes the script as a filename), so edit via a temp file instead.
+sed_inplace() {
+  local f="$1"; shift
+  sed "$@" "$f" > "$f.sed.tmp" && mv "$f.sed.tmp" "$f"
+}
+
 BASE="$(mktemp -d /tmp/sim-sync.XXXXXX)"
 trap 'rm -rf "$BASE"' EXIT
 UPSTREAM="$BASE/upstream.git"; ORIGIN="$BASE/origin.git"
@@ -58,7 +65,7 @@ git clone -q --branch main "$ORIGIN" "$BASE/human"
 pushd "$BASE/human" >/dev/null
   git switch -q -c bot/update-pi-subagents
   git subtree pull -q --prefix packages/pi-subagents "$UPSTREAM" master --squash || true  # no-op sync
-  sed -i '' 's/"pi-packages"/"pi-packages","fix_by_human":true/' package.json
+  sed_inplace package.json 's/"pi-packages"/"pi-packages","fix_by_human":true/'
   git add package.json; git commit -qm "fix: human dep-mirror on sync branch"
   PRE_TIP="$(git rev-parse HEAD)"
   git push -q origin bot/update-pi-subagents
@@ -110,14 +117,14 @@ REMOTE_AFTER="$(git ls-remote "$ORIGIN" refs/heads/bot/update-pi-subagents | awk
 # Deterministic: both sides edit the SAME line of extra.ts.
 git clone -q --branch bot/update-pi-subagents "$ORIGIN" "$BASE/s2-human"
 pushd "$BASE/s2-human" >/dev/null
-  sed -i '' 's/export const two = 2;/export const two = 2; \/\/ S2 human fix/' packages/pi-subagents/src/extra.ts
+  sed_inplace packages/pi-subagents/src/extra.ts 's/export const two = 2;/export const two = 2; \/\/ S2 human fix/'
   git add packages/pi-subagents/src/extra.ts
   git commit -qm "fix: S2 human edit on extra.ts (sync branch)"
   git push -q origin bot/update-pi-subagents
 popd >/dev/null
 
 pushd "$BASE/upstream-src" >/dev/null
-  sed -i '' 's/export const two = 2;/export const two = 2; \/\/ S2 upstream change/' src/extra.ts
+  sed_inplace src/extra.ts 's/export const two = 2;/export const two = 2; \/\/ S2 upstream change/'
   git add -A; git commit -qm "r3: upstream edits extra.ts (same line)"
   git push -q origin master
 popd >/dev/null
