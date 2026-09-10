@@ -66,15 +66,30 @@ jobs:
       - name: Typecheck subtree
         run: npm run typecheck
 
+  sim:
+    name: Sync-loop simulation
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Run sync sim (happy path + failure scenarios)
+        run: bash scripts/sim/simulate-sync.sh
+
   workflow-lint:
     name: Actionlint workflows
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - name: Install actionlint
+      - name: Install actionlint (pinned v1.7.12)
         run: |
           set -euo pipefail
-          curl -sSL https://raw.githubusercontent.com/rhysd/actionlint/main/scripts/download-actionlint.bash | bash
+          ALV=v1.7.12
+          ALV_NUM="${ALV#v}"
+          curl -fsSL -o "actionlint_${ALV_NUM}_linux_amd64.tar.gz" \
+            "https://github.com/rhysd/actionlint/releases/download/${ALV}/actionlint_${ALV_NUM}_linux_amd64.tar.gz"
+          curl -fsSL "https://github.com/rhysd/actionlint/releases/download/${ALV}/actionlint_${ALV_NUM}_checksums.txt" \
+            | grep -F "actionlint_${ALV_NUM}_linux_amd64.tar.gz" > checksums.txt
+          sha256sum -c checksums.txt
+          tar -xzf "actionlint_${ALV_NUM}_linux_amd64.tar.gz"
           sudo mv actionlint /usr/local/bin/
       - name: Lint workflows
         run: actionlint .github/workflows/*.yml
