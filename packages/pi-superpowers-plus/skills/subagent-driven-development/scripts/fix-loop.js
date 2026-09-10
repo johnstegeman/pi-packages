@@ -59,7 +59,7 @@ async function fixStage() {
   // The gate runs after the agent finishes: a non-zero exit fails the agent
   // and folds the command output into its error, so `fixed` is null exactly
   // when the suite did not pass — no model judges prose evidence.
-  let fixed = await agent(fixPrompt, { label: 'fix', gate: gateCommand, phase: 'Fix' })
+  let fixed = await agent(fixPrompt, { label: 'fix', gate: gateCommand, agentType: 'implementer', phase: 'Fix' })
 
   if (fixed === null) {
     log(gateCommand + ' failed — handing the output back to the same child')
@@ -75,7 +75,7 @@ async function fixStage() {
     // gated call in the same tree. This is the entire retry budget.
     const verified = await agent(
       'Run `' + gateCommand + '` and report the result. Change nothing.',
-      { label: 'verify', gate: gateCommand, effort: 'low', phase: 'Fix' },
+      { label: 'verify', gate: gateCommand, effort: 'low', agentType: 'implementer', phase: 'Fix' },
     )
     if (verified === null) {
       // A throw drops this pipeline item; the round resolves to null.
@@ -122,4 +122,4 @@ const round = (await pipeline([{}], fixStage, reReviewStage))[0]
 if (!round) {
   return { passed: false, reason: 'gate-failed', gateOutput: 'gate non-zero after one resume (' + gateCommand + ')', agentSummary: null }
 }
-return { passed: true, summary: round.summary, reReview: round.reReview }
+return { passed: true, agentSummary: round.summary, reReview: round.reReview }

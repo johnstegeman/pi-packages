@@ -37,14 +37,16 @@ test("args normalization + bad-args envelope guard", () => {
 });
 
 test("stage 1: first fix agent is gated + labelled", () => {
-  assert.match(src, /agent\(fixPrompt, \{ label: 'fix', gate: gateCommand, phase: 'Fix' \}\)/);
+  assert.match(src, /agent\(fixPrompt, \{ label: 'fix', gate: gateCommand, agentType: 'implementer', phase: 'Fix' \}\)/);
 });
 
 test("resume rule: resume: 'fix' without gate, then re-gated verify", () => {
   assert.match(src, /label: 'fix', resume: 'fix', phase: 'Fix'/);
-  assert.match(src, /label: 'verify', gate: gateCommand, effort: 'low', phase: 'Fix'/);
+  assert.match(src, /label: 'verify', gate: gateCommand, effort: 'low', agentType: 'implementer', phase: 'Fix'/);
   // gate appears exactly on the first fix call and the verify call — never on the resume
   assert.equal((src.match(/gate: /g) ?? []).length, 2);
+  // agentType: 'implementer' on exactly the two gated calls — never on the resume
+  assert.equal((src.match(/agentType: 'implementer'/g) ?? []).length, 2);
 });
 
 test("retry budget: a throw after failed verify drops the item", () => {
@@ -67,8 +69,8 @@ test("failure envelope: passed:false + reason", () => {
   assert.match(src, /passed: false, reason: 'gate-failed'/);
 });
 
-test("success envelope: passed:true + summary + reReview", () => {
-  assert.match(src, /passed: true, summary: round\.summary, reReview: round\.reReview/);
+test("success envelope: passed:true + agentSummary + reReview", () => {
+  assert.match(src, /passed: true, agentSummary: round\.summary, reReview: round\.reReview/);
 });
 
 test("no sandbox-forbidden globals", () => {

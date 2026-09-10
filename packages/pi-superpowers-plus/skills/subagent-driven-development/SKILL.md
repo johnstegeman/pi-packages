@@ -455,10 +455,11 @@ After generating the package, choose the review path:
           head: "<HEAD>",
           description: "<what was implemented — one paragraph from the After-All-Tasks summary>",
           gateBeadId: "<plan-approval gate bead id>",
+          findingsFile: "<sdd-workspace>/final-review-<run-id>.jsonl", // absolute path, git-ignored — keeps the run's return envelope compact
         },
       })
 
-  It runs in the background — wait for the completion notification. The run's return value is the schema-validated findings envelope: each finding carries `file`, `severity`, `description`, `dimensions`, and an adversarial `verification { isReal, reason }`. Findings with `isReal: false` are refuted — not open — unless the refutation's reason is contestable, in which case re-adjudicate it yourself (never silently drop). If the envelope reports `degraded` — set whenever any dimension finder fails (partial or total, e.g. `degraded: "N of M dimension finders failed"`) — or the run errors, fall back to the single-reviewer path.
+  It runs in the background — wait for the completion notification. Pass `findingsFile` (an absolute path to a JSONL under the git-ignored sdd workspace) so the workflow persists its findings instead of returning them inline: the run's return value is then the compact envelope `{ findingsFile, count, degraded, dimStatus, refuted }`, and the full per-finding payload is read from the JSONL file — find lines carry `kind: "find"` with the schema-validated findings array (each finding carries `file`, `severity`, `description`, `dimensions`); verify lines carry `kind: "verify"` with the finding's fields plus the adversarial `verification { isReal, reason }`. Join verify lines to findings by file/line/severity-agnostic-description — the same dedupe key the script uses. Findings with `isReal: false` are refuted — not open — unless the refutation's reason is contestable, in which case re-adjudicate it yourself (never silently drop). If the envelope reports `degraded` — set whenever any dimension finder fails (partial or total, e.g. `degraded: "N of M dimension finders failed"`) — or the run errors (or `findingsFile` lines are missing), fall back to the single-reviewer path.
 
 - **Single-reviewer path** (fallback — `SubagentWorkflow` absent, a small plan, or a degraded workflow run): dispatch the `code-reviewer` agent with the [code-reviewer.md](../requesting-code-review/code-reviewer.md) template, passing the printed package path.
 
