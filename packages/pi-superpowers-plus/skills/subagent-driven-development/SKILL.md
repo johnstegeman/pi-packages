@@ -428,7 +428,24 @@ Final review findings get ONE fix dispatch (a fresh implementer) plus one
 scoped re-review, then adjudicate any residuals with the breaker rules
 above. When the final review is clean, delete this plan's workspace (the
 record now lives in git) and use `/skill:finishing-a-development-branch`.
-For large branches, the whole-branch review can fan out as a `SubagentWorkflow` per the Workflows section — the phases (review dimensions, verification fan-out) and the fallback rule apply unchanged.
+After generating the package, choose the review path:
+
+- **Workflow path** (preferred when `SubagentWorkflow` is present and the branch is large or broad — multi-file, many commits, security-sensitive, or deferred minors to triage): invoke the skill's final-review workflow:
+
+      SubagentWorkflow({
+        scriptPath: "<skill-scripts-dir>/final-review.js", // the dir containing this skill's scripts/ (e.g. packages/pi-superpowers-plus/skills/subagent-driven-development/scripts/)
+        args: {
+          packagePath: "<printed package path>",
+          base: "<MERGE_BASE>",
+          head: "<HEAD>",
+          description: "<what was implemented — one paragraph from the After-All-Tasks summary>",
+          gateBeadId: "<plan-approval gate bead id>",
+        },
+      })
+
+  It runs in the background — wait for the completion notification. The run's return value is the schema-validated findings envelope: each finding carries `file`, `severity`, `description`, `dimensions`, and an adversarial `verification { isReal, reason }`. Findings with `isReal: false` are refuted — not open — unless the refutation's reason is contestable, in which case re-adjudicate it yourself (never silently drop). If the envelope reports `degraded: "all dimension finders failed"` or the run errors, fall back to the single-reviewer path.
+
+- **Single-reviewer path** (fallback — `SubagentWorkflow` absent, a small plan, or a degraded workflow run): dispatch the `code-reviewer` agent with the [code-reviewer.md](../requesting-code-review/code-reviewer.md) template, passing the printed package path.
 
 ## When a Subagent Fails
 
