@@ -1,4 +1,5 @@
 {
   "fallbackSubagent": "none",
-  "strictAgentFiles": true
+  "strictAgentFiles": true,
+  "toolDescriptionMode": "compact"
 }

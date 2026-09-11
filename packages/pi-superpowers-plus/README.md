@@ -218,6 +218,8 @@ attribution is preserved — there is no per-lookup attribution.
 
 **Fail-loud vs lenient dispatch.** With `fallbackSubagent: "none"`, the SDD agents dispatch by exact name only: `implementer`, `task-reviewer`, and `code-reviewer` resolve to the shipped templates, so a typo or an un-copied template fails loudly with the available-type list instead of silently substituting an all-tools agent. That's the point for the read-only reviewers (`code-reviewer`/`task-reviewer` carry only `read, bash, find, grep, ls`). The cost: any custom agent you add must be copied before dispatch works, and a missing template is a hard error rather than a fallback. Skip the strict setting if you prefer lenient dispatch (the pi-subagents default).
 
+**Context costs.** With workflows enabled, tool-spec context per turn is dominated by pi-subagents' `SubagentWorkflow` description (≈ 4.9k tokens of prose — the fixed cost of having workflows, not reducible here) plus the `Agent` tool description. `toolDescriptionMode: "compact"` cuts the Agent description ~75% (≈ 1.1–1.4k → ≈ 250 tokens, roughly 0.9k saved per turn): worthwhile on small/local/flash models where tool-spec tokens are expensive relative to context, harmless on large ones. Compact is the recommended mode — pi-subagents' CI contract test keeps its load-bearing guardrails in lockstep with the full description, so nothing to maintain. Want your own prose? Set `custom` and ship `<cwd>/.pi/agent-tool-description.md` (project; `{{placeholders}}` keep the agent list live, a missing file falls back to `full`). Configure via `/agents → Settings → Tool description` or `subagents.json` (global `~/.pi/agent/subagents.json`, project `<cwd>/.pi/subagents.json`); takes effect on the next pi session.
+
 ### Single Agent
 
 ```ts
