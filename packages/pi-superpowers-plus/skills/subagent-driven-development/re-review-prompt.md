@@ -51,6 +51,18 @@ Dispatch a subagent with this prompt:
     does not block this task and does not extend the loop. A broad
     whole-branch review happens after all tasks are complete.
 
+    ## Bounded Lookups
+
+    A finding's verdict may require a lookup beyond the fix diff (e.g. is the
+    amended symbol used here, is this caller in scope). You may dispatch **one
+    nested `Explore` child per such named question** to settle it — fold the
+    answer into the verdict as evidence, and never delegate open-ended
+    crawling. Treat the child's answer as an unverified claim: the evidence
+    weight of a folded verdict rests on your own corroborating reading of the
+    diff and code, not the child's word alone. If no nested `Agent` tool is available
+    to you, verdict from the diff alone; unresolved items stay
+    `NOT ADDRESSED` / `⚠️` as today.
+
     ## Tests
 
     The implementer re-ran the tests covering the amended code and appended
