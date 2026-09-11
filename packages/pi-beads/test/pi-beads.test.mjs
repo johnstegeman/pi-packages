@@ -198,6 +198,11 @@ case "$1" in
       printf '%s\n' '[{"id":"proj-m1","title":"m1","issue_type":"molecule","status":"open","dependency_type":"parent-child"}]'
       exit 0
     fi
+    # cascade-parent failure fixture (Task 4): proj-tc's parent fails to close
+    if [ "$3" = "proj-tc" ] && [ "$5" = "down" ]; then
+      printf '%s\n' '[{"id":"proj-bad-parent","title":"Bad parent","issue_type":"task","status":"open","dependency_type":"parent-child"}]'
+      exit 0
+    fi
     if [ "$3" = "proj-g2" ] && [ "$5" = "up" ]; then
       printf '%s\n' '[{"id":"proj-sap","title":"User reviews written spec","issue_type":"task","status":"open","dependency_type":"blocks"}]'
       exit 0
@@ -233,6 +238,10 @@ case "$1" in
 
   close)
     if [ "$2" = "proj-bad-step" ]; then
+      echo "boom" >&2
+      exit 1
+    fi
+    if [ "$2" = "proj-bad-parent" ]; then
       echo "boom" >&2
       exit 1
     fi
@@ -793,6 +802,15 @@ test("single-repo: beads_close cascades to close the parent step when its last c
       invs.findIndex((iv) => iv[0] === "close" && iv[1] === "proj-t9"),
     "parent closed after child",
   );
+});
+
+test("single-repo: close cascade surfaces a failed parent close", async () => {
+  const s = await openSession("single", repoDir);
+  resetLog();
+  const r = await s.byName.get("beads_close").execute("c", { ids: "proj-tc" });
+  const text = r?.content?.[0]?.text ?? "";
+  assert.match(text, /closed proj-tc/, text);
+  assert.match(text, /parent cascade: proj-bad-parent not closed/, text);
 });
 
 test("single-repo: beads_mol_pour builds argv (--var split) and emits", async () => {

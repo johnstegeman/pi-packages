@@ -1102,7 +1102,11 @@ export default function piBeadsLean(pi: any) {
           let nxt = await parentStepToClose(cid, dir);
           while (nxt) {
             const rc = await bd(["close", nxt], dir);
-            if (!rc.ok) break; // defensively stop: another worker may have closed it
+            if (!rc.ok) {
+              const msg = `parent cascade: ${nxt} not closed: ${rc.err}`;
+              failure = failure ? `${failure}; ${msg}` : msg;
+              break;
+            }
             await afterWrite(dir);
             closedIds.push(nxt);
             const prev = nxt;
@@ -1110,7 +1114,10 @@ export default function piBeadsLean(pi: any) {
           }
         }
       }
-      if (failure) return textResult(failure);
+      if (failure) {
+        const done = closedIds.length ? `closed ${closedIds.join(", ")}\nwarning: ${failure}` : failure;
+        return textResult(done);
+      }
       return textResult(`closed ${closedIds.join(", ")}`);
     },
   });
