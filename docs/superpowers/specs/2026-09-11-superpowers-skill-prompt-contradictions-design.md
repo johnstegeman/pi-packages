@@ -45,7 +45,9 @@ pointing at that identity.
 **Division of labour:** `requesting-code-review` = whole-branch / feature / before-merge review
 (`code-reviewer`); per-task review = SDD's `task-reviewer` gate. The `task-reviewer` pair
 (`agent-templates/task-reviewer.md` + `subagent-driven-development/task-reviewer-prompt.md`)
-already agrees on output format, so it only receives a symmetric pointer — no rewrite.
+already agrees on output format, so it only gains a short pointer at the top of
+`task-reviewer-prompt.md` naming `agent-templates/task-reviewer.md` as the identity/output-contract
+source — no prose rewrite.
 
 ### D2 — One canonical `set_phase` vocabulary
 
@@ -140,7 +142,9 @@ skill, call …`) and set its phase to `development`.
 - `skills/requesting-code-review/SKILL.md`: reframed as whole-branch / feature / before-merge
   review; the "Mandatory: after each task" bullet points per-task review at SDD's
   `task-reviewer` gate instead.
-- `task-reviewer` pair: symmetric pointer only.
+- `task-reviewer` pair: add a one-line pointer in `task-reviewer-prompt.md` to
+  `agent-templates/task-reviewer.md` as the identity/output-contract source; no rewrite (the two
+  already agree on the Spec Compliance / Strengths / Issues / Assessment format).
 
 ### M15 — background default
 
