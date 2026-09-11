@@ -105,4 +105,14 @@ test("the SDD task-reviewer prompt references the nested-lookup path", () => {
   );
 });
 
+test("the SDD re-review prompt documents the nested-lookup path", () => {
+  const src = readFileSync(join(root, "skills", "subagent-driven-development", "re-review-prompt.md"), "utf8");
+  assert.match(src, /nested `Explore` child/i, "re-review-prompt.md must document the nested Explore lookup");
+  assert.match(
+    src,
+    /no nested `Agent` tool is available/i,
+    "re-review-prompt.md must keep the graceful-degradation fallback",
+  );
+});
+
 run();
