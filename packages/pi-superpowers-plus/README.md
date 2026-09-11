@@ -63,7 +63,20 @@ mkdir -p .pi/agents && cp agent-templates/*.md .pi/agents/
 
 The templates are copy-in only — they are never auto-loaded from this package's directory and never overwritten by an update. Re-copy after upgrading if you want the upstream changes, or keep your local edits.
 
-No other configuration required. Skills activate automatically.
+**Recommended: fail-closed dispatch.** By default a `subagent_type` that doesn't resolve to exactly one enabled agent silently runs `general-purpose` — an agent with *all* tools, even for the read-only reviewers above. To fail closed instead, copy the matching example config (skip if you prefer the lenient default):
+
+```bash
+# Global (machine-wide) — pick this or the project-local option:
+cp config-examples/subagents.global.json ~/.pi/agent/subagents.json
+
+# Or project-local (this project only):
+mkdir -p .pi && cp config-examples/subagents.project.json .pi/subagents.json
+```
+
+- `fallbackSubagent: "none"` — dispatch fails closed: an unknown, disabled, or case-ambiguous `subagent_type` is refused with an error listing the available types, and nothing spawns. A typo'd name (e.g. `implementor`) can't silently run an all-tools `general-purpose` agent.
+- `strictAgentFiles: true` — an unreadable or unparseable agent file aborts startup and names the file, instead of being skipped with a warning; a checked-in `.pi/agents/` can't silently fall through to a same-named agent from another location. Startup only: mid-session reloads still warn.
+
+Both are also settable via `/agents → Settings` (Fallback agent / Strict agent files).
 
 ## Support
 
@@ -188,6 +201,8 @@ This package ships 4 agent templates (copy-in only — see Install):
 
 Templates live in `agent-templates/*.md` and use YAML frontmatter (per the `pi-subagents` schema) to declare tools and a system prompt body. Copy them into `.pi/agents/` (project) or `~/.pi/agent/agents/` (global) so `pi-subagents` discovers them.
 
+**Fail-loud vs lenient dispatch.** With `fallbackSubagent: "none"`, the SDD agents dispatch by exact name only: `implementer`, `task-reviewer`, and `code-reviewer` resolve to the shipped templates, so a typo or an un-copied template fails loudly with the available-type list instead of silently substituting an all-tools agent. That's the point for the read-only reviewers (`code-reviewer`/`task-reviewer` carry only `read, bash, find, grep, ls`). The cost: any custom agent you add must be copied before dispatch works, and a missing template is a hard error rather than a fallback. Skip the strict setting if you prefer lenient dispatch (the pi-subagents default).
+
 ### Single Agent
 
 ```ts
@@ -245,6 +260,9 @@ pi-superpowers-plus/
 │   ├── worker.md                     # General-purpose task agent
 │   ├── code-reviewer.md              # Production readiness reviewer
 │   └── task-reviewer.md              # Task reviewer (spec + code quality)
+├── config-examples/                   # Recommended fail-closed dispatch configs
+│   ├── subagents.global.json          # → ~/.pi/agent/subagents.json (global)
+│   └── subagents.project.json         # → .pi/subagents.json (project-local)
 ├── skills/                           # 13 workflow skills (26 markdown files)
 │   ├── using-superpowers/
 │   ├── brainstorming/
@@ -259,6 +277,8 @@ pi-superpowers-plus/
 │   ├── dispatching-parallel-agents/
 │   ├── using-git-worktrees/
 │   └── finishing-a-development-branch/
+├── scripts/                           # Structural guard for the dispatch contract
+│   └── agent-dispatch-guard.test.mjs
 └── README.md
 ```
 
@@ -266,7 +286,7 @@ pi-superpowers-plus/
 
 ```bash
 npm install
-npm test        # biome check .
+npm test        # biome check . + structural guard + widget/phase tests
 ```
 
 No compiled code or unit tests remain in this package — it ships skills and agent templates only. `npm test` runs `biome check .` (the lint/quality gate). Add tests back alongside any future code.
