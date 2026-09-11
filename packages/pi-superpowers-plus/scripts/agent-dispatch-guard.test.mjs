@@ -2,8 +2,8 @@
 // (docs/superpowers/specs/2026-09-11-fail-closed-agent-dispatch-design.md):
 // every subagent_type / agentType literal shipped in skills/ must resolve to a
 // template in agent-templates/ (or be a pi built-in), and the config-examples/
-// files must carry fallbackSubagent: "none" + strictAgentFiles: true and stay
-// byte-identical (they differ only by install location).
+// files must carry the fail-closed settings (fallbackSubagent: "none", strictAgentFiles: true) plus the
+// recommended toolDescriptionMode: "compact" and stay byte-identical (they differ only by install location).
 import assert from "node:assert/strict";
 import { readdirSync, readFileSync, statSync } from "node:fs";
 import { dirname, join } from "node:path";
@@ -76,7 +76,11 @@ test("config-examples parse, carry the fail-closed settings, and are byte-identi
   );
   assert.equal(files[0], files[1], "global and project examples must stay byte-identical");
   for (const src of files) {
-    assert.deepEqual(JSON.parse(src), { fallbackSubagent: "none", strictAgentFiles: true });
+    assert.deepEqual(JSON.parse(src), {
+      fallbackSubagent: "none",
+      strictAgentFiles: true,
+      toolDescriptionMode: "compact",
+    });
   }
 });
 test("task-reviewer opts into narrow nested delegation; implementer/worker do not", () => {
