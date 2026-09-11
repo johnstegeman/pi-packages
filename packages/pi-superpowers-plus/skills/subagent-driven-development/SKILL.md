@@ -193,9 +193,9 @@ and `beads_mol_show({ id: "<implement-step-id>" })` for reading the task beads u
   that happens, recover from `git log`.
 
 Read the molecule once (`beads_mol_current({ id: "<implement-step-id>" })`), note its context, and
-confirm the `plan-approved` gate is closed (`beads_show({ id: "<plan-approved-gate-id>" })`) before
+confirm the `plan-approved` gate is closed (`beads_show({ id: "<plan-approval-gate-bead-id>" })`) before
 dispatching any subagent — the plan's canonical Global Constraints live in that gate bead's
-description (`beads_show({ id: "<plan-approved-gate-id>", full: true })`) and are the single source handed
+description (`beads_show({ id: "<plan-approval-gate-bead-id>", full: true })`) and are the single source handed
 to reviewers (task beads still inline the constraints for implementers). Task ids and their
 `needs` ordering already exist as real dependency edges —
 no `TaskCreate`-equivalent step is needed here; `writing-plans` already created them
@@ -304,7 +304,7 @@ needed.
   id holding the plan's canonical Global Constraints.
 - The Global Constraints block is the reviewer's attention lens. Read it
   once from the plan-approval gate bead's description
-  (`beads_show({ id: "<plan-approved-gate-id>", full: true })`, populated by `writing-plans`) and pass that
+  (`beads_show({ id: "<plan-approval-gate-bead-id>", full: true })`, populated by `writing-plans`) and pass that
   gate id to the reviewer dispatch — the reviewer template carries the read instruction itself,
   so the constraints are byte-identical across every task review. The reviewer's template
   already carries the process rules (YAGNI, test hygiene, review method) — the constraints are
@@ -470,7 +470,7 @@ After generating the package, choose the review path:
           base: "<MERGE_BASE>",
           head: "<HEAD>",
           description: "<what was implemented — one paragraph from the After-All-Tasks summary>",
-          gateBeadId: "<plan-approval gate bead id>",
+          gateBeadId: "<plan-approval-gate-bead-id>",
           findingsFile: "<sdd-workspace>/final-review-<run-id>.jsonl", // absolute path, git-ignored — keeps the run's return envelope compact
         },
       })

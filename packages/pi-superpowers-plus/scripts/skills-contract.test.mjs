@@ -66,4 +66,14 @@ test("the SDD prompt set emits one aligned phase", () => {
   assert.deepEqual([...new Set(phases)], ["development"]);
 });
 
+test("plan-approval gate placeholders are not conflated", () => {
+  for (const f of skillFiles()) {
+    const src = readFileSync(f, "utf8");
+    assert.ok(!src.includes("<plan-approved-gate-id>"), `${f} still uses <plan-approved-gate-id>`);
+    for (const m of src.matchAll(/beads_gate_resolve\(\{\s*id:\s*"([^"]*)"/g)) {
+      assert.ok(!m[1].includes("gate-bead-id"), `${f} passes a gate task bead to beads_gate_resolve: ${m[1]}`);
+    }
+  }
+});
+
 run();
