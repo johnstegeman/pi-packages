@@ -51,10 +51,24 @@ MODE="\${FAKE_BD_MODE:-single}"
 } >> "$FAKE_BD_LOG"
 case "$1" in
   where)
+    if [ "$MODE" = "umbrella-dashed" ]; then
+      case "$CWD" in
+        ${shellQuote(workspace)}*|${shellQuote(umbrella)})
+          printf '  %s\\n  prefix: pi-packages\\n' ${shellQuote(join(umbrella, ".beads"))}; exit 0 ;;
+        *) echo "no beads root: $CWD" >&2; exit 1 ;;
+      esac
+    fi
     if [ "$MODE" = "umbrella" ]; then
       case "$CWD" in
-        ${shellQuote(workspace)}*|${shellQuote(umbrella)}*)
+        ${shellQuote(workspace)}*|${shellQuote(umbrella)})
           printf '  %s\\n' ${shellQuote(join(umbrella, ".beads"))}; echo "  prefix: umb"; exit 0 ;;
+        *) echo "no beads root: $CWD" >&2; exit 1 ;;
+      esac
+    fi
+    if [ "$MODE" = "single-dashed" ]; then
+      case "$CWD" in
+        ${shellQuote(repoDir)}*|${shellQuote(workspace)}*)
+          printf '  %s\\n  prefix: pi-packages\\n' ${shellQuote(join(repoDir, ".beads"))}; exit 0 ;;
         *) echo "no beads root: $CWD" >&2; exit 1 ;;
       esac
     fi
@@ -65,8 +79,11 @@ case "$1" in
     esac
     ;;
   repo)
-    if [ "$2" = "list" ] && [ "$MODE" = "umbrella" ]; then
-      printf '  - %s\\n' ${shellQuote(backendDir)}
+    if [ "$2" = "list" ]; then
+      case "$MODE" in
+        umbrella|umbrella-dashed)
+          printf '  - %s\\n' ${shellQuote(backendDir)} ;;
+      esac
     fi
     exit 0
     ;;
@@ -122,6 +139,12 @@ case "$1" in
         *dup*)
           printf '%s\n' '{"issues":[{"id":"proj-xpl","title":"Explore project context: FIXEDTOPIC","issue_type":"task"},{"id":"proj-c1","title":"Ask clarifying questions","issue_type":"task"},{"id":"proj-c2","title":"Ask clarifying questions","issue_type":"task"},{"id":"proj-app","title":"Propose approaches","issue_type":"task"},{"id":"proj-des","title":"Present design sections","issue_type":"task"},{"id":"proj-apr","title":"User approves design","issue_type":"task"},{"id":"proj-g1","title":"Gate: human","issue_type":"gate"},{"id":"proj-wsp","title":"Write spec to docs/superpowers/specs/","issue_type":"task"},{"id":"proj-srv","title":"Spec self-review","issue_type":"task"},{"id":"proj-sap","title":"User reviews written spec","issue_type":"task"},{"id":"proj-g2","title":"Gate: human","issue_type":"gate"},{"id":"proj-imp","title":"Implement FIXEDTOPIC","issue_type":"task"},{"id":"proj-ver","title":"Verify","issue_type":"task"},{"id":"proj-smt","title":"Smoke test / manual QA sign-off","issue_type":"task"},{"id":"proj-g3","title":"Gate: human","issue_type":"gate"},{"id":"proj-fin","title":"Finish development branch","issue_type":"task"}],"dependencies":[{"depends_on_id":"proj-g1","issue_id":"proj-apr","type":"blocks"},{"depends_on_id":"proj-g2","issue_id":"proj-sap","type":"blocks"},{"depends_on_id":"proj-g3","issue_id":"proj-smt","type":"blocks"}]}'
           exit 0 ;;
+        *closed-parent*)
+          printf '%s\n' '[{"id":"proj-closed-parent","status":"closed"}]'
+          exit 0 ;;
+        *bad-parent*)
+          printf '%s\n' '[{"id":"'"$3"'","status":"open"}]'
+          exit 0 ;;
       esac
       printf '%s\n' '{"issues":[{"id":"proj-xpl","title":"Explore project context: FIXEDTOPIC","issue_type":"task"},{"id":"proj-clr","title":"Ask clarifying questions","issue_type":"task"},{"id":"proj-app","title":"Propose approaches","issue_type":"task"},{"id":"proj-des","title":"Present design sections","issue_type":"task"},{"id":"proj-apr","title":"User approves design","issue_type":"task"},{"id":"proj-g1","title":"Gate: human","issue_type":"gate"},{"id":"proj-wsp","title":"Write spec to docs/superpowers/specs/","issue_type":"task"},{"id":"proj-srv","title":"Spec self-review","issue_type":"task"},{"id":"proj-sap","title":"User reviews written spec","issue_type":"task"},{"id":"proj-g2","title":"Gate: human","issue_type":"gate"},{"id":"proj-imp","title":"Implement FIXEDTOPIC","issue_type":"task"},{"id":"proj-ver","title":"Verify","issue_type":"task"},{"id":"proj-smt","title":"Smoke test / manual QA sign-off","issue_type":"task"},{"id":"proj-g3","title":"Gate: human","issue_type":"gate"},{"id":"proj-fin","title":"Finish development branch","issue_type":"task"}],"dependencies":[{"depends_on_id":"proj-g1","issue_id":"proj-apr","type":"blocks"},{"depends_on_id":"proj-g2","issue_id":"proj-sap","type":"blocks"},{"depends_on_id":"proj-g3","issue_id":"proj-smt","type":"blocks"}]}'
       exit 0
@@ -140,14 +163,28 @@ case "$1" in
         *2*) printf '{"issues":[{"id":"proj-m2-imp","title":"Implement T2","status":"open","priority":2,"labels":["step:implement"]}],"meta":{"count":1}}' ;;
         *)   printf '{"issues":[{"id":"proj-m1-imp","title":"Implement T1","status":"open","priority":2,"labels":["step:implement"]},{"id":"proj-m1-done","title":"Explore done","status":"closed","priority":2,"labels":["step:implement"]}],"meta":{"count":2}}' ;;
       esac
-    elif [ "$MODE" = "umbrella" ]; then
-      echo '[{"id": "crmback-1a2", "title": "sample"}]'
+    elif [ "$MODE" = "umbrella" ] || [ "$MODE" = "umbrella-dashed" ]; then
+      if [ "$CWD" = ${shellQuote(backendDir)} ]; then
+        # backend's samplePrefixOf call: two MOLECULE ids so the multi-id LCP path
+        # is exercised (suffix stripping must yield the bare 'crmback' prefix).
+        echo '[{"id": "crmback-mol-1", "title": "m"}, {"id": "crmback-mol-2", "title": "m"}]'
+      else
+        echo '[{"id": "crmback-1a2", "title": "sample"}]'
+      fi
+    elif [ "$MODE" = "single-dashed" ]; then
+      echo '[{"id": "pi-packages-1zth", "title": "sample"}]'
     else
       echo '[{"id": "proj-1a2", "title": "sample"}]'
     fi
     exit 0
     ;;
   dep)
+    # bulk dep wiring: bd dep add --file <jsonl> — echo each edge line so tests
+    # can assert the exact dependent->blocker edge set the tool writes.
+    if [ "$2" = "add" ] && [ "$3" = "--file" ]; then
+      while IFS= read -r line; do printf 'DEPS %s\\n' "$line" >> "$FAKE_BD_LOG"; done < "$4"
+      exit 0
+    fi
     # canned dependents for beads_gate_resolve / beads_close cascade tests
     if [ "$3" = "proj-g1" ] && [ "$5" = "up" ]; then
       printf '%s\n' '[{"id":"proj-apr","title":"User approves design","issue_type":"task","status":"open","dependency_type":"blocks"}]'
@@ -182,6 +219,21 @@ case "$1" in
       printf '%s\n' '[{"id":"proj-m1","title":"m1","issue_type":"molecule","status":"open","dependency_type":"parent-child"}]'
       exit 0
     fi
+    # cascade-parent failure fixture (Task 4): proj-tc's parent fails to close
+    if [ "$3" = "proj-tc" ] && [ "$5" = "down" ]; then
+      printf '%s\n' '[{"id":"proj-bad-parent","title":"Bad parent","issue_type":"task","status":"open","dependency_type":"parent-child"}]'
+      exit 0
+    fi
+    # already-closed-parent fixture (fix r1): parent close fails but show says closed
+    if [ "$3" = "proj-tcc" ] && [ "$5" = "down" ]; then
+      printf '%s\n' '[{"id":"proj-closed-parent","title":"Closed parent","issue_type":"task","status":"open","dependency_type":"parent-child"}]'
+      exit 0
+    fi
+    # multi-repo cascade failure fixture (fix r1): umb-tc's parent fails to close
+    if [ "$3" = "umb-tc" ] && [ "$5" = "down" ]; then
+      printf '%s\n' '[{"id":"umb-bad-parent","title":"Umb bad parent","issue_type":"task","status":"open","dependency_type":"parent-child"}]'
+      exit 0
+    fi
     if [ "$3" = "proj-g2" ] && [ "$5" = "up" ]; then
       printf '%s\n' '[{"id":"proj-sap","title":"User reviews written spec","issue_type":"task","status":"open","dependency_type":"blocks"}]'
       exit 0
@@ -201,6 +253,12 @@ case "$1" in
     ;;
   gate)
     if [ "$2" = "create" ]; then
+      # fail when the human-gate reason is the sentinel (argv: gate create --blocks <id> --type human --reason <reason> --json)
+      if [ "$8" = "Doomed gate" ]; then
+        echo "boom" >&2
+        exit 1
+      fi
+      # mirrors real bd gate create --json (a gate issue with an id field);
       # mirrors real bd gate create --json (a gate issue with an id field);
       # beads_create_list parses it to return the human-gate id
       printf '%s\\n' '{"id":"proj-gate-1","issue_type":"gate","status":"open","title":"Gate: human"}'
@@ -211,6 +269,22 @@ case "$1" in
 
   close)
     if [ "$2" = "proj-bad-step" ]; then
+      echo "boom" >&2
+      exit 1
+    fi
+    if [ "$2" = "proj-bad-parent" ]; then
+      echo "boom" >&2
+      exit 1
+    fi
+    if [ "$2" = "proj-closed-parent" ]; then
+      echo "boom" >&2
+      exit 1
+    fi
+    if [ "$2" = "umb-bad-parent" ]; then
+      echo "boom" >&2
+      exit 1
+    fi
+    if [ "$2" = "crmback-fail" ]; then
       echo "boom" >&2
       exit 1
     fi
@@ -244,6 +318,17 @@ case "$1" in
       "Doomed gate") echo "boom" >&2; exit 1 ;;
       *) printf 'generic-id\\n'; exit 0 ;;
     esac
+    ;;
+  show)
+    case "$2" in
+      *closed-parent*)
+        printf '%s\n' '[{"id":"'"$2"'","status":"closed"}]'
+        exit 0 ;;
+      *bad-parent*)
+        printf '%s\n' '[{"id":"'"$2"'","status":"open"}]'
+        exit 0 ;;
+    esac
+    echo "ok"; exit 0
     ;;
   *) echo "ok"; exit 0 ;;
 esac
@@ -325,6 +410,14 @@ function invocations() {
   return invs;
 }
 
+// bulk dep wiring: parse the `DEPS <json>` lines the fixture echoes for a
+// `bd dep add --file <path>` call. Each line is one {"from","to","type"} edge.
+function depEdges() {
+  return readFileSync(logFile, "utf8").split("\n")
+    .filter((l) => l.startsWith("DEPS "))
+    .map((l) => JSON.parse(l.slice(5)));
+}
+
 function findInvocation(args) {
   const argsStr = JSON.stringify(args);
   const found = invocations().find(
@@ -398,6 +491,37 @@ test("runtime: dirForPrefix routes ids to owning repo in umbrella mode", async (
   assert.equal(rt.dirForPrefix("nosuch-1"), null);
 });
 
+test("umbrella-dashed: dirForPrefix routes the umbrella's dashed native prefix", async () => {
+  await openSession("umbrella-dashed", projDir);
+  const rt = getBeadsRuntime();
+  assert.equal(rt.dirForPrefix("pi-packages-1zth"), umbrella);
+  assert.equal(rt.dirForPrefix("pi-packages-mol-0vre.2"), umbrella);
+  assert.equal(rt.dirForPrefix("crmback-1"), backendDir);
+  assert.equal(rt.dirForPrefix("nosuch-1"), null);
+});
+
+test("single-dashed: dirForPrefix routes the repo's dashed native prefix (nativePrefixOf probe)", async () => {
+  await openSession("single-dashed", repoDir);
+  const rt = getBeadsRuntime();
+  assert.equal(rt.dirForPrefix("pi-packages-1zth"), repoDir);
+  assert.equal(rt.dirForPrefix("pi-packages-mol-0vre.2"), repoDir);
+  assert.equal(rt.dirForPrefix("nosuch-1"), null);
+});
+
+test("samplePrefixOf multi-id LCP strips molecule suffixes (matches single-id path)", async () => {
+  await openSession("umbrella", projDir);
+  const rt = getBeadsRuntime();
+  // backend's sampled ids are molecule ids crmback-mol-1 / crmback-mol-2: the
+  // normalized LCP must yield bare 'crmback', not 'crmback-mol' or "".
+  assert.equal(rt.dirForPrefix("crmback-1a2"), backendDir);
+  assert.equal(rt.dirForPrefix("crmback-mol-1"), backendDir);
+});
+
+test("samplePrefixOf fallback still derives a dashless prefix when bd where fails", async () => {
+  await openSession("umbrella-dashed", projDir);
+  assert.equal(getBeadsRuntime().dirForPrefix("crmback-1a2"), backendDir);
+});
+
 // ---------------------------------------------------------------------------
 // 1. single-repo mode: argv construction + beads:changed emit after mutations
 // ---------------------------------------------------------------------------
@@ -416,6 +540,30 @@ test("single-repo: beads_create builds argv and emits beads:changed", async () =
   findInvocation(["create", "Do the thing"]);
   assert.equal(s.emitted.length, before + 1);
   assert.equal(s.emitted.at(-1), "beads:changed");
+});
+
+test("single-repo: beads_create rejects an unknown repo instead of using the default", async () => {
+  const s = await openSession("single", repoDir);
+  resetLog();
+  const r = await s.byName.get("beads_create").execute("c", { title: "Doomed", repo: "bakcend" });
+  assert.match(r?.content?.[0]?.text ?? "", /unknown repo 'bakcend'/);
+  assert.equal(invocations().length, 0, "no bd create may run");
+});
+
+test("single-repo: beads_create still defaults when repo is omitted", async () => {
+  const s = await openSession("single", repoDir);
+  resetLog();
+  const r = await s.byName.get("beads_create").execute("c", { title: "Do the thing" });
+  assert.ok(okResult(r), JSON.stringify(r));
+  findInvocation(["create", "Do the thing"]);
+});
+
+test("single-repo: beads_mol_pour rejects an unknown repo", async () => {
+  const s = await openSession("single", repoDir);
+  resetLog();
+  const r = await s.byName.get("beads_mol_pour").execute("c", { proto: "superpowers-workflow", repo: "bakcend", vars: "topic=x" });
+  assert.match(r?.content?.[0]?.text ?? "", /unknown repo 'bakcend'/);
+  assert.equal(invocations().length, 0);
 });
 
 test("single-repo: beads_create_list creates sequentially, wires gate+chain deps, emits", async () => {
@@ -447,17 +595,30 @@ test("single-repo: beads_create_list creates sequentially, wires gate+chain deps
     });
     assert.ok(okResult(r), JSON.stringify(r));
 
-    // exact argv of every bd call: gate bead, human gate, three tasks, then the blocks chain
+    // exact argv of every bd call: gate bead, human gate, three task creates (no --deps),
+    // then ONE bulk `bd dep add --file <tmp>` (edges wired in the correct direction).
     findInvocation(["create", "Plan reviewed / ready to execute", "--parent", "proj-m1-imp", "-t", "task", "-d", "constraints", "--silent"]);
     findInvocation(["gate", "create", "--blocks", "proj-m1-imp.1", "--type", "human", "--reason", "Plan approval", "--json"]);
     findInvocation(["create", "Task 1: setup", "--parent", "proj-m1-imp", "-d", "d1", "--silent"]);
     findInvocation(["create", "Task 2: build", "--parent", "proj-m1-imp", "-t", "feature", "-d", "d2", "--silent"]);
     findInvocation(["create", "Task 3: verify", "--parent", "proj-m1-imp", "-d", "d3", "-l", "a,b", "--silent"]);
-    findInvocation(["link", "proj-m1-imp.2", "proj-m1-imp.1", "--type", "blocks"]); // task1 blocks gate
-    findInvocation(["link", "proj-m1-imp.3", "proj-m1-imp.1", "--type", "blocks"]); // task2 blocks gate
-    findInvocation(["link", "proj-m1-imp.3", "proj-m1-imp.2", "--type", "blocks"]); // task2 blocks task1
-    findInvocation(["link", "proj-m1-imp.4", "proj-m1-imp.1", "--type", "blocks"]); // task3 blocks gate
-    findInvocation(["link", "proj-m1-imp.4", "proj-m1-imp.3", "--type", "blocks"]); // task3 blocks task2
+    assert.ok(!invocations().some((iv) => iv[0] === "link"), "no link calls");
+    assert.ok(!invocations().some((iv) => iv.some((a) => a === "--deps")), "no create --deps");
+    // one bulk dep add with a --file tmp path (unstable name, so match the prefix)
+    assert.ok(
+      invocations().some((iv) => iv[0] === "dep" && iv[1] === "add" && iv[2] === "--file"),
+      `expected a 'bd dep add --file' invocation; got:\n${JSON.stringify(invocations(), null, 1)}`
+    );
+    // the edge set: from = dependent, to = blocker; each task blocks the gate,
+    // task i+1 blocks task i (plan chain).
+    const edges = depEdges();
+    const has = (from, to) => edges.some((e) => e.from === from && e.to === to && e.type === "blocks");
+    assert.ok(has("proj-m1-imp.2", "proj-m1-imp.1"), "t1 depends on gate");
+    assert.ok(has("proj-m1-imp.3", "proj-m1-imp.1"), "t2 depends on gate");
+    assert.ok(has("proj-m1-imp.4", "proj-m1-imp.1"), "t3 depends on gate");
+    assert.ok(has("proj-m1-imp.3", "proj-m1-imp.2"), "t2 depends on t1");
+    assert.ok(has("proj-m1-imp.4", "proj-m1-imp.3"), "t3 depends on t2");
+    assert.equal(edges.length, 5, JSON.stringify(edges));
 
     // the whole point: one atomic call, creates issued SEQUENTIALLY in gate -> t1 -> t2 -> t3 order
     // (each awaited before the next) so ids come out parent.1..N in plan order.
@@ -470,7 +631,7 @@ test("single-repo: beads_create_list creates sequentially, wires gate+chain deps
         return "OTHER_CREATE";
       }
       if (inv[0] === "gate") return "GATE";
-      if (inv[0] === "link") return "LINK";
+      if (inv[0] === "dep") return "DEP";
       return "OTHER";
     });
     assert.deepEqual(seq, [
@@ -479,11 +640,7 @@ test("single-repo: beads_create_list creates sequentially, wires gate+chain deps
       "T1_CREATE",
       "T2_CREATE",
       "T3_CREATE",
-      "LINK",
-      "LINK",
-      "LINK",
-      "LINK",
-      "LINK",
+      "DEP",
     ]);
 
     // output maps the input task index -> minted id (gate first, then human gate)
@@ -535,6 +692,30 @@ test("single-repo: beads_create_list reports partial failure with created-so-far
   assert.ok(!invs.some((iv) => iv[0] === "link"), `no dep wiring after a task failure: ${JSON.stringify(invs)}`);
 });
 
+test("single-repo: create_list re-exports after a partial task failure", async () => {
+  const s = await openSession("single", repoDir);
+  resetLog();
+  s.emitted.length = 0;
+  const r = await s.byName.get("beads_create_list").execute("c", {
+    parent: "proj-m1-imp",
+    tasks: [{ title: "Task 1: setup" }, { title: "Doomed task" }],
+  });
+  assert.match(r?.content?.[0]?.text ?? "", /1 of 2 tasks created before failure/);
+  assert.equal(s.emitted.at(-1), "beads:changed", "afterWrite must run after minted beads");
+});
+
+test("single-repo: create_list does not re-export when no bead was minted", async () => {
+  const s = await openSession("single", repoDir);
+  resetLog();
+  s.emitted.length = 0;
+  const r = await s.byName.get("beads_create_list").execute("c", {
+    parent: "proj-m1-imp",
+    tasks: [{ title: "Doomed task" }],
+  });
+  assert.match(r?.content?.[0]?.text ?? "", /0 of 1 tasks created before failure/);
+  assert.equal(s.emitted.length, 0, "no beads minted -> no beads:changed");
+});
+
 test("single-repo: beads_create_list gate-failure aborts before any task", async () => {
   const s = await openSession("single", repoDir);
   resetLog();
@@ -548,6 +729,20 @@ test("single-repo: beads_create_list gate-failure aborts before any task", async
   const invs = invocations();
   assert.equal(invs.length, 1, JSON.stringify(invs));
   assert.deepEqual(invs[0], ["create", "Doomed gate", "--parent", "proj-m1-imp", "-t", "task", "--silent"]);
+});
+
+test("single-repo: create_list re-exports after a human-gate setup failure", async () => {
+  const s = await openSession("single", repoDir);
+  resetLog();
+  s.emitted.length = 0;
+  const r = await s.byName.get("beads_create_list").execute("c", {
+    parent: "proj-m1-imp",
+    gate: { title: "Plan reviewed / ready to execute", reason: "Doomed gate" },
+    tasks: [{ title: "Task 1: setup" }],
+  });
+  const text = r?.content?.[0]?.text ?? "";
+  assert.match(text, /gate created \(proj-m1-imp\.1\) but human-gate setup failed/, text);
+  assert.equal(s.emitted.at(-1), "beads:changed", "afterWrite must run after minted gate bead");
 });
 
 test("single-repo: beads_create_list validates parent and non-empty tasks before touching bd", async () => {
@@ -690,6 +885,56 @@ test("single-repo: beads_close cascades to close the parent step when its last c
       invs.findIndex((iv) => iv[0] === "close" && iv[1] === "proj-t9"),
     "parent closed after child",
   );
+});
+
+test("single-repo: close cascade surfaces a failed parent close", async () => {
+  const s = await openSession("single", repoDir);
+  resetLog();
+  const r = await s.byName.get("beads_close").execute("c", { ids: "proj-tc" });
+  const text = r?.content?.[0]?.text ?? "";
+  assert.match(text, /closed proj-tc/, text);
+  assert.match(text, /parent cascade: proj-bad-parent not closed/, text);
+});
+
+test("single-repo: close cascade treats an already-closed parent as success", async () => {
+  const s = await openSession("single", repoDir);
+  resetLog();
+  const r = await s.byName.get("beads_close").execute("c", { ids: "proj-tcc" });
+  const text = r?.content?.[0]?.text ?? "";
+  assert.match(text, /closed proj-tcc/, text);
+  assert.doesNotMatch(text, /warning:/, text);
+  assert.doesNotMatch(text, /not closed/, text);
+  findInvocation(["show", "proj-closed-parent", "--json"]);
+});
+
+test("umbrella: close cascade failure is not overwritten by a later repo failure", async () => {
+  const s = await openSession("umbrella", projDir);
+  resetLog();
+  const r = await s.byName.get("beads_close").execute("c", { ids: "umb-tc crmback-fail" });
+  const text = r?.content?.[0]?.text ?? "";
+  assert.match(text, /parent cascade: umb-bad-parent not closed/, text);
+  assert.match(text, /bd close failed for crmback-fail/, text);
+});
+
+test("umbrella: a failing repo close does not skip later repos (no order-dependent silent failure)", async () => {
+  const s = await openSession("umbrella", projDir);
+  resetLog();
+  // backend (crmback-fail) is iterated FIRST and fails; umbrella (umb-1a2)
+  // SECOND must still be attempted and reported in the same result.
+  const r = await s.byName.get("beads_close").execute("c", { ids: "crmback-fail umb-1a2" });
+  const text = r?.content?.[0]?.text ?? "";
+  assert.match(text, /bd close failed for crmback-fail/, text);
+  assert.match(text, /closed umb-1a2/, text);
+  findInvocation(["close", "umb-1a2"]);
+});
+
+test("umbrella: unknown-repo error lists both folder names and id prefixes", async () => {
+  const s = await openSession("umbrella", projDir);
+  const r = await s.byName.get("beads_create").execute("c", { title: "x", repo: "nope" });
+  const text = r?.content?.[0]?.text ?? "";
+  assert.match(text, /unknown repo 'nope'/, text);
+  assert.match(text, /known: .*backend/, text);
+  assert.match(text, /known: .*crmback/, text);
 });
 
 test("single-repo: beads_mol_pour builds argv (--var split) and emits", async () => {

@@ -4,7 +4,7 @@
 // extension code runs unmodified; the fixture makes `show` return whatever
 // metadata the test seeds in FAKE_BD_SHOW_JSON.
 import assert from "node:assert/strict";
-import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, chmodSync, realpathSync } from "node:fs";
+import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, chmodSync, realpathSync, existsSync } from "node:fs";
 import { join, delimiter } from "node:path";
 import { tmpdir } from "node:os";
 
@@ -23,11 +23,34 @@ CWD="$(pwd)"
   printf 'INV cwd=%s\\n' "$CWD"
   for a in "$@"; do printf 'ARG %s\\n' "$a"; done
 } >> "$FAKE_BD_LOG"
+# concurrency instrumentation (shared with pi-beads.test.mjs's create case): when
+# FAKE_BD_CONC=1, detect two bd ops in flight at once. A correct serialized
+# show->update RMW never overlaps; a racy one writes CONCURRENT to the marker.
+conc_guard() {
+  [ "\${FAKE_BD_CONC:-0}" = "1" ] || return 0
+  mkdir -p "$FAKE_BD_CONC_DIR"
+  CLAIM="$FAKE_BD_CONC_DIR/$$"
+  mkdir "$CLAIM" 2>/dev/null || { echo "cannot claim" >&2; exit 1; }
+  N="$(ls -A "$FAKE_BD_CONC_DIR" | wc -l | tr -d ' ')"
+  if [ "$N" -gt 1 ]; then
+    mkdir -p "$(dirname "$FAKE_BD_CONC_MARKER")"
+    printf 'CONCURRENT\\n' >> "$FAKE_BD_CONC_MARKER"
+    rmdir "$CLAIM" 2>/dev/null
+    echo "concurrent bd op detected" >&2
+    exit 1
+  fi
+  sleep 0.05
+  rmdir "$CLAIM" 2>/dev/null
+}
 case "$1" in
   where)
     printf '  %s\\n  prefix: rep\\n' ${shellQuote(join(repoDir, ".beads"))}; exit 0 ;;
   show)
+    conc_guard
     printf '%s\\n' "$FAKE_BD_SHOW_JSON"; exit 0 ;;
+  update)
+    conc_guard
+    exit 0 ;;
   list)
     # single-repo prefix resolution (samplePrefixOf) needs one id to derive the
     # 'rep' prefix; mirrors pi-beads.test.mjs's single-repo list answer.
@@ -227,6 +250,35 @@ test("dotted agent id is sanitized to underscore and still counted in rollups", 
     "--set-metadata", "cost.total=0.11",
     "--set-metadata", "cost.agents.count=1",
   ]);
+});
+
+test("overlapping events for the same bead are serialized (no lost/overlapping RMW)", async () => {
+  const s = await openSession();
+  process.env.FAKE_BD_SHOW_JSON = JSON.stringify([{ id: "rep-1", metadata: {} }]);
+  process.env.FAKE_BD_CONC = "1";
+  process.env.FAKE_BD_CONC_DIR = join(root, "conc");
+  process.env.FAKE_BD_CONC_MARKER = join(root, "conc.marker");
+  try {
+    resetLog();
+    await Promise.all([
+      fire(s, "subagents:completed", { id: "a1", type: "implementer", status: "completed", description: "x task bead:rep-1", usage: { input: 1, output: 1, cacheRead: 0, cost: { total: 0.1 } } }),
+      fire(s, "subagents:completed", { id: "a2", type: "implementer", status: "completed", description: "x task bead:rep-1", usage: { input: 1, output: 1, cacheRead: 0, cost: { total: 0.2 } } }),
+    ]);
+    // prove the instrumentation was active, else the marker check is vacuous
+    assert.ok(existsSync(join(root, "conc")), "concurrency instrumentation never ran");
+    let marker = "";
+    try { marker = readFileSync(process.env.FAKE_BD_CONC_MARKER, "utf8"); } catch {}
+    assert.equal(marker.trim(), "", `overlapping RMW observed: ${marker}`);
+  } finally {
+    delete process.env.FAKE_BD_CONC; delete process.env.FAKE_BD_CONC_DIR; delete process.env.FAKE_BD_CONC_MARKER;
+  }
+});
+
+test("handlers are registered once across repeated factory runs", async () => {
+  const s = makePi();
+  costTracking(s.pi); // second registration on the same pi instance
+  assert.equal(s.eventHandlers["subagents:completed"].length, 1);
+  assert.equal(s.eventHandlers["subagents:failed"].length, 1);
 });
 
 run();
