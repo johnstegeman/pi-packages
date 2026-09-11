@@ -91,4 +91,9 @@ test("task-reviewer opts into narrow nested delegation; implementer/worker do no
   }
 });
 
+test("the SDD task-reviewer prompt references the nested-lookup path", () => {
+  const src = readFileSync(join(root, "skills", "subagent-driven-development", "task-reviewer-prompt.md"), "utf8");
+  assert.match(src, /nested `Explore` child/i, "task-reviewer-prompt.md must document the nested Explore lookup");
+});
+
 run();
