@@ -448,7 +448,7 @@ Do NOT automatically dispatch final review or start the finishing skill. The use
 
 ## Final Review
 
-After the user confirms, At the start of the skill, call `set_phase({ phase: "final review" })`.
+After the user confirms, call `set_phase({ phase: "development" })`.
 The final whole-branch review gets a package too:
 run `scripts/review-package <implement-step-id> MERGE_BASE HEAD` (MERGE_BASE is the
 branch point) and dispatch the `code-reviewer` agent with the

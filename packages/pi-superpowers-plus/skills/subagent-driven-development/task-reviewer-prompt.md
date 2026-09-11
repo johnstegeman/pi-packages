@@ -17,7 +17,7 @@ Dispatch a subagent with this prompt:
 
     ## What Was Requested
 
-    call set_phase({ phase: "brainstorming" }).
+    call set_phase({ phase: "development" }).
     Read your task bead: beads_show({ id: "<TASK_ID>", full: true }).
     It contains the exact, full text of the task.
 
