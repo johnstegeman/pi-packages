@@ -114,7 +114,9 @@ digraph process {
     "Stop and ask user: ready for final review?" [shape=box];
     "Dispatch final code reviewer (../requesting-code-review/code-reviewer.md)" [shape=box];
     "Final findings? ONE fix dispatch, one scoped re-review, adjudicate residuals" [shape=box];
-    "Final review clean: delete this plan's workspace" [shape=box];
+    "Final review clean" [shape=box];
+    "Close implement step" [shape=box];
+    "Claim verify (/skill:verification-before-completion)" [shape=box];
     "Use /skill:finishing-a-development-branch" [shape=box style=filled fillcolor=lightgreen];
 
     "Setup: worktree, ledger check, read plan, pre-flight review" -> "Dispatch implementer subagent (./implementer-prompt.md)";
@@ -144,8 +146,10 @@ digraph process {
     "More tasks remain?" -> "Stop and ask user: ready for final review?" [label="no"];
     "Stop and ask user: ready for final review?" -> "Dispatch final code reviewer (../requesting-code-review/code-reviewer.md)" [label="user confirms"];
     "Dispatch final code reviewer (../requesting-code-review/code-reviewer.md)" -> "Final findings? ONE fix dispatch, one scoped re-review, adjudicate residuals";
-    "Final findings? ONE fix dispatch, one scoped re-review, adjudicate residuals" -> "Final review clean: delete this plan's workspace";
-    "Final review clean: delete this plan's workspace" -> "Use /skill:finishing-a-development-branch";
+    "Final findings? ONE fix dispatch, one scoped re-review, adjudicate residuals" -> "Final review clean";
+    "Final review clean" -> "Close implement step";
+    "Close implement step" -> "Claim verify (/skill:verification-before-completion)";
+    "Claim verify (/skill:verification-before-completion)" -> "Use /skill:finishing-a-development-branch";
 }
 ```
 
@@ -457,8 +461,12 @@ the requesting-code-review skill, passing the printed package path.
 
 Final review findings get ONE fix dispatch (a fresh implementer) plus one
 scoped re-review, then adjudicate any residuals with the breaker rules
-above. When the final review is clean, delete this plan's workspace (the
-record now lives in git) and use `/skill:finishing-a-development-branch`.
+above. When the final review is clean:
+1. Delete this plan's workspace (the record now lives in git).
+2. Close the `implement` step — `beads_close({ ids: "<implement-step-id>", reason: "all tasks complete" })` — which unblocks `verify`.
+3. Claim `verify` (`beads_update({ id: "<verify-step-id>", claim: true })`) and proceed to that work before the finishing handoff below — use `/skill:verification-before-completion`, which closes `verify`, surfaces the human `smoke-test-approved` gate, and works `finish`.
+4. Then announce "I'm using the finishing-a-development-branch skill to complete this work." and hand off: **REQUIRED SUB-SKILL:** `/skill:finishing-a-development-branch` — tell the user to type `/finish` to load it.
+
 After generating the package, choose the review path:
 
 - **Workflow path** (preferred when `SubagentWorkflow` is present and the branch is large or broad — multi-file, many commits, security-sensitive, or deferred minors to triage): invoke the skill's final-review workflow:
