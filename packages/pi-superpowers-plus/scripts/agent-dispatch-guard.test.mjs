@@ -64,8 +64,8 @@ test("every skill dispatch name resolves to a shipped template or built-in", () 
   }
 });
 
-test("the three SDD agent names are covered by templates", () => {
-  for (const name of ["implementer", "task-reviewer", "code-reviewer"]) {
+test("the SDD and dispatch agent names are covered by templates", () => {
+  for (const name of ["implementer", "task-reviewer", "code-reviewer", "worker"]) {
     assert.ok(statSync(join(root, "agent-templates", `${name}.md`)).isFile(), `missing ${name}.md`);
   }
 });

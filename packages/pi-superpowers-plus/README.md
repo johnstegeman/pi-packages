@@ -289,7 +289,7 @@ npm install
 npm test        # biome check . + structural guard + widget/phase tests
 ```
 
-No compiled code or unit tests remain in this package — it ships skills and agent templates only. `npm test` runs `biome check .` (the lint/quality gate). Add tests back alongside any future code.
+No compiled code ships in this package — it is skills and agent templates. `npm test` runs `biome check .` plus the node test scripts (extensions, SDD scripts, structural guard).
 
 ## Attribution
 
