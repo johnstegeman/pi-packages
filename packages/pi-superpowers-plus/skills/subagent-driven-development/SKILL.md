@@ -185,6 +185,10 @@ and `beads_mol_show({ id: "<implement-step-id>" })` for reading the task beads u
 - The ledger is your recovery map: the commits it names exist in git even
   when your context no longer remembers creating them. After compaction,
   trust the ledger and `git log` over your own recollection.
+- **Second recovery path: @handle.** Every implementer dispatch carries a canonical name (`task-<sanitized-task-id>-impl` — see The Task Loop · 1. Dispatch the implementer), and that handle works wherever an id does: `steer_subagent` / `get_subagent_result` accept it by name, and at the prompt `@task-…-impl` messages a running implementer, resumes a finished one, and reopens one from disk long after its in-memory record is evicted. Sessions persist by default (`rememberAgents`): a finished implementer's conversation lives on disk; a tombstone keeps the handle resolving after eviction (~10 min) and a later query reopens the conversation from disk, re-resolving the currently defined `implementer` frontmatter. After compaction, re-derive the handle from the task bead id you still hold and query — recover the outcome without re-dispatch. `get_subagent_result` / `steer_subagent` resolve live records only (within the ~10-minute eviction window after the implementer finishes; eviction is real-time, independent of controller compaction); after eviction the recovery channel is the `@task-…-impl` prompt mention, which reopens the conversation from disk as a fresh run rather than reading a stored result, and a tool-bound controller cannot type mentions.
+- **The boundary is the session.** The 100 most recent handles are kept, and all are forgotten on `/new` and session switch — the @handle path is recovery within the live session only. The ledger stays the cross-session recovery map, and now indexes each implementer (`agent:` and `handle:` on dispatch and fix-round lines), so recovery is ledger → handle → query.
+- **`run_in_background` on resume.** A foreground resume reopens an existing session and never hits the spawn path or the concurrency pool; a background resume takes a background slot and queues with other background agents. Fix-loop resumes are background by default — dispatch and let the completion notification carry the result, don't block. A finished agent resumes only once its run has finished; `steer_subagent` is the mid-run channel.
+- **Absent-extension caveat.** Naming and @handle require pi-subagents ≥0.19 with `rememberAgents` enabled; without them the ledger remains the sole recovery path and the naming bullet is moot.
 - `git clean -fdx` will destroy the workspace (it's git-ignored scratch); if
   that happens, recover from `git log`.
 
@@ -234,6 +238,7 @@ and fix-round diffs need it.
   gives no `in_progress` signal, so the widget's deepest-open fallback can't
   tell "being worked" from "next up"; claim it at dispatch so ◐ means a real
   claimed step.
+- **Canonical handle (named dispatch):** give every implementer dispatch a deterministic `name:` so a finished implementer stays reachable: `task-` + the task bead id with every "." replaced by "-" + `-impl` (example: task bead `pi-packages-l8x9.2` → `task-pi-packages-l8x9-2-impl`; Agent names allow letters/digits/_/- only, hence the dot substitution). Dispatch: `Agent({ subagent_type: "implementer", name: "task-<sanitized-task-id>-impl", ... })`. The handle works wherever ids do — `steer_subagent` / `get_subagent_result` accept it by name — and is deterministically re-derivable from the task bead id after compaction (see Setup · Second recovery path: @handle). Record `agent:` **and** `handle:` on the ledger dispatch line. The canonical name is held by the first implementer that claims it: a second fresh dispatch of the same task (fix rounds 4-5, or a BLOCKED/NEEDS_CONTEXT re-dispatch) within the live+tombstone window is silently renamed to `task-…-impl-2` — the spawn response never echoes the assigned alias, only an agent id — while the unsuffixed handle still resolves to the older, finished implementer, so recovery by the canonical name silently returns a stale outcome. For recovery, prefer the recorded `agent:` id (the durable resume key) or the actually-resolved handle, and record both `agent:` and `handle:` together on every ledger dispatch/fix-round line — never one without the other.
 - **Cost attribution:** include the task's bead id as a `bead:<task-id>` token in the Agent dispatch's `description` (e.g. `description: "Implement task bead:pi-packages-l8x9.2"`). The pi-beads cost-tracking extension parses `bead:<id>` out of the `subagents:completed`/`subagents:failed` event payload and writes the run's spend to the task bead's `cost.*` metadata (see docs/superpowers/specs/2026-09-10-cost-tracking-on-task-beads-design.md). Apply the token to implementer, task-reviewer, and re-review dispatches aimed at a tracked task bead; omit it for agents not aimed at a bead — cost tracking simply skips them.
 - **Report file:** name the implementer's report file after its task id
   (`<workspace>/<task-id>-report.md`) and put it in the dispatch prompt. The
@@ -362,6 +367,7 @@ recorded when you first dispatched this task's implementer. Its context is
 intact: it knows the task, the code, and its own choices. The `resume:`
 parameter is real tool support from `@tintinweb/pi-subagents` — the old
 "resume this agent" instruction had no tool behind it; now it does.
+Keep the resumed agent's `handle:` (recorded at dispatch) in the ledger, and append it to each fix-round line: after compaction, `get_subagent_result` by the handle retrieves the finished implementer's outcome without re-dispatch. This query is safe because each fix round runs and resumes inside the live window; after eviction the ledger (commits + handle) is the cross-session record.
 
 **Rounds 4-5 — dispatch a fresh implementer** (drop `resume:`), with the
 task bead id, the report-file path, the open findings, and this framing: "A
@@ -506,6 +512,7 @@ If an implementer subagent fails, errors out, or produces incomplete work:
 - Pre-judge findings for a reviewer ("do not flag", "at most Minor")
 - Silently discard a finding — every adjudication is a ledger entry
 - Fix findings yourself in the controller session
+- Re-dispatch a completed task from memory because the controller lost its report — query the finished implementer by its canonical handle (Setup · Second recovery path: @handle) or trust the ledger first
 - Emulate workflows with parallel `Agent` dispatch when `SubagentWorkflow` is absent (the fallback is the sequential loop, not fake parallelism)
 
 ## Integration
