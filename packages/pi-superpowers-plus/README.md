@@ -197,9 +197,24 @@ This package ships 4 agent templates (copy-in only — see Install):
 | `implementer` | Strict TDD implementation | read, write, edit, bash |
 | `worker` | General-purpose task execution | read, write, edit, bash |
 | `code-reviewer` | Production readiness review (read-only) | read, bash, find, grep, ls |
-| `task-reviewer` | Task review: spec compliance + code quality (read-only) | read, bash, find, grep, ls |
+| `task-reviewer` | Task review: spec compliance + code quality (read-only); may spawn one nested `Explore` lookup per named question | read, bash, find, grep, ls |
 
 Templates live in `agent-templates/*.md` and use YAML frontmatter (per the `pi-subagents` schema) to declare tools and a system prompt body. Copy them into `.pi/agents/` (project) or `~/.pi/agent/agents/` (global) so `pi-subagents` discovers them.
+
+**Nested lookups (`task-reviewer` only).** The `task-reviewer` template sets
+`allowed_subagents: Explore`, so a reviewer can settle a bounded, named question
+with one nested read-only lookup instead of bouncing it to the controller. This
+requires pi-subagents' `maxSubagentDepth` ≥ 2 (the default is 2; `0` or `1`
+disables nesting project-wide) and a re-copied template — templates are copy-in,
+so an older copy has no nesting and the reviewer falls back to reporting `⚠️`.
+The allowlist is `Explore` only: `general-purpose` carries all tools and would
+hand the read-only reviewer write-capable delegation. `Explore` still ships
+`bash`, so its read-only guarantee is prompt-enforced, not sandboxed. The
+payoff is context isolation as much as reach: the exploration runs in the
+child's context and only its synthesized answer returns, keeping the reviewer's
+own window tight. Nested token spend rolls into the `task-reviewer`'s totals,
+so per-task cost
+attribution is preserved — there is no per-lookup attribution.
 
 **Fail-loud vs lenient dispatch.** With `fallbackSubagent: "none"`, the SDD agents dispatch by exact name only: `implementer`, `task-reviewer`, and `code-reviewer` resolve to the shipped templates, so a typo or an un-copied template fails loudly with the available-type list instead of silently substituting an all-tools agent. That's the point for the read-only reviewers (`code-reviewer`/`task-reviewer` carry only `read, bash, find, grep, ls`). The cost: any custom agent you add must be copied before dispatch works, and a missing template is a hard error rather than a fallback. Skip the strict setting if you prefer lenient dispatch (the pi-subagents default).
 

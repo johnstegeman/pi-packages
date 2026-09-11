@@ -46,6 +46,11 @@ Dispatch a subagent with this prompt:
     Do not crawl the broader codebase. Inspect code outside the diff only
     to evaluate a concrete risk you can name — one focused check per named
     risk, and name both the risk and what you checked in your report.
+    When a named question can be settled by a bounded read-only lookup, do
+    it yourself: dispatch one nested `Explore` child for that question (when
+    the nested `Agent` tool is available to you) and fold its answer into
+    your verdict, instead of bouncing the question to the controller. If no
+    nested `Agent` tool is available, report the item as `⚠️` as before.
     Cross-cutting changes are legitimate named risks: if the diff changes
     lock ordering, a function or API contract, or shared mutable state,
     checking the call sites is the right method.
@@ -113,8 +118,9 @@ Dispatch a subagent with this prompt:
 
     Your report should point at evidence: file:line references for every
     finding and for any check you would otherwise answer with a bare
-    "yes." A tight report that cites lines gives the controller everything
-    it needs.
+    "yes." A nested `Explore` lookup is a check you ran — name its question
+    and that an `Explore` child answered it. A tight report that cites lines
+    gives the controller everything it needs.
 
     Your final message is the report itself: begin directly with the
     spec-compliance verdict. Every line is a verdict, a finding with
@@ -144,8 +150,10 @@ Dispatch a subagent with this prompt:
     - ✅ Spec compliant | ❌ Issues found: [what's missing/extra/misunderstood,
       with file:line references]
     - ⚠️ Cannot verify from diff: [requirements you could not verify from the
-      diff alone, and what the controller should check — report alongside the
-      ✅/❌ verdict for everything you could verify]
+      diff alone, what you already checked (including any nested `Explore`
+      lookup and the question it answered), and what the controller should
+      check — report alongside the ✅/❌ verdict for everything you could
+      verify]
 
     ### Strengths
     [What's well done? Be specific.]
