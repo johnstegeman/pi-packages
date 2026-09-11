@@ -35,15 +35,6 @@ const tagSyncChains = new Map<string, Promise<void>>();
 const lastSentTagsBySession = new Map<string, string>();
 const DEFAULT_TAG_SYNC_SESSION_KEY = "__pi_langfuse_default_session__";
 
-function formatPhaseTagSyncError(error: unknown): string {
-  if (typeof error === "object" && error !== null && "statusCode" in error && (error as { statusCode?: unknown }).statusCode === 404) {
-    return "trace is not visible yet or is outside the configured Langfuse project";
-  }
-  // Generic SDK errors can contain request headers, credentials, response bodies, or stacks.
-  // Use a stable classification rather than copying arbitrary Error.message content.
-  return "unexpected error while synchronizing trace tags";
-}
-
 export async function syncActiveTracePhaseTags(): Promise<void> {
   const sessionKey = state.currentSessionId || DEFAULT_TAG_SYNC_SESSION_KEY;
   const root = state.agentState?.root;
@@ -61,8 +52,7 @@ export async function syncActiveTracePhaseTags(): Promise<void> {
     // Capture the runtime before enqueueing. The global runtime may be replaced
     // while this session's earlier work is still in flight.
     rt = await getRuntime();
-  } catch (e) {
-    console.warn(`📊 Langfuse: Phase tag sync unavailable (${formatPhaseTagSyncError(e)}); tracing continues.`);
+  } catch {
     return;
   }
   lastSentTagsBySession.set(sessionKey, desiredTagsKey);
@@ -90,12 +80,9 @@ export async function syncActiveTracePhaseTags(): Promise<void> {
         return;
       }
       await rt.updateTraceTags(traceId, replacementTags);
-    } catch (e) {
+    } catch {
       if (lastSentTagsBySession.get(sessionKey) === desiredTagsKey) {
         lastSentTagsBySession.delete(sessionKey);
-      }
-      if (isRuntimeActive(rt)) {
-        console.warn(`📊 Langfuse: Phase tag sync unavailable (${formatPhaseTagSyncError(e)}); tracing continues.`);
       }
     }
   });

@@ -302,15 +302,7 @@ test("phase tag sync isolates a permanently missing trace", async () => {
     phaseHandler!({ phase: "permanent-failure" });
     await new Promise((resolve) => setTimeout(resolve, 0));
 
-    assert.equal(warnings.length, 2);
-    for (const warning of warnings) {
-      assert.equal(warning.length, 1);
-      assert.equal(typeof warning[0], "string");
-      assert.match(warning[0] as string, /Phase tag sync unavailable/);
-      assert.match(warning[0] as string, /tracing continues/);
-      assert.match(warning[0] as string, /trace is not visible yet or is outside the configured Langfuse project/);
-      assert.doesNotMatch(warning[0] as string, /LangfuseNotFoundError|authorization|sdk stack|\n/);
-    }
+    assert.equal(warnings.length, 0, "tag-sync failures must be silent");
   } finally {
     console.warn = previousWarn;
     setPhase(null);
@@ -320,7 +312,7 @@ test("phase tag sync isolates a permanently missing trace", async () => {
   }
 });
 
-test("phase tag sync bounds generic diagnostics without leaking sensitive error content", async () => {
+test("phase tag sync failures are silent and never leak error content", async () => {
   const previousConfig = state.config;
   const observation = {
     traceId: "trace-id",
@@ -367,14 +359,7 @@ test("phase tag sync bounds generic diagnostics without leaking sensitive error 
     await startAgentRun({ prompt: "test" }, {});
     phaseHandler!({ phase: "sensitive-failure" });
     await new Promise((resolve) => setTimeout(resolve, 0));
-    assert.equal(warnings.length, 1);
-    assert.equal(warnings[0].length, 1);
-    const warning = warnings[0][0];
-    assert.equal(typeof warning, "string");
-    assert.ok((warning as string).length <= 200);
-    assert.match(warning as string, /Phase tag sync unavailable/);
-    assert.match(warning as string, /tracing continues/);
-    assert.doesNotMatch(warning as string, /Authorization|Bearer|super-secret|X-API-Key|credential|response body|response-secret|password|hunter2|sdk stack|\n/);
+    assert.equal(warnings.length, 0, "tag-sync failures must be silent even for hostile errors");
   } finally {
     console.warn = previousWarn;
     setPhase(null);
