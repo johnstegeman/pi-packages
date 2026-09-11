@@ -201,8 +201,8 @@ confirm the `plan-approved` gate is closed (`beads_show({ id: "<plan-approval-ga
 dispatching any subagent — the plan's canonical Global Constraints live in that gate bead's
 description (`beads_show({ id: "<plan-approval-gate-bead-id>", full: true })`) and are the single source handed
 to reviewers (task beads still inline the constraints for implementers). Task ids and their
-`needs` ordering already exist as real dependency edges —
-no `TaskCreate`-equivalent step is needed here; `writing-plans` already created them
+`needs` ordering are already wired; the task beads already exist as real dependency edges and
+`writing-plans` created them
 (see its Task Structure section).
 
 Before dispatching Task 1, scan the plan once for conflicts:
