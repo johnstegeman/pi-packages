@@ -27,6 +27,8 @@
  */
 
 import { execFile } from "node:child_process";
+import { writeFileSync, unlinkSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { promisify } from "node:util";
 import * as path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -912,13 +914,6 @@ export default function piBeadsLean(pi: any) {
         if (t.description) a.push("-d", String(t.description));
         if (t.labels) a.push("-l", String(t.labels));
         if (t.priority !== undefined && t.priority !== null) a.push("-p", String(t.priority));
-        // fold the dep wiring into the create: each task blocks the gate;
-        // task i+1 blocks task i (plan chain). bd's --deps 'blocks:<id>' means
-        // the NEW issue depends on <id>, matching the previous bd link wiring.
-        const deps: string[] = [];
-        if (gateId) deps.push(`blocks:${gateId}`);
-        if (i > 0) deps.push(`blocks:${taskIds[i - 1]}`);
-        if (deps.length) a.push("--deps", deps.join(","));
         a.push("--silent");
         const r = await bd(a, repoDir);
         if (!r.ok) {
@@ -927,6 +922,25 @@ export default function piBeadsLean(pi: any) {
           return textResult(`${taskIds.length} of ${params.tasks.length} tasks created before failure: ${ids.join(", ")}`);
         }
         taskIds.push(lastId(r.out));
+      }
+      // (3) wire the blocks-graph in ONE bd call: each task blocks the gate; task i+1
+      // blocks task i (plan chain). bd dep add --file takes JSONL edges with
+      // {from:<dependent>, to:<blocker>, type:"blocks"} — the correct direction
+      // (the old per-create --deps form made the NEW issue the BLOCKER, inverting it).
+      const edges: Array<{ from: string; to: string; type: string }> = [];
+      for (let i = 0; i < taskIds.length; i++) {
+        if (gateId) edges.push({ from: taskIds[i], to: gateId, type: "blocks" });
+        if (i > 0) edges.push({ from: taskIds[i], to: taskIds[i - 1], type: "blocks" });
+      }
+      if (edges.length) {
+        const depFile = path.join(tmpdir(), `pi-beads-deps-${process.pid}-${taskIds[0]}.jsonl`);
+        writeFileSync(depFile, edges.map((e) => JSON.stringify(e)).join("\n") + "\n", "utf8");
+        const dr = await bd(["dep", "add", "--file", depFile], repoDir);
+        try { unlinkSync(depFile); } catch { /* best effort */ }
+        if (!dr.ok) {
+          await afterWrite(repoDir);
+          return textResult(`deps: bulk wiring failed: ${dr.err}`);
+        }
       }
       await afterWrite(repoDir);
       const lines = gateId ? [`gate: ${gateId}`] : [];

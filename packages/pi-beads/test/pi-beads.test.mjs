@@ -158,6 +158,12 @@ case "$1" in
     exit 0
     ;;
   dep)
+    # bulk dep wiring: bd dep add --file <jsonl> — echo each edge line so tests
+    # can assert the exact dependent->blocker edge set the tool writes.
+    if [ "$2" = "add" ] && [ "$3" = "--file" ]; then
+      while IFS= read -r line; do printf 'DEPS %s\\n' "$line" >> "$FAKE_BD_LOG"; done < "$4"
+      exit 0
+    fi
     # canned dependents for beads_gate_resolve / beads_close cascade tests
     if [ "$3" = "proj-g1" ] && [ "$5" = "up" ]; then
       printf '%s\n' '[{"id":"proj-apr","title":"User approves design","issue_type":"task","status":"open","dependency_type":"blocks"}]'
@@ -341,6 +347,14 @@ function invocations() {
   return invs;
 }
 
+// bulk dep wiring: parse the `DEPS <json>` lines the fixture echoes for a
+// `bd dep add --file <path>` call. Each line is one {"from","to","type"} edge.
+function depEdges() {
+  return readFileSync(logFile, "utf8").split("\n")
+    .filter((l) => l.startsWith("DEPS "))
+    .map((l) => JSON.parse(l.slice(5)));
+}
+
 function findInvocation(args) {
   const argsStr = JSON.stringify(args);
   const found = invocations().find(
@@ -501,13 +515,30 @@ test("single-repo: beads_create_list creates sequentially, wires gate+chain deps
     });
     assert.ok(okResult(r), JSON.stringify(r));
 
-    // exact argv of every bd call: gate bead, human gate, three tasks (deps folded into each create)
+    // exact argv of every bd call: gate bead, human gate, three task creates (no --deps),
+    // then ONE bulk `bd dep add --file <tmp>` (edges wired in the correct direction).
     findInvocation(["create", "Plan reviewed / ready to execute", "--parent", "proj-m1-imp", "-t", "task", "-d", "constraints", "--silent"]);
     findInvocation(["gate", "create", "--blocks", "proj-m1-imp.1", "--type", "human", "--reason", "Plan approval", "--json"]);
-    findInvocation(["create", "Task 1: setup", "--parent", "proj-m1-imp", "-d", "d1", "--deps", "blocks:proj-m1-imp.1", "--silent"]);
-    findInvocation(["create", "Task 2: build", "--parent", "proj-m1-imp", "-t", "feature", "-d", "d2", "--deps", "blocks:proj-m1-imp.1,blocks:proj-m1-imp.2", "--silent"]);
-    findInvocation(["create", "Task 3: verify", "--parent", "proj-m1-imp", "-d", "d3", "-l", "a,b", "--deps", "blocks:proj-m1-imp.1,blocks:proj-m1-imp.3", "--silent"]);
+    findInvocation(["create", "Task 1: setup", "--parent", "proj-m1-imp", "-d", "d1", "--silent"]);
+    findInvocation(["create", "Task 2: build", "--parent", "proj-m1-imp", "-t", "feature", "-d", "d2", "--silent"]);
+    findInvocation(["create", "Task 3: verify", "--parent", "proj-m1-imp", "-d", "d3", "-l", "a,b", "--silent"]);
     assert.ok(!invocations().some((iv) => iv[0] === "link"), "no link calls");
+    assert.ok(!invocations().some((iv) => iv.some((a) => a === "--deps")), "no create --deps");
+    // one bulk dep add with a --file tmp path (unstable name, so match the prefix)
+    assert.ok(
+      invocations().some((iv) => iv[0] === "dep" && iv[1] === "add" && iv[2] === "--file"),
+      `expected a 'bd dep add --file' invocation; got:\n${JSON.stringify(invocations(), null, 1)}`
+    );
+    // the edge set: from = dependent, to = blocker; each task blocks the gate,
+    // task i+1 blocks task i (plan chain).
+    const edges = depEdges();
+    const has = (from, to) => edges.some((e) => e.from === from && e.to === to && e.type === "blocks");
+    assert.ok(has("proj-m1-imp.2", "proj-m1-imp.1"), "t1 depends on gate");
+    assert.ok(has("proj-m1-imp.3", "proj-m1-imp.1"), "t2 depends on gate");
+    assert.ok(has("proj-m1-imp.4", "proj-m1-imp.1"), "t3 depends on gate");
+    assert.ok(has("proj-m1-imp.3", "proj-m1-imp.2"), "t2 depends on t1");
+    assert.ok(has("proj-m1-imp.4", "proj-m1-imp.3"), "t3 depends on t2");
+    assert.equal(edges.length, 5, JSON.stringify(edges));
 
     // the whole point: one atomic call, creates issued SEQUENTIALLY in gate -> t1 -> t2 -> t3 order
     // (each awaited before the next) so ids come out parent.1..N in plan order.
@@ -520,6 +551,7 @@ test("single-repo: beads_create_list creates sequentially, wires gate+chain deps
         return "OTHER_CREATE";
       }
       if (inv[0] === "gate") return "GATE";
+      if (inv[0] === "dep") return "DEP";
       return "OTHER";
     });
     assert.deepEqual(seq, [
@@ -528,6 +560,7 @@ test("single-repo: beads_create_list creates sequentially, wires gate+chain deps
       "T1_CREATE",
       "T2_CREATE",
       "T3_CREATE",
+      "DEP",
     ]);
 
     // output maps the input task index -> minted id (gate first, then human gate)
