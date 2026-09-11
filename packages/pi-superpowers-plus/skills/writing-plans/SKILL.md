@@ -74,6 +74,8 @@ document:
 Set the bead title to `Task N: <name>`; the description body starts after the
 heading (do not include the `### Task N:` heading in the description).
 
+**Optional `**Gate:**` line.** When a task's covering-test command is known up front (common for package-scoped tasks, e.g. `` `cd packages/statusline && npm test` ``), declare it as a `**Gate:** <re-runnable command>` line at the end of the task body. The wave-parallel execution route (subagent-driven-development) gates the implementer on a declared gate — a non-zero exit fails the agent. Omit it when the covering command is unknown or the task is doc-only (no gate); the implementer's report may still name a command for the fix loop.
+
 ````markdown
 ### Task N: [Component Name]
 
