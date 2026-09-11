@@ -1092,7 +1092,8 @@ export default function piBeadsLean(pi: any) {
         if (params.reason) args.push("-r", String(params.reason));
         const r = await bd(args, dir);
         if (!r.ok) {
-          failure = `bd close failed for ${rids.join(", ")}: ${r.err}`;
+          const msg = `bd close failed for ${rids.join(", ")}: ${r.err}`;
+          failure = failure ? `${failure}; ${msg}` : msg;
           break;
         }
         await afterWrite(dir);
@@ -1103,6 +1104,15 @@ export default function piBeadsLean(pi: any) {
           while (nxt) {
             const rc = await bd(["close", nxt], dir);
             if (!rc.ok) {
+              // A concurrent worker may have closed the parent already; that is
+              // success, not an error. Probe only on failure to keep the happy path
+              // free of extra bd calls.
+              if (/already closed/i.test(rc.err)) break;
+              const st = await bd(["show", nxt, "--json"], dir);
+              const so = jparse(st.out);
+              const sarr = Array.isArray(so) ? so : Array.isArray((so as any)?.issues) ? (so as any).issues : [];
+              const sIssue = sarr.find((x: any) => x && String(x.id) === nxt) ?? sarr[0];
+              if (sIssue && String(sIssue.status) === "closed") break;
               const msg = `parent cascade: ${nxt} not closed: ${rc.err}`;
               failure = failure ? `${failure}; ${msg}` : msg;
               break;

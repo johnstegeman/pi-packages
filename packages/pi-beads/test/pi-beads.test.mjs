@@ -132,6 +132,12 @@ case "$1" in
         *dup*)
           printf '%s\n' '{"issues":[{"id":"proj-xpl","title":"Explore project context: FIXEDTOPIC","issue_type":"task"},{"id":"proj-c1","title":"Ask clarifying questions","issue_type":"task"},{"id":"proj-c2","title":"Ask clarifying questions","issue_type":"task"},{"id":"proj-app","title":"Propose approaches","issue_type":"task"},{"id":"proj-des","title":"Present design sections","issue_type":"task"},{"id":"proj-apr","title":"User approves design","issue_type":"task"},{"id":"proj-g1","title":"Gate: human","issue_type":"gate"},{"id":"proj-wsp","title":"Write spec to docs/superpowers/specs/","issue_type":"task"},{"id":"proj-srv","title":"Spec self-review","issue_type":"task"},{"id":"proj-sap","title":"User reviews written spec","issue_type":"task"},{"id":"proj-g2","title":"Gate: human","issue_type":"gate"},{"id":"proj-imp","title":"Implement FIXEDTOPIC","issue_type":"task"},{"id":"proj-ver","title":"Verify","issue_type":"task"},{"id":"proj-smt","title":"Smoke test / manual QA sign-off","issue_type":"task"},{"id":"proj-g3","title":"Gate: human","issue_type":"gate"},{"id":"proj-fin","title":"Finish development branch","issue_type":"task"}],"dependencies":[{"depends_on_id":"proj-g1","issue_id":"proj-apr","type":"blocks"},{"depends_on_id":"proj-g2","issue_id":"proj-sap","type":"blocks"},{"depends_on_id":"proj-g3","issue_id":"proj-smt","type":"blocks"}]}'
           exit 0 ;;
+        *closed-parent*)
+          printf '%s\n' '[{"id":"proj-closed-parent","status":"closed"}]'
+          exit 0 ;;
+        *bad-parent*)
+          printf '%s\n' '[{"id":"'"$3"'","status":"open"}]'
+          exit 0 ;;
       esac
       printf '%s\n' '{"issues":[{"id":"proj-xpl","title":"Explore project context: FIXEDTOPIC","issue_type":"task"},{"id":"proj-clr","title":"Ask clarifying questions","issue_type":"task"},{"id":"proj-app","title":"Propose approaches","issue_type":"task"},{"id":"proj-des","title":"Present design sections","issue_type":"task"},{"id":"proj-apr","title":"User approves design","issue_type":"task"},{"id":"proj-g1","title":"Gate: human","issue_type":"gate"},{"id":"proj-wsp","title":"Write spec to docs/superpowers/specs/","issue_type":"task"},{"id":"proj-srv","title":"Spec self-review","issue_type":"task"},{"id":"proj-sap","title":"User reviews written spec","issue_type":"task"},{"id":"proj-g2","title":"Gate: human","issue_type":"gate"},{"id":"proj-imp","title":"Implement FIXEDTOPIC","issue_type":"task"},{"id":"proj-ver","title":"Verify","issue_type":"task"},{"id":"proj-smt","title":"Smoke test / manual QA sign-off","issue_type":"task"},{"id":"proj-g3","title":"Gate: human","issue_type":"gate"},{"id":"proj-fin","title":"Finish development branch","issue_type":"task"}],"dependencies":[{"depends_on_id":"proj-g1","issue_id":"proj-apr","type":"blocks"},{"depends_on_id":"proj-g2","issue_id":"proj-sap","type":"blocks"},{"depends_on_id":"proj-g3","issue_id":"proj-smt","type":"blocks"}]}'
       exit 0
@@ -203,6 +209,16 @@ case "$1" in
       printf '%s\n' '[{"id":"proj-bad-parent","title":"Bad parent","issue_type":"task","status":"open","dependency_type":"parent-child"}]'
       exit 0
     fi
+    # already-closed-parent fixture (fix r1): parent close fails but show says closed
+    if [ "$3" = "proj-tcc" ] && [ "$5" = "down" ]; then
+      printf '%s\n' '[{"id":"proj-closed-parent","title":"Closed parent","issue_type":"task","status":"open","dependency_type":"parent-child"}]'
+      exit 0
+    fi
+    # multi-repo cascade failure fixture (fix r1): umb-tc's parent fails to close
+    if [ "$3" = "umb-tc" ] && [ "$5" = "down" ]; then
+      printf '%s\n' '[{"id":"umb-bad-parent","title":"Umb bad parent","issue_type":"task","status":"open","dependency_type":"parent-child"}]'
+      exit 0
+    fi
     if [ "$3" = "proj-g2" ] && [ "$5" = "up" ]; then
       printf '%s\n' '[{"id":"proj-sap","title":"User reviews written spec","issue_type":"task","status":"open","dependency_type":"blocks"}]'
       exit 0
@@ -245,6 +261,18 @@ case "$1" in
       echo "boom" >&2
       exit 1
     fi
+    if [ "$2" = "proj-closed-parent" ]; then
+      echo "boom" >&2
+      exit 1
+    fi
+    if [ "$2" = "umb-bad-parent" ]; then
+      echo "boom" >&2
+      exit 1
+    fi
+    if [ "$2" = "crmback-fail" ]; then
+      echo "boom" >&2
+      exit 1
+    fi
     echo "ok"; exit 0
     ;;
   create)
@@ -275,6 +303,17 @@ case "$1" in
       "Doomed gate") echo "boom" >&2; exit 1 ;;
       *) printf 'generic-id\\n'; exit 0 ;;
     esac
+    ;;
+  show)
+    case "$2" in
+      *closed-parent*)
+        printf '%s\n' '[{"id":"'"$2"'","status":"closed"}]'
+        exit 0 ;;
+      *bad-parent*)
+        printf '%s\n' '[{"id":"'"$2"'","status":"open"}]'
+        exit 0 ;;
+    esac
+    echo "ok"; exit 0
     ;;
   *) echo "ok"; exit 0 ;;
 esac
@@ -811,6 +850,26 @@ test("single-repo: close cascade surfaces a failed parent close", async () => {
   const text = r?.content?.[0]?.text ?? "";
   assert.match(text, /closed proj-tc/, text);
   assert.match(text, /parent cascade: proj-bad-parent not closed/, text);
+});
+
+test("single-repo: close cascade treats an already-closed parent as success", async () => {
+  const s = await openSession("single", repoDir);
+  resetLog();
+  const r = await s.byName.get("beads_close").execute("c", { ids: "proj-tcc" });
+  const text = r?.content?.[0]?.text ?? "";
+  assert.match(text, /closed proj-tcc/, text);
+  assert.doesNotMatch(text, /warning:/, text);
+  assert.doesNotMatch(text, /not closed/, text);
+  findInvocation(["show", "proj-closed-parent", "--json"]);
+});
+
+test("umbrella: close cascade failure is not overwritten by a later repo failure", async () => {
+  const s = await openSession("umbrella", projDir);
+  resetLog();
+  const r = await s.byName.get("beads_close").execute("c", { ids: "umb-tc crmback-fail" });
+  const text = r?.content?.[0]?.text ?? "";
+  assert.match(text, /parent cascade: umb-bad-parent not closed/, text);
+  assert.match(text, /bd close failed for crmback-fail/, text);
 });
 
 test("single-repo: beads_mol_pour builds argv (--var split) and emits", async () => {
