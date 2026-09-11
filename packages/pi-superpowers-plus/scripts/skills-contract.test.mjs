@@ -78,7 +78,11 @@ test("plan-approval gate placeholders are not conflated", () => {
 
 test("no HEAD~1 review base in shipped skills", () => {
   for (const f of skillFiles()) {
-    assert.ok(!readFileSync(f, "utf8").includes("HEAD~1"), `${f} uses HEAD~1`);
+    for (const [i, line] of readFileSync(f, "utf8").split("\n").entries()) {
+      if (line.includes("HEAD~1") && !/\bnever\b/.test(line)) {
+        assert.fail(`${f}:${i + 1} uses HEAD~1 as a review base (only "never HEAD~1" warnings are allowed)`);
+      }
+    }
   }
 });
 
