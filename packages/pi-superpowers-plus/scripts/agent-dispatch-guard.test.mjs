@@ -79,5 +79,16 @@ test("config-examples parse, carry the fail-closed settings, and are byte-identi
     assert.deepEqual(JSON.parse(src), { fallbackSubagent: "none", strictAgentFiles: true });
   }
 });
+test("task-reviewer opts into narrow nested delegation; implementer/worker do not", () => {
+  const fm = (name) => readFileSync(join(root, "agent-templates", name), "utf8").split("---")[1] ?? "";
+  assert.match(
+    fm("task-reviewer.md"),
+    /allowed_subagents:\s*Explore\b/,
+    "task-reviewer.md must declare allowed_subagents: Explore",
+  );
+  for (const name of ["implementer.md", "worker.md"]) {
+    assert.ok(!/allowed_subagents:/.test(fm(name)), `${name} must not declare allowed_subagents`);
+  }
+});
 
 run();
