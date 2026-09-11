@@ -81,12 +81,10 @@ test("config-examples parse, carry the fail-closed settings, and are byte-identi
 });
 test("task-reviewer opts into narrow nested delegation; implementer/worker do not", () => {
   const fm = (name) => readFileSync(join(root, "agent-templates", name), "utf8").split("---")[1] ?? "";
-  assert.match(
-    fm("task-reviewer.md"),
-    /allowed_subagents:\s*Explore\b/,
-    "task-reviewer.md must declare allowed_subagents: Explore",
-  );
-  for (const name of ["implementer.md", "worker.md"]) {
+  const m = fm("task-reviewer.md").match(/^allowed_subagents:(.*)$/m);
+  assert.ok(m, "task-reviewer.md must declare allowed_subagents");
+  assert.equal(m[1].trim(), "Explore", "the allowlist must be exactly Explore");
+  for (const name of ["implementer.md", "worker.md", "code-reviewer.md"]) {
     assert.ok(!/allowed_subagents:/.test(fm(name)), `${name} must not declare allowed_subagents`);
   }
 });
@@ -94,6 +92,11 @@ test("task-reviewer opts into narrow nested delegation; implementer/worker do no
 test("the SDD task-reviewer prompt references the nested-lookup path", () => {
   const src = readFileSync(join(root, "skills", "subagent-driven-development", "task-reviewer-prompt.md"), "utf8");
   assert.match(src, /nested `Explore` child/i, "task-reviewer-prompt.md must document the nested Explore lookup");
+  assert.match(
+    src,
+    /nested `Agent` tool is available, report the item as `⚠️`/,
+    "task-reviewer-prompt.md must keep the graceful-degradation fallback",
+  );
 });
 
 run();
