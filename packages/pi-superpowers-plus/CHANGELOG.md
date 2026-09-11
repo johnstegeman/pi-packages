@@ -26,6 +26,15 @@ Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   that predates nested delegation, or a stale copied template) fall back to
   today's `⚠️`. Requires re-copying
   `agent-templates/task-reviewer.md`.
+- **Nested delegation for the code reviewer** — the `code-reviewer` template
+  sets `allowed_subagents: Explore` (same bounded contract as `task-reviewer`:
+  one `Explore` child per named question, folded into the verdict, `⚠️`
+  fallback). The scoped re-review prompt allows the same for finding/fix-diff
+  questions. Workflow children stay inert: SubagentWorkflow-spawned agents
+  (`final-review.js` finders, `fix-loop.js` re-reviewers) carry no
+  `nestedRuntime` — verified by code trace (`agent-manager.ts:800` is the sole
+  construction site) — so the template is inert there, documented fail-closed
+  (l8x9.11).
 
 ---
 
