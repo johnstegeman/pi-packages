@@ -21,8 +21,9 @@ Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   bounded, named question with one nested read-only lookup and fold the answer
   into its verdict instead of bouncing it to the controller. `Explore` only (no
   write-capable agents), one child per question, and the report names each
-  lookup. Hosts without nesting (`maxSubagentDepth` ≤ 1, pi-subagents < 0.19, or
-  a stale copied template) fall back to today's `⚠️`. Requires re-copying
+  lookup. Hosts without nesting (`maxSubagentDepth` ≤ 1, a pi-subagents build
+  that predates nested delegation, or a stale copied template) fall back to
+  today's `⚠️`. Requires re-copying
   `agent-templates/task-reviewer.md`.
 
 ---

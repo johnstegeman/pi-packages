@@ -14,8 +14,8 @@ from the diff alone, the prompt's current instruction is to report it as a
 
 That hand-back is the "bounce". The controller must then break out of
 coordination, run a lookup, and either answer the reviewer (an extra round trip)
-or adjudicate an unverified verdict. pi-subagents ≥ 0.19 supplies a better
-path: `allowed_subagents` gives a custom agent its own ownership-scoped nested
+or adjudicate an unverified verdict. pi-subagents supplies a better path:
+`allowed_subagents` gives a custom agent its own ownership-scoped nested
 `Agent` / `get_subagent_result` / `steer_subagent` tools, depth-capped from the
 main session (default 2), with results folded back and token spend rolled into
 the parent's totals. A reviewer could settle a bounded question itself with one
@@ -69,9 +69,9 @@ controller can record it in the ledger and the reviewer's verdict stays
 auditable.
 
 **Fallback (graceful, additive).** If no nested `Agent` tool is available —
-pi-subagents < 0.19, `maxSubagentDepth ≤ 1`, a stale copied template, or
-`Explore` disabled — the reviewer reports `⚠️` exactly as today. Nothing on the
-controller path changes.
+a pi-subagents build that predates nested delegation, `maxSubagentDepth ≤ 1`,
+a stale copied template, or `Explore` disabled — the reviewer reports `⚠️`
+exactly as today. Nothing on the controller path changes.
 
 ## File changes
 
