@@ -57,8 +57,11 @@ Dispatch a subagent with this prompt:
     amended symbol used here, is this caller in scope). You may dispatch **one
     nested `Explore` child per such named question** to settle it — fold the
     answer into the verdict as evidence, and never delegate open-ended
-    crawling. If no nested `Agent` tool is available to you, verdict from the
-    diff alone; unresolved items stay `NOT ADDRESSED` / `⚠️` as today.
+    crawling. Treat the child's answer as an unverified claim: the evidence
+    weight of a folded verdict rests on your own corroborating reading of the
+    diff and code, not the child's word alone. If no nested `Agent` tool is available
+    to you, verdict from the diff alone; unresolved items stay
+    `NOT ADDRESSED` / `⚠️` as today.
 
     ## Tests
 

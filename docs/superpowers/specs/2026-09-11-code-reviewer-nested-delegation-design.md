@@ -21,10 +21,23 @@ The `code-reviewer` role has the same bounce problem:
   fans out parallel dimension finders; each hits verification questions it
   cannot answer from the diff alone and either guesses or emits weak/unverified
   findings into the JSONL.
-- The **scoped re-review** (`skills/subagent-driven-development/re-review-prompt.md`,
-  used inside `fix-loop.js` / `wave-parallel.js` pipelines) verdicts each
-  finding from the fix diff; verifying "was the amended symbol actually used
-  here / is this caller in scope" often needs a bounded tree lookup.
+- The **scoped re-review** verdicts each finding from the fix diff; verifying
+  "was the amended symbol actually used here / is this caller in scope" often
+  needs a bounded tree lookup. Its prompt
+  (`skills/subagent-driven-development/re-review-prompt.md`) is consumed by the
+  controller's prose-path re-review dispatch ("Dispatch scoped re-review" in
+  `SKILL.md`), a direct `Agent` tool call; `fix-loop.js` builds its re-review
+  prompt inline (`const reReviewPrompt = [...]`, line 96) and never reads
+  `re-review-prompt.md`, and `wave-parallel.js` has no re-review stage at all
+  (fix rounds stay controller-side).
+
+Consequence: because `re-review-prompt.md` is consumed on the controller's
+direct-dispatch path — which carries `nestedRuntime` — the re-review half of
+the feature is live there (that re-reviewer DOES get the nested `Agent` tools),
+while the automated `fix-loop.js` re-reviewer never sees the Bounded Lookups
+paragraph because its prompt is built inline; the workflow-inert caveat still
+holds for workflow children, but the fix-loop re-reviewer's missing nesting
+comes from the absent paragraph text, not tool-inertness.
 
 The bead's open question — resolved below with evidence — is whether
 `allowed_subagents` composes with SubagentWorkflow-spawned children

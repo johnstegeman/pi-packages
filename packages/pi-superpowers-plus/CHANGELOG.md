@@ -34,7 +34,7 @@ Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   (`final-review.js` finders, `fix-loop.js` re-reviewers) carry no
   `nestedRuntime` — verified by code trace (`agent-manager.ts:800` is the sole
   construction site) — so the template is inert there, documented fail-closed
-  (l8x9.11).
+  (l8x9.11). Requires re-copying `agent-templates/code-reviewer.md`.
 
 ---
 
