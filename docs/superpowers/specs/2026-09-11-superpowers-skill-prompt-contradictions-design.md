@@ -170,7 +170,7 @@ asserts:
 2. **SDD prompt-set alignment (H7)** — `implementer-prompt.md`, `re-review-prompt.md`, and
    `task-reviewer-prompt.md` each emit a `set_phase` call and all three agree
    (expected `"development"`).
-3. **No `HEAD~1`** — the string never appears anywhere under `skills/**` (M12).
+3. **No `HEAD~1` review base** — no shipped skill *computes* a review base with `HEAD~1`: any line containing `HEAD~1` without a `never` warning is a failure. The explicit "never `HEAD~1`" warnings in SDD (`SKILL.md:265,300`) and the `review-package` comment are allowed prose (M12).
 4. **Gate-placeholder discipline (H8)** — the old conflated name `<plan-approved-gate-id>` is
    gone, and no `beads_gate_resolve({ id: "…gate-bead-id" })` call exists (the gate *task* bead
    is never handed to the resolver).
