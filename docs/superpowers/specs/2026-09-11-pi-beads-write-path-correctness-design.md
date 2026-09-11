@@ -44,7 +44,7 @@ re-verified by hand:
 | Q2 | `beads_create_list` contract under M1 | Exact contract preserved: direct children, plan-order `t1..tN`, unchanged return shape. `bd batch` (no `--parent`/`--silent`) is rejected; `bd create --graph` is a possible follow-up, not this run. |
 | Q3 | Prefix discovery (H2) | Hybrid (option C): try `bd where` (`nativePrefixOf`) for every repo; fall back to a longest-common-prefix sampler when it fails. |
 | Q4 | Prefix matching | `dirForPrefix` does longest-known-prefix matching over `prefixToDir`; no truncation anywhere. |
-| Q5 | M1 mechanism | Fold the chain and gate edges into each create via `--deps` (`N+2` bd calls), replacing the `bd link` loop. If bd rejects `--deps`, fail loudly rather than silently re-wiring. |
+| Q5 | M1 mechanism | Keep per-task creates; wire all gate/chain edges in one `bd dep add --file <tmp.jsonl>` call (`N+3` bd calls), replacing the `bd link` loop. (`bd create --deps 'blocks:id'` makes the *new* issue the blocker of `id` — the reverse of the required direction — so it is unusable here.) |
 | Q6 | Target bd | 1.2.2 (what the suite pins and what the repo's tools are verified against). No silent fallback paths for unsupported flags. |
 
 ## Behavior contract
@@ -86,17 +86,20 @@ Applies to `beads_create` and `beads_mol_pour`.
 - **Durability:** any return path that has already minted beads calls
   `await afterWrite(repoDir)` first — the human-gate-setup failure path and the
   partial-task-failure path included.
-- **Batching:** each task create carries its own edges via
-  `--deps "blocks:<gate>,blocks:<prevTask>"` (each part omitted when
-  absent). bd's `--deps 'type:id'` means *the new issue depends on `id`*, which
-  is exactly today's wiring: tasks depend on the gate, and task *i* depends on
-  task *i−1*. The separate `bd link` loop is removed. bd invocations drop from
-  ~`3N+2` to `N+2`.
+- **Batching:** after all creates, write every edge to a temp JSONL file
+  (`{"from":<dependent>,"to":<blocker>,"type":"blocks"}`) and issue one
+  `bd dep add --file <path>` call. Direction is the verified-correct one:
+  `from` = dependent, `to` = blocker (same as `bd dep add D C` → D depends on C).
+  Edges are: each task depends on the gate; task *i* depends on task *i−1*. The
+  `bd link` loop is removed. bd invocations drop from ~`3N+2` to `N+3`.
+  (`bd create --deps 'blocks:id'` is NOT usable: it makes the new issue the
+  blocker of `id`, inverting the graph — empirically verified on bd 1.2.2.)
 - **Contract:** creates keep `--parent <parent> --silent`; ids are still
   real `parent.N` children emitted in plan order; the return string is
   unchanged (`gate:`/`human-gate:`/`t1:..tN:`).
-- **Failure:** a create that fails with `--deps` returns the existing
-  partial-failure report (after `afterWrite`), not a silent fallback.
+- **Failure:** a task create that fails returns the existing partial-failure
+  report (after `afterWrite`), not a silent fallback; a failed bulk dep call is
+  surfaced after `afterWrite`.
 
 ### 4. `beads_close` cascade (M3)
 
@@ -121,9 +124,10 @@ All tests use the existing fixture `bd` stub (subprocess-boundary double).
 - **Prefix routing:** dashed native prefix in *both* single-repo and umbrella
   modes; `bd where` returning a prefix for an additional repo (hybrid path); a
   `bd where`-fails case exercising the sampler fallback.
-- **create_list:** assert `--deps` on each create and assert **zero `link`
-  invocations**; assert `afterWrite`/`export` on the partial-failure and
-  human-gate-setup-failure paths; assert ids/return shape unchanged.
+- **create_list:** assert **zero `link`/`--deps` invocations**, assert the bulk
+  `bd dep add --file` call's JSONL edge set (from/to/type direction), and assert
+  `afterWrite`/`export` on the partial-failure and human-gate-setup-failure
+  paths; assert ids/return shape unchanged.
 - **close:** cascade failure surfaced while successful closes are still
   reported.
 - **cost-tracking:** a unit test proving two overlapping same-bead events both
@@ -143,5 +147,6 @@ All tests use the existing fixture `bd` stub (subprocess-boundary double).
 - **`bd where` in a hydrated additional repo is unverified here** (the fixture
   currently models it as failing). The hybrid design contains this: the sampler
   fallback covers it, and the fixture is updated to model both outcomes.
-- **`--deps` direction/version support.** Mitigated by an explicit fixture
-  assertion of the argv and a hard error when bd rejects the flag.
+- **`bd dep add --file` availability/version.** Available on bd 1.2.2; a
+  non-zero exit is surfaced (after `afterWrite`) rather than retried. Edge
+  direction is pinned by a fixture that echoes the JSONL contents.
