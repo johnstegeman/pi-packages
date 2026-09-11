@@ -158,14 +158,43 @@ export default function piBeadsLean(pi: any) {
     const m = r.out.match(/^\s*prefix:\s*(\S+)/m);
     return m ? m[1] : "";
   }
+  function longestCommonPrefix(strings: string[]): string {
+    if (strings.length === 0) return "";
+    let p = strings[0];
+    for (const s of strings.slice(1)) {
+      let i = 0;
+      while (i < p.length && i < s.length && p[i] === s[i]) i++;
+      p = p.slice(0, i);
+      if (!p) break;
+    }
+    return p;
+  }
+  function prefixFromId(id: string): string {
+    let s = String(id).replace(/\.[^.]*$/, ""); // strip a trailing .N step suffix
+    const mol = s.indexOf("-mol-");
+    if (mol > 0) s = s.slice(0, mol);
+    const dash = s.lastIndexOf("-");
+    return dash > 0 ? s.slice(0, dash) : s;
+  }
   async function samplePrefixOf(repoDir: string): Promise<string> {
-    // a per-repo DB only holds its own issues -> any id reveals the prefix
-    const r = await bd(["list", "--all", "-n", "1", "--json"], repoDir);
+    // a per-repo DB only holds its own issues -> any id reveals the prefix. Derive it
+    // from the longest common prefix of sampled ids so a DASHED native prefix
+    // (e.g. pi-packages) is recovered, not just the first hyphen-delimited token.
+    const r = await bd(["list", "--all", "-n", "5", "--json"], repoDir);
     if (r.ok) {
       try {
         const a = JSON.parse(r.out);
-        const id = Array.isArray(a) ? a[0]?.id : a?.id;
-        if (id) return String(id).split("-")[0];
+        const rows = Array.isArray(a) ? a : (a?.issues ?? []);
+        const ids = rows
+          .map((x: any) => x?.id)
+          .filter(Boolean)
+          .map(String);
+        if (ids.length >= 2) {
+          const lcp = longestCommonPrefix(ids);
+          const cut = lcp.lastIndexOf("-");
+          if (cut > 0) return lcp.slice(0, cut);
+        }
+        if (ids.length === 1) return prefixFromId(ids[0]);
       } catch {
         /* ignore */
       }
@@ -208,7 +237,7 @@ export default function piBeadsLean(pi: any) {
       basenameToDir.set(path.basename(umbrella), umbrella);
       for (const dir of repos) {
         basenameToDir.set(path.basename(dir), dir);
-        const pfx = await samplePrefixOf(dir);
+        const pfx = (await nativePrefixOf(dir)) || (await samplePrefixOf(dir));
         if (pfx) prefixToDir.set(pfx, dir);
       }
       const ar = await repoRootOf(activeCwd);
@@ -244,8 +273,14 @@ export default function piBeadsLean(pi: any) {
   }
 
   function dirForPrefix(id: string): string | null {
-    const pfx = String(id).split("-")[0];
-    return prefixToDir.get(pfx) ?? null;
+    const s = String(id);
+    let bestKey: string | null = null;
+    for (const pfx of prefixToDir.keys()) {
+      if ((s === pfx || s.startsWith(pfx + "-")) && (bestKey === null || pfx.length > bestKey.length)) {
+        bestKey = pfx;
+      }
+    }
+    return bestKey ? (prefixToDir.get(bestKey) ?? null) : null;
   }
   function resolveRepoTarget(repoParam?: string): string | null {
     if (!repoParam) return null;

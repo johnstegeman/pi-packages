@@ -51,9 +51,16 @@ MODE="\${FAKE_BD_MODE:-single}"
 } >> "$FAKE_BD_LOG"
 case "$1" in
   where)
+    if [ "$MODE" = "umbrella-dashed" ]; then
+      case "$CWD" in
+        ${shellQuote(workspace)}*|${shellQuote(umbrella)})
+          printf '  %s\\n  prefix: pi-packages\\n' ${shellQuote(join(umbrella, ".beads"))}; exit 0 ;;
+        *) echo "no beads root: $CWD" >&2; exit 1 ;;
+      esac
+    fi
     if [ "$MODE" = "umbrella" ]; then
       case "$CWD" in
-        ${shellQuote(workspace)}*|${shellQuote(umbrella)}*)
+        ${shellQuote(workspace)}*|${shellQuote(umbrella)})
           printf '  %s\\n' ${shellQuote(join(umbrella, ".beads"))}; echo "  prefix: umb"; exit 0 ;;
         *) echo "no beads root: $CWD" >&2; exit 1 ;;
       esac
@@ -65,8 +72,11 @@ case "$1" in
     esac
     ;;
   repo)
-    if [ "$2" = "list" ] && [ "$MODE" = "umbrella" ]; then
-      printf '  - %s\\n' ${shellQuote(backendDir)}
+    if [ "$2" = "list" ]; then
+      case "$MODE" in
+        umbrella|umbrella-dashed)
+          printf '  - %s\\n' ${shellQuote(backendDir)} ;;
+      esac
     fi
     exit 0
     ;;
@@ -140,7 +150,7 @@ case "$1" in
         *2*) printf '{"issues":[{"id":"proj-m2-imp","title":"Implement T2","status":"open","priority":2,"labels":["step:implement"]}],"meta":{"count":1}}' ;;
         *)   printf '{"issues":[{"id":"proj-m1-imp","title":"Implement T1","status":"open","priority":2,"labels":["step:implement"]},{"id":"proj-m1-done","title":"Explore done","status":"closed","priority":2,"labels":["step:implement"]}],"meta":{"count":2}}' ;;
       esac
-    elif [ "$MODE" = "umbrella" ]; then
+    elif [ "$MODE" = "umbrella" ] || [ "$MODE" = "umbrella-dashed" ]; then
       echo '[{"id": "crmback-1a2", "title": "sample"}]'
     else
       echo '[{"id": "proj-1a2", "title": "sample"}]'
@@ -396,6 +406,20 @@ test("runtime: dirForPrefix routes ids to owning repo in umbrella mode", async (
   const rt = getBeadsRuntime();
   assert.equal(rt.dirForPrefix("crmback-1"), backendDir); // crmback-* -> backendDir per the fixture
   assert.equal(rt.dirForPrefix("nosuch-1"), null);
+});
+
+test("umbrella-dashed: dirForPrefix routes the umbrella's dashed native prefix", async () => {
+  await openSession("umbrella-dashed", projDir);
+  const rt = getBeadsRuntime();
+  assert.equal(rt.dirForPrefix("pi-packages-1zth"), umbrella);
+  assert.equal(rt.dirForPrefix("pi-packages-mol-0vre.2"), umbrella);
+  assert.equal(rt.dirForPrefix("crmback-1"), backendDir);
+  assert.equal(rt.dirForPrefix("nosuch-1"), null);
+});
+
+test("samplePrefixOf fallback still derives a dashless prefix when bd where fails", async () => {
+  await openSession("umbrella-dashed", projDir);
+  assert.equal(getBeadsRuntime().dirForPrefix("crmback-1a2"), backendDir);
 });
 
 // ---------------------------------------------------------------------------
