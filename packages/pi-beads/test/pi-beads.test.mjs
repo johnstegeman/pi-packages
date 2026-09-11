@@ -442,6 +442,30 @@ test("single-repo: beads_create builds argv and emits beads:changed", async () =
   assert.equal(s.emitted.at(-1), "beads:changed");
 });
 
+test("single-repo: beads_create rejects an unknown repo instead of using the default", async () => {
+  const s = await openSession("single", repoDir);
+  resetLog();
+  const r = await s.byName.get("beads_create").execute("c", { title: "Doomed", repo: "bakcend" });
+  assert.match(r?.content?.[0]?.text ?? "", /unknown repo 'bakcend'/);
+  assert.equal(invocations().length, 0, "no bd create may run");
+});
+
+test("single-repo: beads_create still defaults when repo is omitted", async () => {
+  const s = await openSession("single", repoDir);
+  resetLog();
+  const r = await s.byName.get("beads_create").execute("c", { title: "Do the thing" });
+  assert.ok(okResult(r), JSON.stringify(r));
+  findInvocation(["create", "Do the thing"]);
+});
+
+test("single-repo: beads_mol_pour rejects an unknown repo", async () => {
+  const s = await openSession("single", repoDir);
+  resetLog();
+  const r = await s.byName.get("beads_mol_pour").execute("c", { proto: "superpowers-workflow", repo: "bakcend", vars: "topic=x" });
+  assert.match(r?.content?.[0]?.text ?? "", /unknown repo 'bakcend'/);
+  assert.equal(invocations().length, 0);
+});
+
 test("single-repo: beads_create_list creates sequentially, wires gate+chain deps, emits", async () => {
   const s = await openSession("single", repoDir);
   const before = s.emitted.length;

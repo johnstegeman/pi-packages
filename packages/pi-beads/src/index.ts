@@ -291,8 +291,15 @@ export default function piBeadsLean(pi: any) {
       (basenameToDir.get(path.basename(k)) || null)
     );
   }
-  function resolveCreateTarget(repoParam?: string): string | null {
-    return resolveRepoTarget(repoParam) ?? defaultRepoDir;
+  function resolveCreateTarget(repoParam?: string): { dir: string } | { error: string } {
+    const supplied = repoParam !== undefined && repoParam !== null && String(repoParam).trim() !== "";
+    if (!supplied) {
+      return defaultRepoDir
+        ? { dir: defaultRepoDir }
+        : { error: `specify repo (one of: ${knownRepos()}) — cannot create in the umbrella aggregate` };
+    }
+    const dir = resolveRepoTarget(repoParam);
+    return dir ? { dir } : { error: `unknown repo '${String(repoParam).trim()}' (known: ${knownRepos()})` };
   }
   const knownRepos = () => Array.from(basenameToDir.keys()).join(", ");
 
@@ -794,11 +801,9 @@ export default function piBeadsLean(pi: any) {
     },
     async execute(_id: string, params: any) {
       if (!params?.title) return textResult("title is required");
-      const repoDir = resolveCreateTarget(params?.repo);
-      if (!repoDir)
-        return textResult(
-          `specify repo (one of: ${knownRepos()}) — cannot create in the umbrella aggregate`,
-        );
+      const target = resolveCreateTarget(params?.repo);
+      if ("error" in target) return textResult(target.error);
+      const repoDir = target.dir;
       const args = ["create", String(params.title)];
       if (params.type) args.push("-t", String(params.type));
       if (params.priority !== undefined && params.priority !== null)
@@ -1249,9 +1254,9 @@ export default function piBeadsLean(pi: any) {
     },
     async execute(_id: string, params: any) {
       if (!params?.proto) return textResult("proto is required");
-      const repoDir = resolveCreateTarget(params?.repo);
-      if (!repoDir)
-        return textResult(`specify repo (one of: ${knownRepos()}) — cannot pour in the umbrella aggregate`);
+      const target = resolveCreateTarget(params?.repo);
+      if ("error" in target) return textResult(target.error);
+      const repoDir = target.dir;
       const varPairs = String(params.vars ?? "")
         .split(",").map((s: string) => s.trim()).filter(Boolean);
       const args = ["mol", "pour", String(params.proto)];
