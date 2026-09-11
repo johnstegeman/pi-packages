@@ -16,6 +16,15 @@ Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - **Wave-parallel implementation** — SDD can batch ready, disjoint-file tasks as waves: `scripts/wave-parallel.js` runs `pipeline(implement, review)` per task (engine-managed concurrency, review pipelined behind implementation), gated on task-declared `**Gate:**` commands, with file-scoped review packages (`review-package -- files`) so concurrent commits on the shared branch can't contaminate reviews. Controller claims all wave task beads at dispatch and processes the envelope after the run; fix rounds stay controller-side. Waves waive per-task cost attribution by design; the sequential loop is unchanged when `SubagentWorkflow` is absent.
 - **Named implementer dispatches + @handle recovery path** — every per-task implementer is dispatched with a deterministic `name: "task-<sanitized-task-id>-impl"` (ledger dispatch and fix-round lines record `agent:` + `handle:`), and SDD documents the `@handle` path as a second recovery route within the live session: sessions persist by default (`rememberAgents`), tombstones keep the handle resolving after record eviction and reopen from disk, the handle works in `steer_subagent` / `get_subagent_result` by name, with the session-scoped boundary (forgotten on `/new` — the ledger stays the cross-session map) and the `run_in_background`-on-resume nuance documented. New structural guard `scripts/named-agents.test.mjs` pins the contract into `npm test`.
 
+- **Narrow nested delegation for the task reviewer** — the `task-reviewer`
+  template sets `allowed_subagents: Explore`, so a reviewer can settle a
+  bounded, named question with one nested read-only lookup and fold the answer
+  into its verdict instead of bouncing it to the controller. `Explore` only (no
+  write-capable agents), one child per question, and the report names each
+  lookup. Hosts without nesting (`maxSubagentDepth` ≤ 1, pi-subagents < 0.19, or
+  a stale copied template) fall back to today's `⚠️`. Requires re-copying
+  `agent-templates/task-reviewer.md`.
+
 ---
 
 ## [0.9.0] — 2026-09-04
