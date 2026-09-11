@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 # Generate a review package: commit list, stat summary, and the net
 # diff with extended context, written to a file the reviewer reads in one
-# call. Using the recorded per-task BASE (not HEAD~1) keeps multi-commit
-# tasks intact.
+# call. Using the recorded per-task BASE (not the parent-commit base) keeps
+# multi-commit tasks intact.
 #
 # Usage: review-package SLUG BASE HEAD [OUTFILE] [-- FILE...]
 #   A trailing '-- <files...>' scopes the stat and diff to those paths —

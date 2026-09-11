@@ -76,4 +76,10 @@ test("plan-approval gate placeholders are not conflated", () => {
   }
 });
 
+test("no HEAD~1 review base in shipped skills", () => {
+  for (const f of skillFiles()) {
+    assert.ok(!readFileSync(f, "utf8").includes("HEAD~1"), `${f} uses HEAD~1`);
+  }
+});
+
 run();
