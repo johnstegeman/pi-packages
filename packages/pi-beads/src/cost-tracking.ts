@@ -24,7 +24,13 @@ const beadQueues = new Map<string, Promise<void>>();
 function enqueue(beadId: string, task: () => Promise<void>): Promise<void> {
   const prev = beadQueues.get(beadId) ?? Promise.resolve();
   const next = prev.then(task, task);
-  beadQueues.set(beadId, next.catch(() => {}));
+  const stored = next.catch(() => {}); // never rejects; keeps the chain alive
+  beadQueues.set(beadId, stored);
+  // Prune the entry once this link settles and it is still the tail, so the
+  // map does not grow unboundedly; a newer queued link is left in place.
+  stored.then(() => {
+    if (beadQueues.get(beadId) === stored) beadQueues.delete(beadId);
+  });
   return next.catch(() => {});
 }
 

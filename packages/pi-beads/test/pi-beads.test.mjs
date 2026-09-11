@@ -65,6 +65,13 @@ case "$1" in
         *) echo "no beads root: $CWD" >&2; exit 1 ;;
       esac
     fi
+    if [ "$MODE" = "single-dashed" ]; then
+      case "$CWD" in
+        ${shellQuote(repoDir)}*|${shellQuote(workspace)}*)
+          printf '  %s\\n  prefix: pi-packages\\n' ${shellQuote(join(repoDir, ".beads"))}; exit 0 ;;
+        *) echo "no beads root: $CWD" >&2; exit 1 ;;
+      esac
+    fi
     case "$CWD" in
       ${shellQuote(repoDir)}*|${shellQuote(workspace)}*)
         printf '  %s\\n' ${shellQuote(join(repoDir, ".beads"))}; exit 0 ;;
@@ -157,7 +164,15 @@ case "$1" in
         *)   printf '{"issues":[{"id":"proj-m1-imp","title":"Implement T1","status":"open","priority":2,"labels":["step:implement"]},{"id":"proj-m1-done","title":"Explore done","status":"closed","priority":2,"labels":["step:implement"]}],"meta":{"count":2}}' ;;
       esac
     elif [ "$MODE" = "umbrella" ] || [ "$MODE" = "umbrella-dashed" ]; then
-      echo '[{"id": "crmback-1a2", "title": "sample"}]'
+      if [ "$CWD" = ${shellQuote(backendDir)} ]; then
+        # backend's samplePrefixOf call: two MOLECULE ids so the multi-id LCP path
+        # is exercised (suffix stripping must yield the bare 'crmback' prefix).
+        echo '[{"id": "crmback-mol-1", "title": "m"}, {"id": "crmback-mol-2", "title": "m"}]'
+      else
+        echo '[{"id": "crmback-1a2", "title": "sample"}]'
+      fi
+    elif [ "$MODE" = "single-dashed" ]; then
+      echo '[{"id": "pi-packages-1zth", "title": "sample"}]'
     else
       echo '[{"id": "proj-1a2", "title": "sample"}]'
     fi
@@ -485,6 +500,23 @@ test("umbrella-dashed: dirForPrefix routes the umbrella's dashed native prefix",
   assert.equal(rt.dirForPrefix("nosuch-1"), null);
 });
 
+test("single-dashed: dirForPrefix routes the repo's dashed native prefix (nativePrefixOf probe)", async () => {
+  await openSession("single-dashed", repoDir);
+  const rt = getBeadsRuntime();
+  assert.equal(rt.dirForPrefix("pi-packages-1zth"), repoDir);
+  assert.equal(rt.dirForPrefix("pi-packages-mol-0vre.2"), repoDir);
+  assert.equal(rt.dirForPrefix("nosuch-1"), null);
+});
+
+test("samplePrefixOf multi-id LCP strips molecule suffixes (matches single-id path)", async () => {
+  await openSession("umbrella", projDir);
+  const rt = getBeadsRuntime();
+  // backend's sampled ids are molecule ids crmback-mol-1 / crmback-mol-2: the
+  // normalized LCP must yield bare 'crmback', not 'crmback-mol' or "".
+  assert.equal(rt.dirForPrefix("crmback-1a2"), backendDir);
+  assert.equal(rt.dirForPrefix("crmback-mol-1"), backendDir);
+});
+
 test("samplePrefixOf fallback still derives a dashless prefix when bd where fails", async () => {
   await openSession("umbrella-dashed", projDir);
   assert.equal(getBeadsRuntime().dirForPrefix("crmback-1a2"), backendDir);
@@ -670,6 +702,18 @@ test("single-repo: create_list re-exports after a partial task failure", async (
   });
   assert.match(r?.content?.[0]?.text ?? "", /1 of 2 tasks created before failure/);
   assert.equal(s.emitted.at(-1), "beads:changed", "afterWrite must run after minted beads");
+});
+
+test("single-repo: create_list does not re-export when no bead was minted", async () => {
+  const s = await openSession("single", repoDir);
+  resetLog();
+  s.emitted.length = 0;
+  const r = await s.byName.get("beads_create_list").execute("c", {
+    parent: "proj-m1-imp",
+    tasks: [{ title: "Doomed task" }],
+  });
+  assert.match(r?.content?.[0]?.text ?? "", /0 of 1 tasks created before failure/);
+  assert.equal(s.emitted.length, 0, "no beads minted -> no beads:changed");
 });
 
 test("single-repo: beads_create_list gate-failure aborts before any task", async () => {
@@ -870,6 +914,27 @@ test("umbrella: close cascade failure is not overwritten by a later repo failure
   const text = r?.content?.[0]?.text ?? "";
   assert.match(text, /parent cascade: umb-bad-parent not closed/, text);
   assert.match(text, /bd close failed for crmback-fail/, text);
+});
+
+test("umbrella: a failing repo close does not skip later repos (no order-dependent silent failure)", async () => {
+  const s = await openSession("umbrella", projDir);
+  resetLog();
+  // backend (crmback-fail) is iterated FIRST and fails; umbrella (umb-1a2)
+  // SECOND must still be attempted and reported in the same result.
+  const r = await s.byName.get("beads_close").execute("c", { ids: "crmback-fail umb-1a2" });
+  const text = r?.content?.[0]?.text ?? "";
+  assert.match(text, /bd close failed for crmback-fail/, text);
+  assert.match(text, /closed umb-1a2/, text);
+  findInvocation(["close", "umb-1a2"]);
+});
+
+test("umbrella: unknown-repo error lists both folder names and id prefixes", async () => {
+  const s = await openSession("umbrella", projDir);
+  const r = await s.byName.get("beads_create").execute("c", { title: "x", repo: "nope" });
+  const text = r?.content?.[0]?.text ?? "";
+  assert.match(text, /unknown repo 'nope'/, text);
+  assert.match(text, /known: .*backend/, text);
+  assert.match(text, /known: .*crmback/, text);
 });
 
 test("single-repo: beads_mol_pour builds argv (--var split) and emits", async () => {

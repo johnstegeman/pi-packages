@@ -27,7 +27,7 @@
  */
 
 import { execFile } from "node:child_process";
-import { writeFileSync, unlinkSync } from "node:fs";
+import { writeFileSync, mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { promisify } from "node:util";
 import * as path from "node:path";
@@ -155,7 +155,8 @@ export default function piBeadsLean(pi: any) {
     return dirs;
   }
   async function nativePrefixOf(dir: string): Promise<string> {
-    // umbrella's own prefix from `bd where` ("  prefix: prod")
+    // a repo's native prefix from `bd where` ("  prefix: prod"); called for
+    // every repo (umbrella and each hydrated sub-repo)
     const r = await bd(["where"], dir);
     const m = r.out.match(/^\s*prefix:\s*(\S+)/m);
     return m ? m[1] : "";
@@ -171,10 +172,16 @@ export default function piBeadsLean(pi: any) {
     }
     return p;
   }
-  function prefixFromId(id: string): string {
-    let s = String(id).replace(/\.[^.]*$/, ""); // strip a trailing .N step suffix
+  // strip a trailing `.N` step suffix and any `-mol-…` segment so a molecule
+  // step id (e.g. proj-mol-1.2) and its root (proj-mol-1) normalize alike.
+  function stripIdSuffix(id: string): string {
+    let s = String(id).replace(/\.[^.]*$/, "");
     const mol = s.indexOf("-mol-");
     if (mol > 0) s = s.slice(0, mol);
+    return s;
+  }
+  function prefixFromId(id: string): string {
+    const s = stripIdSuffix(id);
     const dash = s.lastIndexOf("-");
     return dash > 0 ? s.slice(0, dash) : s;
   }
@@ -190,11 +197,15 @@ export default function piBeadsLean(pi: any) {
         const ids = rows
           .map((x: any) => x?.id)
           .filter(Boolean)
-          .map(String);
+          .map(String)
+          .map(stripIdSuffix);
         if (ids.length >= 2) {
           const lcp = longestCommonPrefix(ids);
           const cut = lcp.lastIndexOf("-");
           if (cut > 0) return lcp.slice(0, cut);
+          // no hyphen left after normalization (dashless prefix such as
+          // 'crmback') -> the LCP itself is the prefix, matching prefixFromId.
+          if (lcp) return lcp;
         }
         if (ids.length === 1) return prefixFromId(ids[0]);
       } catch {
@@ -249,7 +260,7 @@ export default function piBeadsLean(pi: any) {
       umbrella = (await repoRootOf(activeCwd)) || activeCwd;
       isUmbrella = false;
       basenameToDir.set(path.basename(umbrella), umbrella);
-      const pfx = await samplePrefixOf(umbrella);
+      const pfx = (await nativePrefixOf(umbrella)) || (await samplePrefixOf(umbrella));
       if (pfx) prefixToDir.set(pfx, umbrella);
       defaultRepoDir = umbrella;
     }
@@ -303,7 +314,8 @@ export default function piBeadsLean(pi: any) {
     const dir = resolveRepoTarget(repoParam);
     return dir ? { dir } : { error: `unknown repo '${String(repoParam).trim()}' (known: ${knownRepos()})` };
   }
-  const knownRepos = () => Array.from(basenameToDir.keys()).join(", ");
+  const knownRepos = () =>
+    Array.from(new Set([...basenameToDir.keys(), ...prefixToDir.keys()])).join(", ");
 
   // ---- compact formatters ----
   const trunc = (s: string, n = 70) =>
@@ -918,7 +930,7 @@ export default function piBeadsLean(pi: any) {
         const r = await bd(a, repoDir);
         if (!r.ok) {
           const ids = [...(gateId ? [gateId] : []), ...taskIds];
-          await afterWrite(repoDir);
+          if (gateId || taskIds.length) await afterWrite(repoDir);
           return textResult(`${taskIds.length} of ${params.tasks.length} tasks created before failure: ${ids.join(", ")}`);
         }
         taskIds.push(lastId(r.out));
@@ -933,13 +945,25 @@ export default function piBeadsLean(pi: any) {
         if (i > 0) edges.push({ from: taskIds[i], to: taskIds[i - 1], type: "blocks" });
       }
       if (edges.length) {
-        const depFile = path.join(tmpdir(), `pi-beads-deps-${process.pid}-${taskIds[0]}.jsonl`);
-        writeFileSync(depFile, edges.map((e) => JSON.stringify(e)).join("\n") + "\n", "utf8");
-        const dr = await bd(["dep", "add", "--file", depFile], repoDir);
-        try { unlinkSync(depFile); } catch { /* best effort */ }
-        if (!dr.ok) {
+        // Write the bulk-dep JSONL inside a unique private dir under the shared
+        // tmpdir (a predictable path there is a symlink/collision footgun), and
+        // always clean up. A write failure must still run afterWrite so the
+        // partial-success report and JSONL re-export are not lost.
+        const depDir = mkdtempSync(path.join(tmpdir(), "pi-beads-deps-"));
+        let depErr: string | null = null;
+        try {
+          const depFile = path.join(depDir, "edges.jsonl");
+          writeFileSync(depFile, edges.map((e) => JSON.stringify(e)).join("\n") + "\n", "utf8");
+          const dr = await bd(["dep", "add", "--file", depFile], repoDir);
+          if (!dr.ok) depErr = dr.err;
+        } catch (e: any) {
+          depErr = e?.message ?? String(e);
+        } finally {
+          try { rmSync(depDir, { recursive: true, force: true }); } catch { /* best effort */ }
+        }
+        if (depErr) {
           await afterWrite(repoDir);
-          return textResult(`deps: bulk wiring failed: ${dr.err}`);
+          return textResult(`deps: bulk wiring failed: ${depErr}`);
         }
       }
       await afterWrite(repoDir);
@@ -1094,7 +1118,9 @@ export default function piBeadsLean(pi: any) {
         if (!r.ok) {
           const msg = `bd close failed for ${rids.join(", ")}: ${r.err}`;
           failure = failure ? `${failure}; ${msg}` : msg;
-          break;
+          // each repo's close is independent: keep going so later repos are
+          // neither silently skipped nor omitted from the accumulated failure.
+          continue;
         }
         await afterWrite(dir);
         closedIds.push(...rids);
