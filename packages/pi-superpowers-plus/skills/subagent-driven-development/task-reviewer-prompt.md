@@ -1,5 +1,7 @@
 # Task Reviewer Prompt Template
 
+The reviewer's identity and output contract are defined in `agent-templates/task-reviewer.md`. This template supplies the task context.
+
 Use this template when dispatching a task reviewer subagent. The reviewer
 reads the task's diff once and returns two verdicts: spec compliance and
 code quality.

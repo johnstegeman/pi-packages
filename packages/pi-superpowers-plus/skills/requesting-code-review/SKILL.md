@@ -17,7 +17,7 @@ Call `set_phase({ phase: "development" })` — code review is still the developm
 ## When to Request Review
 
 **Mandatory:**
-- After each task in `/skill:subagent-driven-development`
+- Per-task review is handled by the `/skill:subagent-driven-development` `task-reviewer` gate; use this skill for whole-branch / feature review.
 - After completing major feature
 - Before merge to main
 
