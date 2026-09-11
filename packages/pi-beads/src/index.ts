@@ -886,7 +886,10 @@ export default function piBeadsLean(pi: any) {
           ["gate", "create", "--blocks", gateId, "--type", "human", "--reason", gateReason, "--json"],
           repoDir,
         );
-        if (!gc.ok) return textResult(`gate created (${gateId}) but human-gate setup failed: ${gc.err}`);
+        if (!gc.ok) {
+          await afterWrite(repoDir);
+          return textResult(`gate created (${gateId}) but human-gate setup failed: ${gc.err}`);
+        }
         // bd gate create --json prints the gate issue with an `id` field (the human-gate
         // id); fall back to the text form's "Resolve with: bd gate resolve <id>" line.
         try {
@@ -902,30 +905,28 @@ export default function piBeadsLean(pi: any) {
       }
       // (2) sequential create of every task, awaiting each so ids come out parent.1..N in order
       const taskIds: string[] = [];
-      for (const t of params.tasks) {
+      for (let i = 0; i < params.tasks.length; i++) {
+        const t = params.tasks[i];
         const a = ["create", String(t.title), "--parent", String(params.parent)];
         if (t.type) a.push("-t", String(t.type));
         if (t.description) a.push("-d", String(t.description));
         if (t.labels) a.push("-l", String(t.labels));
         if (t.priority !== undefined && t.priority !== null) a.push("-p", String(t.priority));
+        // fold the dep wiring into the create: each task blocks the gate;
+        // task i+1 blocks task i (plan chain). bd's --deps 'blocks:<id>' means
+        // the NEW issue depends on <id>, matching the previous bd link wiring.
+        const deps: string[] = [];
+        if (gateId) deps.push(`blocks:${gateId}`);
+        if (i > 0) deps.push(`blocks:${taskIds[i - 1]}`);
+        if (deps.length) a.push("--deps", deps.join(","));
         a.push("--silent");
         const r = await bd(a, repoDir);
         if (!r.ok) {
           const ids = [...(gateId ? [gateId] : []), ...taskIds];
+          await afterWrite(repoDir);
           return textResult(`${taskIds.length} of ${params.tasks.length} tasks created before failure: ${ids.join(", ")}`);
         }
         taskIds.push(lastId(r.out));
-      }
-      // (3) wire deps: each task blocks the gate; task i+1 blocks task i (plan chain)
-      for (let i = 0; i < taskIds.length; i++) {
-        if (gateId) {
-          const l = await bd(["link", taskIds[i], gateId, "--type", "blocks"], repoDir);
-          if (!l.ok) return textResult(`deps: linking ${taskIds[i]}→${gateId} failed: ${l.err}`);
-        }
-        if (i > 0) {
-          const l = await bd(["link", taskIds[i], taskIds[i - 1], "--type", "blocks"], repoDir);
-          if (!l.ok) return textResult(`deps: linking ${taskIds[i]}→${taskIds[i - 1]} failed: ${l.err}`);
-        }
       }
       await afterWrite(repoDir);
       const lines = gateId ? [`gate: ${gateId}`] : [];

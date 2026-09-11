@@ -211,6 +211,12 @@ case "$1" in
     ;;
   gate)
     if [ "$2" = "create" ]; then
+      # fail when the human-gate reason is the sentinel (argv: gate create --blocks <id> --type human --reason <reason> --json)
+      if [ "$8" = "Doomed gate" ]; then
+        echo "boom" >&2
+        exit 1
+      fi
+      # mirrors real bd gate create --json (a gate issue with an id field);
       # mirrors real bd gate create --json (a gate issue with an id field);
       # beads_create_list parses it to return the human-gate id
       printf '%s\\n' '{"id":"proj-gate-1","issue_type":"gate","status":"open","title":"Gate: human"}'
@@ -495,17 +501,13 @@ test("single-repo: beads_create_list creates sequentially, wires gate+chain deps
     });
     assert.ok(okResult(r), JSON.stringify(r));
 
-    // exact argv of every bd call: gate bead, human gate, three tasks, then the blocks chain
+    // exact argv of every bd call: gate bead, human gate, three tasks (deps folded into each create)
     findInvocation(["create", "Plan reviewed / ready to execute", "--parent", "proj-m1-imp", "-t", "task", "-d", "constraints", "--silent"]);
     findInvocation(["gate", "create", "--blocks", "proj-m1-imp.1", "--type", "human", "--reason", "Plan approval", "--json"]);
-    findInvocation(["create", "Task 1: setup", "--parent", "proj-m1-imp", "-d", "d1", "--silent"]);
-    findInvocation(["create", "Task 2: build", "--parent", "proj-m1-imp", "-t", "feature", "-d", "d2", "--silent"]);
-    findInvocation(["create", "Task 3: verify", "--parent", "proj-m1-imp", "-d", "d3", "-l", "a,b", "--silent"]);
-    findInvocation(["link", "proj-m1-imp.2", "proj-m1-imp.1", "--type", "blocks"]); // task1 blocks gate
-    findInvocation(["link", "proj-m1-imp.3", "proj-m1-imp.1", "--type", "blocks"]); // task2 blocks gate
-    findInvocation(["link", "proj-m1-imp.3", "proj-m1-imp.2", "--type", "blocks"]); // task2 blocks task1
-    findInvocation(["link", "proj-m1-imp.4", "proj-m1-imp.1", "--type", "blocks"]); // task3 blocks gate
-    findInvocation(["link", "proj-m1-imp.4", "proj-m1-imp.3", "--type", "blocks"]); // task3 blocks task2
+    findInvocation(["create", "Task 1: setup", "--parent", "proj-m1-imp", "-d", "d1", "--deps", "blocks:proj-m1-imp.1", "--silent"]);
+    findInvocation(["create", "Task 2: build", "--parent", "proj-m1-imp", "-t", "feature", "-d", "d2", "--deps", "blocks:proj-m1-imp.1,blocks:proj-m1-imp.2", "--silent"]);
+    findInvocation(["create", "Task 3: verify", "--parent", "proj-m1-imp", "-d", "d3", "-l", "a,b", "--deps", "blocks:proj-m1-imp.1,blocks:proj-m1-imp.3", "--silent"]);
+    assert.ok(!invocations().some((iv) => iv[0] === "link"), "no link calls");
 
     // the whole point: one atomic call, creates issued SEQUENTIALLY in gate -> t1 -> t2 -> t3 order
     // (each awaited before the next) so ids come out parent.1..N in plan order.
@@ -518,7 +520,6 @@ test("single-repo: beads_create_list creates sequentially, wires gate+chain deps
         return "OTHER_CREATE";
       }
       if (inv[0] === "gate") return "GATE";
-      if (inv[0] === "link") return "LINK";
       return "OTHER";
     });
     assert.deepEqual(seq, [
@@ -527,11 +528,6 @@ test("single-repo: beads_create_list creates sequentially, wires gate+chain deps
       "T1_CREATE",
       "T2_CREATE",
       "T3_CREATE",
-      "LINK",
-      "LINK",
-      "LINK",
-      "LINK",
-      "LINK",
     ]);
 
     // output maps the input task index -> minted id (gate first, then human gate)
@@ -583,6 +579,18 @@ test("single-repo: beads_create_list reports partial failure with created-so-far
   assert.ok(!invs.some((iv) => iv[0] === "link"), `no dep wiring after a task failure: ${JSON.stringify(invs)}`);
 });
 
+test("single-repo: create_list re-exports after a partial task failure", async () => {
+  const s = await openSession("single", repoDir);
+  resetLog();
+  s.emitted.length = 0;
+  const r = await s.byName.get("beads_create_list").execute("c", {
+    parent: "proj-m1-imp",
+    tasks: [{ title: "Task 1: setup" }, { title: "Doomed task" }],
+  });
+  assert.match(r?.content?.[0]?.text ?? "", /1 of 2 tasks created before failure/);
+  assert.equal(s.emitted.at(-1), "beads:changed", "afterWrite must run after minted beads");
+});
+
 test("single-repo: beads_create_list gate-failure aborts before any task", async () => {
   const s = await openSession("single", repoDir);
   resetLog();
@@ -596,6 +604,20 @@ test("single-repo: beads_create_list gate-failure aborts before any task", async
   const invs = invocations();
   assert.equal(invs.length, 1, JSON.stringify(invs));
   assert.deepEqual(invs[0], ["create", "Doomed gate", "--parent", "proj-m1-imp", "-t", "task", "--silent"]);
+});
+
+test("single-repo: create_list re-exports after a human-gate setup failure", async () => {
+  const s = await openSession("single", repoDir);
+  resetLog();
+  s.emitted.length = 0;
+  const r = await s.byName.get("beads_create_list").execute("c", {
+    parent: "proj-m1-imp",
+    gate: { title: "Plan reviewed / ready to execute", reason: "Doomed gate" },
+    tasks: [{ title: "Task 1: setup" }],
+  });
+  const text = r?.content?.[0]?.text ?? "";
+  assert.match(text, /gate created \(proj-m1-imp\.1\) but human-gate setup failed/, text);
+  assert.equal(s.emitted.at(-1), "beads:changed", "afterWrite must run after minted gate bead");
 });
 
 test("single-repo: beads_create_list validates parent and non-empty tasks before touching bd", async () => {
