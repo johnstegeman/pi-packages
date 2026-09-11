@@ -6,7 +6,7 @@
     "pi-package"
   ],
   "scripts": {
-    "test": "biome check . && node extensions/beads-molecule-widget.test.mjs && node extensions/phase-commands.test.mjs && node skills/subagent-driven-development/scripts/final-review.test.mjs && node skills/subagent-driven-development/scripts/fix-loop.test.mjs && node skills/subagent-driven-development/scripts/wave-parallel.test.mjs && node skills/subagent-driven-development/scripts/named-agents.test.mjs",
+    "test": "biome check . && node extensions/beads-molecule-widget.test.mjs && node extensions/phase-commands.test.mjs && node skills/subagent-driven-development/scripts/final-review.test.mjs && node skills/subagent-driven-development/scripts/fix-loop.test.mjs && node skills/subagent-driven-development/scripts/wave-parallel.test.mjs && node skills/subagent-driven-development/scripts/named-agents.test.mjs && node scripts/agent-dispatch-guard.test.mjs",
     "lint": "biome check .",
     "check": "biome check ."
   },
@@ -19,6 +19,7 @@
   "homepage": "https://github.com/johnstegeman/pi-packages#readme",
   "files": [
     "agent-templates/",
+    "config-examples/",
     "skills/",
     "extensions/",
     "formulas/",
