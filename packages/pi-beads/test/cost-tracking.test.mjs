@@ -281,4 +281,31 @@ test("handlers are registered once across repeated factory runs", async () => {
   assert.equal(s.eventHandlers["subagents:failed"].length, 1);
 });
 
+test("smoke: realistic subagent completion drives the shipped entrypoints end-to-end", async () => {
+  const s = await openSession();
+  // Contract: the extension subscribes to exactly the events pi-subagents emits.
+  assert.ok(s.eventHandlers["subagents:completed"]?.length === 1, "subscribes subagents:completed");
+  assert.ok(s.eventHandlers["subagents:failed"]?.length === 1, "subscribes subagents:failed");
+
+  process.env.FAKE_BD_SHOW_JSON = JSON.stringify([{ id: "rep-1", metadata: {} }]);
+  resetLog();
+  s.emitted.length = 0;
+  // Payload shaped exactly as pi-subagents emits it (see cost-tracking.ts Interfaces).
+  await fire(s, "subagents:completed", {
+    id: "smoke-agent-1",
+    type: "implementer",
+    status: "completed",
+    description: "Implement task bead:rep-1",
+    usage: { input: 42, output: 21, cacheRead: 7, cost: { total: 0.123456 } },
+  });
+  findUpdateContaining("rep-1", [
+    "--set-metadata", "cost.agents.smoke-agent-1.total=0.123456",
+    "--set-metadata", "cost.agents.smoke-agent-1.role=implementer",
+    "--set-metadata", "cost.agents.smoke-agent-1.status=completed",
+    "--set-metadata", "cost.total=0.123456",
+    "--set-metadata", "cost.agents.count=1",
+  ]);
+  assert.ok(s.emitted.includes("beads:changed"), "afterWrite emits beads:changed");
+});
+
 run();
