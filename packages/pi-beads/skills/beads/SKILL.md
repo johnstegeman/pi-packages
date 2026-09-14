@@ -32,7 +32,7 @@ live umbrella path, prefix routes, and current default-create repo for this sess
 ### Read — always span ALL repos (from the aggregate by default)
 | tool | use |
 |---|---|
-| `beads_ready({ limit?, repo?, label?, labelAny? })` | ready issues (open + unblocked, **wisps/ephemeral included** so a brainstorming batch stays visible). Optional `repo` narrows to one project; `label` / `labelAny` filter by labels |
+| `beads_ready({ limit?, repo?, label?, labelAny?, claim? })` | ready issues (open + unblocked, **wisps/ephemeral included** so a brainstorming batch stays visible). Optional `repo` narrows to one project; `label` / `labelAny` filter by labels; `claim: true` atomically claims the first match (`bd ready --claim`) |
 | `beads_list({ status?, limit?, repo?, label?, labelAny? })` | list issues across every repo; `status` = `open,in_progress,blocked,deferred,closed`; optional project/label filters |
 | `beads_show({ id })` | full details of one issue: status, **blocker ids** (`blocked_by:` + `BLOCKED` marker), and for epics **children + progress** (`children: done/total`) |
 | `beads_deps({ ids, direction? })` | dependency view: ONE id → the blocker/dependent **tree**; SEVERAL ids → one compact line each. `direction` = `blockers` (default) or `dependents` |
@@ -45,7 +45,7 @@ Reads are already cross-repo — **do not** shell out to raw `bd list`, `bd dep 
 |---|---|
 | `beads_create({ title, repo?, type?, priority?, description?, parent?, labels?, notes?, design?, ephemeral? })` | create in the owning repo; `parent` must be in the same repo; `ephemeral: true` (or `"true"`) passes `--ephemeral`, creating a wisp |
 | `beads_update({ id, status?, priority?, title?, parent?, notes?, appendNotes?, addLabels?, removeLabels? })` | update one issue; auto-routed by id prefix |
-| `beads_close({ ids, reason? })` | close one or many (ids space/comma separated) |
+| `beads_close({ ids, reason?, continue?, suggestNext?, claimNext?, noAuto? })` | close one or many (ids space/comma separated); `continue` auto-advances to the next molecule step, `suggestNext` shows newly unblocked issues, `claimNext` claims the next highest-priority issue, `noAuto` shows the next step without claiming it |
 | `beads_dep({ issue, blocker })` | `blocker` must be done before `issue` |
 | `beads_undep({ issue, blocker })` | remove a dependency |
 | `beads_comment({ id, text })` | add a progress note / comment |
@@ -121,6 +121,12 @@ beads_update({ id: "orch-9ll", appendNotes: "Need retry semantics agreed before 
 **Finish**
 ```
 beads_close({ ids: "apps-xyz lguard-09d818c2", reason: "done" })
+beads_close({ ids: "proj-m1-imp.2", reason: "done", continue: true })
+```
+
+Claim the next ready issue in one call (instead of `beads_ready` + `beads_update`):
+```
+beads_ready({ claim: true })
 ```
 
 ## Slash commands (operator, no context cost)

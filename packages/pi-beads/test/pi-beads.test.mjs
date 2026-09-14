@@ -944,6 +944,26 @@ test("single-repo: close cascade treats an already-closed parent as success", as
   findInvocation(["show", "proj-closed-parent", "--json"]);
 });
 
+test("single-repo: beads_ready claim appends --claim and does not emit", async () => {
+  const s = await openSession("single", repoDir);
+  resetLog();
+  const r = await s.byName.get("beads_ready").execute("c", { limit: 5, claim: true });
+  assert.ok(okResult(r), JSON.stringify(r));
+  findInvocation(["ready", "--json", "--include-ephemeral", "-n", "5", "--claim"]);
+  assert.equal(s.emitted.length, 0);
+});
+
+test("single-repo: beads_close maps continue/next flags and still cascades", async () => {
+  const s = await openSession("single", repoDir);
+  resetLog();
+  const r = await s.byName.get("beads_close").execute("c", {
+    ids: "proj-t9", reason: "done", continue: true, suggestNext: true, claimNext: true, noAuto: true,
+  });
+  assert.ok(okResult(r), JSON.stringify(r));
+  findInvocation(["close", "proj-t9", "-r", "done", "--continue", "--suggest-next", "--claim-next", "--no-auto"]);
+  findInvocation(["close", "proj-imp2"]); // parent cascade still runs
+});
+
 test("umbrella: close cascade failure is not overwritten by a later repo failure", async () => {
   const s = await openSession("umbrella", projDir);
   resetLog();

@@ -124,14 +124,14 @@ MCP transport, and what comes back is a digest rather than raw JSON.
 
 | Tool | What it does |
 |---|---|
-| `beads_ready` | Issues ready to work (open and unblocked) across all repositories |
+| `beads_ready` | Issues ready to work (open and unblocked) across all repositories; `claim: true` atomically claims the first match (`bd ready --claim`), read-only when omitted |
 | `beads_list` | A list filtered by status (`open,in_progress,blocked,deferred,closed`) |
 | `beads_show` | The essential fields of one issue: status, priority, type, dependencies; `full: true` includes the whole description body |
 | `beads_deps` | Blockers or dependents: a tree for one id, compact lines for several |
 | `beads_create` | Create an issue in the right repository (`repo` is a folder name or a prefix), return its id |
 | `beads_create_list` | Create an optional gate bead + its human gate, then the task beads sequentially under one parent in declared (plan) order, then wire the blocks-chain; returns `gate:`/`human-gate:` ids and `t1:..tN:` in plan order |
 | `beads_update` | Status, priority, title, parent, notes, labels; plus `claim`, `setMetadata` (`key=value,...`), `description` (replaces the body); routed by id prefix |
-| `beads_close` | Close one or more ids, with a reason |
+| `beads_close` | Close one or more ids, with a reason; optional `continue`, `suggestNext`, `claimNext`, `noAuto` map to the matching `bd close` flags |
 | `beads_reopen` | Reopen one or more closed ids, with an optional reason |
 | `beads_dep` | Add a dependency (blocker blocks issue) within one repository; `type` is `blocks\|tracks\|related\|parent-child\|discovered-from` |
 | `beads_undep` | Remove a dependency |

@@ -606,6 +606,11 @@ export default function piBeadsLean(pi: any) {
           description:
             "Require AT LEAST ONE of these labels (comma-separated, bd --label-any semantics)",
         },
+        claim: {
+          type: "boolean",
+          description:
+            "Atomically claim the first ready issue matching the filters (bd ready --claim). Read-only when omitted.",
+        },
       },
     },
     async execute(_id: string, params: any) {
@@ -618,6 +623,7 @@ export default function piBeadsLean(pi: any) {
       const rargs = ["ready", "--json", "--include-ephemeral", "-n", String(params?.limit ?? 15)];
       if (params?.label) rargs.push("--label", String(params.label));
       if (params?.labelAny) rargs.push("--label-any", String(params.labelAny));
+      if (params?.claim === true || params?.claim === "true") rargs.push("--claim");
       const r = await bd(rargs, scope);
       if (!r.ok) return textResult(`bd ready failed: ${r.err}`);
       return textResult(fmtRows(r.out));
@@ -1107,6 +1113,10 @@ export default function piBeadsLean(pi: any) {
           description: "One or more issue ids, space or comma separated",
         },
         reason: { type: "string", description: "Optional closing reason" },
+        continue: { type: "boolean", description: "Auto-advance to the next molecule step (--continue)" },
+        suggestNext: { type: "boolean", description: "Show newly unblocked issues after closing (--suggest-next)" },
+        claimNext: { type: "boolean", description: "Claim the next highest-priority issue (--claim-next)" },
+        noAuto: { type: "boolean", description: "With --continue, show the next step but don't claim it (--no-auto)" },
       },
       required: ["ids"],
     },
@@ -1130,6 +1140,10 @@ export default function piBeadsLean(pi: any) {
       for (const [dir, rids] of byRepo) {
         const args = ["close", ...rids];
         if (params.reason) args.push("-r", String(params.reason));
+        if (params?.continue === true || params?.continue === "true") args.push("--continue");
+        if (params?.suggestNext === true || params?.suggestNext === "true") args.push("--suggest-next");
+        if (params?.claimNext === true || params?.claimNext === "true") args.push("--claim-next");
+        if (params?.noAuto === true || params?.noAuto === "true") args.push("--no-auto");
         const r = await bd(args, dir);
         if (!r.ok) {
           const msg = `bd close failed for ${rids.join(", ")}: ${r.err}`;
