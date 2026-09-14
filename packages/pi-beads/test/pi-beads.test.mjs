@@ -364,8 +364,8 @@ const { default: piBeadsLean, getBeadsRuntime } = await import("../src/index.ts"
 const { DEP_LINK_TYPES, GATE_TYPES } = await import("../src/index.ts");
 
 // ---------------------------------------------------------------------------
-// minimal runner: node:assert + a tiny async harness (mirrors the widget test's
-// "all assertions passed" style; this one also runs async tool executes).
+// minimal runner: node:assert + a tiny async harness (mirrors the other
+// node:assert suites; this one also runs async tool executes).
 // `run()` is invoked at the very end of the file, after registrations.
 // ---------------------------------------------------------------------------
 let failures = 0;
