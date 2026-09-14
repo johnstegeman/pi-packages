@@ -36,13 +36,13 @@ interface BifrostConfig {
   virtualKey?: string;
 }
 
-function loadConfig(): BifrostConfig {
+export function loadConfig(configPath: string = CONFIG_PATH): BifrostConfig {
   const envUrl = process.env.BIFROST_GATEWAY_URL?.trim();
   const envKey = process.env.BIFROST_VIRTUAL_KEY?.trim();
 
   let file: BifrostConfig = {};
   try {
-    file = JSON.parse(fs.readFileSync(CONFIG_PATH, "utf8")) as BifrostConfig;
+    file = JSON.parse(fs.readFileSync(configPath, "utf8")) as BifrostConfig;
   } catch {
     // File not yet created – fine.
   }
@@ -54,20 +54,24 @@ function loadConfig(): BifrostConfig {
   };
 }
 
-function saveConfig(updates: BifrostConfig): void {
+export function saveConfig(updates: BifrostConfig, configPath: string = CONFIG_PATH): void {
   let existing: BifrostConfig = {};
   try {
-    existing = JSON.parse(fs.readFileSync(CONFIG_PATH, "utf8")) as BifrostConfig;
+    existing = JSON.parse(fs.readFileSync(configPath, "utf8")) as BifrostConfig;
   } catch {
     // No existing file – start fresh.
   }
 
   try {
+    fs.mkdirSync(path.dirname(configPath), { recursive: true, mode: 0o700 });
     fs.writeFileSync(
-      CONFIG_PATH,
+      configPath,
       JSON.stringify({ ...existing, ...updates }, null, 2),
-      "utf8",
+      { encoding: "utf8", mode: 0o600 },
     );
+    // writeFileSync's mode only applies when the file is created; an
+    // already-existing file keeps its old mode, so correct it explicitly.
+    fs.chmodSync(configPath, 0o600);
   } catch (err) {
     console.error("[pi-bifrost] Failed to save config:", err);
   }
