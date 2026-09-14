@@ -49,6 +49,8 @@ Reads are already cross-repo — **do not** shell out to raw `bd list`, `bd dep 
 | `beads_dep({ issue, blocker })` | `blocker` must be done before `issue` |
 | `beads_undep({ issue, blocker })` | remove a dependency |
 | `beads_comment({ id, text })` | add a progress note / comment |
+| `beads_memories({ action: "remember", content: "...", key: "..." })` | store a persistent memory (`forget` with `key` removes one; remember/forget are writes) |
+| `beads_memories({ action: "list" })` | list memories (`recall` with `key` reads one back) — reads run against the umbrella aggregate |
 
 ## Rules that matter
 

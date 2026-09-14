@@ -63,6 +63,7 @@ const TOOL = {
   molPour: "beads_mol_pour",
   molShow: "beads_mol_show",
   promote: "beads_promote",
+  memories: "beads_memories",
   molCurrent: "beads_mol_current",
   molReady: "beads_mol_ready",
 };
@@ -489,6 +490,16 @@ export default function piBeadsLean(pi: any) {
         return `${who}${when ? " " + when : ""}: ${body}`;
       })
       .join("\n");
+  }
+
+  function fmtMemories(json: string): string {
+    const o = jparse(json);
+    if (o && typeof o === "object" && !Array.isArray(o)) {
+      const entries = Object.entries(o).filter(([k]) => k !== "schema_version");
+      if (entries.length === 0) return "(no memories)";
+      return entries.map(([k, v]) => `${k}: ${v}`).join("\n");
+    }
+    return (json ?? "").trim() || "(no memories)";
   }
 
   // strip bd's promotional / hint lines to keep tool output lean
@@ -1255,6 +1266,57 @@ export default function piBeadsLean(pi: any) {
       if (!r.ok) return textResult(`bd promote failed: ${r.err}`);
       await afterWrite(dir);
       return textResult(r.out.trim() || "promoted");
+    },
+  });
+
+  pi.registerTool({
+    name: TOOL.memories,
+    label: "Beads memories",
+    description:
+      "Persistent memories injected at prime time: action=remember|recall|list|forget. All run against the umbrella so they surface in every session.",
+    parameters: {
+      type: "object",
+      properties: {
+        action: { type: "string", description: "remember | recall | list | forget" },
+        key: { type: "string", description: "Memory key (recall/forget; optional for remember)" },
+        content: { type: "string", description: "Memory content (remember)" },
+        query: { type: "string", description: "Search text (list)" },
+      },
+      required: ["action"],
+    },
+    async execute(_id: string, params: any) {
+      const action = String(params?.action ?? "").toLowerCase();
+      if (!["remember", "recall", "list", "forget"].includes(action))
+        return textResult(`invalid action '${params?.action}' (allowed: remember|recall|list|forget)`);
+      await ensureFresh();
+      if (action === "remember") {
+        if (!params?.content) return textResult("content is required for remember");
+        const args = ["remember", String(params.content)];
+        if (params.key) args.push("--key", String(params.key));
+        const r = await bd(args, umbrella);
+        if (!r.ok) return textResult(`bd remember failed: ${r.err}`);
+        await afterWrite(umbrella);
+        return textResult(r.out.trim() || "remembered");
+      }
+      if (action === "recall") {
+        if (!params?.key) return textResult("key is required for recall");
+        const r = await bd(["recall", String(params.key), "--json"], umbrella);
+        if (!r.ok) return textResult(`bd recall failed: ${r.err}`);
+        return textResult(fmtMemories(r.out));
+      }
+      if (action === "forget") {
+        if (!params?.key) return textResult("key is required for forget");
+        const r = await bd(["forget", String(params.key)], umbrella);
+        if (!r.ok) return textResult(`bd forget failed: ${r.err}`);
+        await afterWrite(umbrella);
+        return textResult(r.out.trim() || "forgotten");
+      }
+      const args = ["memories"];
+      if (params?.query) args.push(String(params.query));
+      args.push("--json");
+      const r = await bd(args, umbrella);
+      if (!r.ok) return textResult(`bd memories failed: ${r.err}`);
+      return textResult(fmtMemories(r.out));
     },
   });
 

@@ -119,7 +119,7 @@ Commands are run by a person and their output never reaches the model's context.
 | `/beads-init` | Quiet initialization of beads in the current project (see below) |
 | `/beads-mode` | Current mode, umbrella, default repository, prefix table, context economics |
 
-The agent gets twenty tools. All of them are direct in-process `bd` calls with no
+The agent gets twenty-one tools. All of them are direct in-process `bd` calls with no
 MCP transport, and what comes back is a digest rather than raw JSON.
 
 | Tool | What it does |
@@ -143,6 +143,7 @@ MCP transport, and what comes back is a digest rather than raw JSON.
 | `beads_mol_show` | Show a molecule/proto structure (`bd mol show ... --json`), read-only |
 | `beads_mol_current` | Show the current position in a molecule's workflow (`bd mol current ... --json`), read-only |
 | `beads_promote` | Promote a wisp (ephemeral issue) to a permanent bead |
+| `beads_memories` | Persistent memories (remember/recall/list/forget); injected at prime time |
 
 On current bd (1.2.2) `bd gate resolve` already closes the gate bead — it is
 `bd close <gate>` under a more explicit name. `beads_gate_resolve` then looks up
@@ -161,8 +162,8 @@ with `pi.events.on("beads:changed", handler)`:
 tool call: `beads_create`, `beads_create_list`, `beads_update`, `beads_close`,
 `beads_reopen`, `beads_dep`, `beads_undep`, `beads_comment`, `beads_gate_create`,
 `beads_gate_resolve` (once for the resolve, plus once per gated step it closes),
-`beads_mol_pour`, and `beads_promote`. Read tools (`beads_ready`, `beads_list`, `beads_show`,
-`beads_deps`, `beads_comments`, `beads_mol_show`, `beads_mol_current`) never emit.
+`beads_mol_pour`, `beads_promote`, and `beads_memories` (remember/forget). Read tools (`beads_ready`, `beads_list`, `beads_show`,
+`beads_deps`, `beads_comments`, `beads_memories` recall/list, `beads_mol_show`, `beads_mol_current`) never emit.
 
 It is a generic change signal: consumers should re-fetch whatever they display.
 Extensions keeping steady state across a burst of mutations (e.g. the

@@ -337,6 +337,10 @@ case "$1" in
   promote)
     printf 'Promoted %s\n' "$2"
     exit 0 ;;
+  remember) printf 'Remembered %s\n' "$2"; exit 0 ;;
+  recall) printf '{"k":"v"}\n'; exit 0 ;;
+  memories) printf '{"alpha":"one","beta":"two","schema_version":1}\n'; exit 0 ;;
+  forget) printf 'Forgot %s\n' "$2"; exit 0 ;;
   *) echo "ok"; exit 0 ;;
 esac
 `;
@@ -460,6 +464,7 @@ test("registers every expected tool", async () => {
     "beads_gate_create",
     "beads_gate_resolve",
     "beads_list",
+    "beads_memories",
     "beads_mol_current",
     "beads_mol_pour",
     "beads_mol_ready",
@@ -537,7 +542,7 @@ test("samplePrefixOf fallback still derives a dashless prefix when bd where fail
 test("single-repo: session_start resolves, registers tools, emits nothing", async () => {
   const s = await openSession("single", repoDir);
   assert.equal(s.emitted.length, 0, "session_start must not emit beads:changed");
-  assert.equal(s.tools.length, 20);
+  assert.equal(s.tools.length, 21);
 });
 
 test("single-repo: beads_create builds argv and emits beads:changed", async () => {
@@ -851,6 +856,40 @@ test("single-repo: beads_promote rejects an unknown prefix before bd", async () 
   resetLog();
   const r = await s.byName.get("beads_promote").execute("c", { id: "nosuch-1" });
   assert.match(r.content[0].text, /unknown repo for id 'nosuch-1'/);
+  assert.equal(invocations().length, 0);
+});
+
+test("single-repo: beads_memories remember routes to bd and emits", async () => {
+  const s = await openSession("single", repoDir);
+  resetLog();
+  const r = await s.byName.get("beads_memories").execute("c", { action: "remember", content: "always test", key: "test-rule" });
+  assert.ok(okResult(r), JSON.stringify(r));
+  findInvocation(["remember", "always test", "--key", "test-rule"]);
+  assert.equal(s.emitted.at(-1), "beads:changed");
+});
+
+test("single-repo: beads_memories list and recall are reads that do not emit", async () => {
+  const s = await openSession("single", repoDir);
+  resetLog();
+  const r1 = await s.byName.get("beads_memories").execute("c", { action: "list" });
+  assert.match(r1.content[0].text, /alpha: one/);
+  findInvocation(["memories", "--json"]);
+  resetLog();
+  const r2 = await s.byName.get("beads_memories").execute("c", { action: "recall", key: "k" });
+  assert.ok(okResult(r2), JSON.stringify(r2));
+  findInvocation(["recall", "k", "--json"]);
+  assert.equal(s.emitted.length, 0);
+});
+
+test("single-repo: beads_memories forget emits; invalid action rejected before bd", async () => {
+  const s = await openSession("single", repoDir);
+  resetLog();
+  const rf = await s.byName.get("beads_memories").execute("c", { action: "forget", key: "k" });
+  findInvocation(["forget", "k"]);
+  assert.equal(s.emitted.at(-1), "beads:changed");
+  resetLog();
+  const rb = await s.byName.get("beads_memories").execute("c", { action: "nope" });
+  assert.match(rb.content[0].text, /invalid action 'nope'/);
   assert.equal(invocations().length, 0);
 });
 
