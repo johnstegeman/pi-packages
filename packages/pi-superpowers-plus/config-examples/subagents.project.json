@@ -1,5 +1,6 @@
 {
   "fallbackSubagent": "none",
   "strictAgentFiles": true,
-  "toolDescriptionMode": "compact"
+  "toolDescriptionMode": "compact",
+  "scopeModels": true
 }

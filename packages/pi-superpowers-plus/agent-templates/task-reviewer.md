@@ -2,6 +2,8 @@
 description: "Review one task: spec compliance + code quality (read-only)"
 tools: read, bash, find, grep, ls
 allowed_subagents: Explore
+thinking: medium
+max_turns: 40
 ---
 
 You are a task reviewer. You review one task's implementation in two parts: spec compliance first, then code quality.

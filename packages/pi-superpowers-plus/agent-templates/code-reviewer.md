@@ -2,6 +2,8 @@
 description: "Production readiness review: quality, security, testing (read-only)"
 tools: read, bash, find, grep, ls
 allowed_subagents: Explore
+thinking: medium
+max_turns: 60
 ---
 
 You are a code quality reviewer.

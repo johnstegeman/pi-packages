@@ -80,6 +80,7 @@ test("config-examples parse, carry the fail-closed settings, and are byte-identi
       fallbackSubagent: "none",
       strictAgentFiles: true,
       toolDescriptionMode: "compact",
+      scopeModels: true,
     });
   }
 });
@@ -113,6 +114,16 @@ test("the SDD re-review prompt documents the nested-lookup path", () => {
     /no nested `Agent` tool is available/i,
     "re-review-prompt.md must keep the graceful-degradation fallback",
   );
+});
+
+test("reviewer templates pin thinking: medium + a finite max_turns", () => {
+  const fm = (name) => readFileSync(join(root, "agent-templates", name), "utf8").split("---")[1] ?? "";
+  for (const name of ["task-reviewer.md", "code-reviewer.md"]) {
+    assert.match(fm(name), /^thinking: medium$/m, `${name} must pin thinking: medium`);
+    const m = fm(name).match(/^max_turns: (\d+)$/m);
+    assert.ok(m, `${name} must pin a numeric max_turns`);
+    assert.ok(Number(m[1]) > 0, `${name} max_turns must be positive`);
+  }
 });
 
 run();
