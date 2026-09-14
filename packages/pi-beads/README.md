@@ -221,10 +221,12 @@ npm carries an older `pi-beads` package by a different author, depending on the 
 
 ## Development
 
-There is no build step. `npm test` runs two lightweight `node:assert` suites:
+There is no build step. `npm test` runs three lightweight `node:assert` suites:
 `test/pi-beads.test.mjs` (every tool's `bd` argv construction and the
 `beads:changed` emit in single-repo and umbrella modes against a fixture `bd`
-binary) and `test/cost-tracking.test.mjs` (the cost-attribution handler). After
-editing, `/reload` in pi.
+binary), `test/cost-tracking.test.mjs` (the cost-attribution handler), and
+`test/tool-surface.test.mjs` (a structural guard that the enumerated tool tables
+in the README/pi-tools.md/SKILL.md stay in sync with the registered surface).
+After editing, `/reload` in pi.
 
 Licensed [MIT](https://github.com/abix5/pi-beads/blob/main/LICENSE).

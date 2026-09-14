@@ -32,7 +32,7 @@ const WORKFLOW_CRITICAL = [
   "beads_promote",
 ];
 
-const missing = (haystack, names) => names.filter((n) => !haystack.includes(n));
+const missing = (haystack, names) => names.filter((n) => !new RegExp(`\\b${n}\\b`).test(haystack));
 
 let failures = 0;
 function test(name, fn) {
