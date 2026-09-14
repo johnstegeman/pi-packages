@@ -82,7 +82,7 @@ Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ### Removed
 
 - **Removed the bundled `subagent` and `plan_tracker` extensions entirely** (`extensions/` directory, `agents/` bundled definitions, and `tests/`). These are replaced by two companion packages the user installs separately: [`@tintinweb/pi-subagents`](https://github.com/tintinweb/pi-subagents) (in-process subagent dispatch via `createAgentSession` — no subprocess, no stdout parsing, no hand-rolled inactivity watchdog) and [`@tintinweb/pi-tasks`](https://github.com/tintinweb/pi-tasks) (dependency-graph task tracking with `TaskCreate`/`TaskUpdate`/`TaskList`). This eliminates the inactivity-timeout bug class by construction (no subprocess lifecycle left in this repo) and brings UX upgrades the bundled tools lacked: a persistent widget, FleetView, mid-run steering, session resume, background/scheduled dispatch, and bidirectional task dependencies. **Breaking change:** skills now reference `Agent(...)` / `TaskCreate(...)` / `TaskUpdate(...)` directly with no fallback path — both prerequisite packages must be installed. See the README Prerequisites section for install commands.
-- **Removed `lsp` from agent template `tools:` frontmatter** — it was a silent no-op (not a real pi built-in tool in either the old system or `pi-subagents`). A real LSP extension is a fast-follow.
+- **Removed `lsp` from agent template `tools:` frontmatter** — it was a silent no-op (not a real pi built-in tool in either the old system or `pi-subagents`). A real LSP extension is a fast-follow, tracked as `pi-packages-egut`.
 
 ### Added
 
@@ -152,7 +152,6 @@ Unified `/superpowers` user command for inspecting and controlling workflow stat
   - `/superpowers tasks [list|add|remove|complete|reset|rewind]` — manipulate plan-tracker tasks directly (mutations persist via `plan_tracker_state` appendEntry).
   - `/superpowers stage [show|<phase>|reset]` — view or advance the workflow stage in place (non-session-spawning counterpart to `/workflow-next`).
   - `/superpowers reset` — reset all workflow state (workflow + TDD + debug + verification + tasks).
-  - (`/superpowers query` is not implemented; tracked as future work.)
 - **`plan_tracker` tool: `add`/`remove`/`rewind` actions** — the tool can now append a task, remove a task by index, and rewind a task + all later tasks to `pending` (in addition to the existing init/update/status/clear).
 - **`plan-tracker-state.ts` shared module** — the single source of truth for the task list, imported by both the `plan_tracker` tool and the `/superpowers tasks` command. Exports mutators + `persistTasks` (appendEntry) + `reconstructTasksFromBranch` (with legacy tool-result-details fallback).
 - **`plan-tracker-render.ts`** — shared TUI widget renderer used by both the tool and the command.
