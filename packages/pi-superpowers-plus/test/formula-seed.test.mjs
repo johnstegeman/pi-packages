@@ -12,7 +12,7 @@ import {
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
-import { seedFormula } from "./formula-seed.mjs";
+import { seedFormula } from "../extensions/formula-seed.mjs";
 
 const FORMULA = "superpowers-workflow.formula.toml";
 

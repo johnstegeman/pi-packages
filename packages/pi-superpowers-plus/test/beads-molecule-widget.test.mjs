@@ -12,7 +12,7 @@ import {
   phaseFor,
   topicFor,
   waitingReviewStep,
-} from "./beads-molecule-widget.mjs";
+} from "../extensions/beads-molecule-widget.mjs";
 
 // ---------- parser: malformed input never throws ----------
 

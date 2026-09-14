@@ -12,8 +12,8 @@ pi install git:github.com/johnstegeman/pi-packages
 
 | Action skills request | Package | Tool |
 | --- | --- | --- |
-| Dispatch a subagent (`Agent({ subagent_type, prompt, description, ... })`) | [`@tintinweb/pi-subagents`](https://github.com/tintinweb/pi-subagents) | `Agent`, `get_subagent_result`, `steer_subagent` |
-| Task tracking (`beads_create`, `beads_update`, `beads_close`, `beads_dep`) | forked [`pi-beads`](https://github.com/abix5/pi-beads) (requires the fork's `ephemeral` support — upstream v0.2.2 lacks it) | `beads_ready`, `beads_list`, `beads_show`, `beads_create`, `beads_update`, `beads_close`, `beads_dep`, `beads_undep`, `beads_comment`, `beads_comments`, `beads_promote`, `beads_memories`, `beads_stale`, `beads_lint` |
+| Dispatch a subagent (`Agent({ subagent_type, prompt, description, ... })`) and run workflow scripts via `SubagentWorkflow(...)` | [`@tintinweb/pi-subagents`](https://github.com/tintinweb/pi-subagents) | `Agent`, `get_subagent_result`, `steer_subagent`, `SubagentWorkflow` |
+| Task tracking (`beads_create`, `beads_update`, `beads_close`, `beads_dep`) | forked [`pi-beads`](https://github.com/abix5/pi-beads) (requires the fork's `ephemeral` support — upstream v0.2.2 lacks it) | `beads_ready`, `beads_list`, `beads_show`, `beads_deps`, `beads_create`, `beads_create_list`, `beads_update`, `beads_close`, `beads_dep`, `beads_undep`, `beads_comment`, `beads_comments`, `beads_reopen`, `beads_gate_create`, `beads_gate_resolve`, `beads_mol_pour`, `beads_mol_show`, `beads_mol_current`, `beads_mol_ready`, `beads_promote`, `beads_memories`, `beads_stale`, `beads_lint` |
 
 There is **no fallback** if the tools aren't present (they ship in the monorepo install) — skills reference the tools directly. For each tool's full parameter schema, see the package's own README (linked above); skills show the concrete call shapes you'll use day to day.
 

@@ -24,7 +24,7 @@ export function displayWidth(s) {
   for (const ch of String(s)) w += charWidth(ch.codePointAt(0));
   return w;
 }
-export function truncToWidth(s, width) {
+function truncToWidth(s, width) {
   s = String(s);
   if (width <= 0) return "";
   if (displayWidth(s) <= width) return s;
@@ -315,7 +315,7 @@ function chainForPhase(state, phase) {
 }
 
 /** Human gates (by formula label) → the review step each one blocks. */
-export const GATE_TO_REVIEW_STEP = {
+const GATE_TO_REVIEW_STEP = {
   "step:gate-design-approved": "User approves design",
   "step:gate-spec-approved": "User reviews written spec",
   "step:gate-smoke-test-approved": "Smoke test / manual QA sign-off",

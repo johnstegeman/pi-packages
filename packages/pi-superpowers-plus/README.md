@@ -35,7 +35,10 @@ Because the hidden skills are not model-invocable, every phase skill — plus th
 
 ## Prerequisites
 
-This package provides skills and agent templates only — it no longer bundles its own tools. The two companion packages (pi-subagents and the pi-beads fork) are provided by the [pi-packages monorepo](https://github.com/johnstegeman/pi-packages) install — **no separate install is needed**:
+This package provides Superpowers workflow skills, agent templates, and its own
+pi extensions (`phase-commands`, `set-phase`, `beads-molecule-widget`,
+`formula-seed`). It no longer bundles its own beads/subagent *tools* — those come
+from the companion packages below. The two companion packages (pi-subagents and the pi-beads fork) are provided by the [pi-packages monorepo](https://github.com/johnstegeman/pi-packages) install — **no separate install is needed**:
 
 ```bash
 pi install git:github.com/johnstegeman/pi-packages
@@ -80,9 +83,9 @@ Both are also settable via `/agents → Settings` (Fallback agent / Strict agent
 
 ## Support
 
-- Questions / support: https://github.com/johnstegeman/pi-superpowers-plus/discussions
-- Bugs: https://github.com/johnstegeman/pi-superpowers-plus/issues/new/choose
-- Feature requests: https://github.com/johnstegeman/pi-superpowers-plus/issues/new/choose
+- Questions / support: https://github.com/johnstegeman/pi-packages/discussions
+- Bugs: https://github.com/johnstegeman/pi-packages/issues/new/choose
+- Feature requests: https://github.com/johnstegeman/pi-packages/issues/new/choose
 - Roadmap: [`ROADMAP.md`](ROADMAP.md)
 - Contributing: [`CONTRIBUTING.md`](CONTRIBUTING.md)
 
@@ -190,7 +193,7 @@ Subagent dispatch is provided by [`@tintinweb/pi-subagents`](https://github.com/
 
 ### Agent Templates
 
-This package ships 4 agent templates (copy-in only — see Install):
+This package ships 5 agent templates (copy-in only — see Install):
 
 | Agent | Purpose | Tools |
 |-------|---------|-------|
@@ -198,6 +201,7 @@ This package ships 4 agent templates (copy-in only — see Install):
 | `worker` | General-purpose task execution | read, write, edit, bash |
 | `code-reviewer` | Production readiness review (read-only); may spawn one nested `Explore` lookup per named question | read, bash, find, grep, ls |
 | `task-reviewer` | Task review: spec compliance + code quality (read-only); may spawn one nested `Explore` lookup per named question | read, bash, find, grep, ls |
+| `verifier` | Adversarial refutation of a single review finding (read-only) | read, bash, find, grep, ls |
 
 Templates live in `agent-templates/*.md` and use YAML frontmatter (per the `pi-subagents` schema) to declare tools and a system prompt body. Copy them into `.pi/agents/` (project) or `~/.pi/agent/agents/` (global) so `pi-subagents` discovers them.
 
@@ -229,7 +233,7 @@ dispatches receive nested tools (verified by code trace, l8x9.11).
 ```ts
 Agent({
   subagent_type: "implementer",
-  prompt: "Implement the retry logic per docs/superpowers/plans/retry-plan.md Task 3",
+  prompt: "Implement the retry logic per task bead proj-abc.3",
   description: "Implement retry logic",
 })
 ```
@@ -267,7 +271,7 @@ Based on [Superpowers](https://github.com/obra/superpowers) by Jesse Vincent, po
 | **Skills** | 13 workflow skills | Same 13 skills (pi port) | Same 13 skills (three-scenario TDD, restored inline guidance) |
 | **TDD discipline** | Skill tells agent the rules | Skill tells agent the rules | Skill tells agent the rules (three-scenario model) |
 | **Debug discipline** | Manual discipline | Manual discipline | Manual discipline |
-| **Subagent dispatch** | — | — | `@tintinweb/pi-subagents` (`Agent` tool) + 4 agent templates |
+| **Subagent dispatch** | — | — | `@tintinweb/pi-subagents` (`Agent` tool) + 5 agent templates |
 | **TDD in subagents** | — | — | Three-scenario TDD instructions in agent templates + prompt templates |
 | **Task tracking** | — | — | beads via forked `pi-beads` (`beads_create`/`beads_update`/`beads_close`) — persistent issues + wisps |
 | **Reference content** | Everything in SKILL.md | Everything in SKILL.md | Inline guidance + separate reference files loaded on demand |
@@ -280,7 +284,8 @@ pi-superpowers-plus/
 │   ├── implementer.md                # Strict TDD implementation agent
 │   ├── worker.md                     # General-purpose task agent
 │   ├── code-reviewer.md              # Production readiness reviewer
-│   └── task-reviewer.md              # Task reviewer (spec + code quality)
+│   ├── task-reviewer.md              # Task reviewer (spec + code quality)
+│   └── verifier.md                   # Adversarial single-finding verifier (read-only)
 ├── config-examples/                   # Recommended fail-closed dispatch configs
 │   ├── subagents.global.json          # → ~/.pi/agent/subagents.json (global)
 │   └── subagents.project.json         # → .pi/subagents.json (project-local)
@@ -298,8 +303,14 @@ pi-superpowers-plus/
 │   ├── dispatching-parallel-agents/
 │   ├── using-git-worktrees/
 │   └── finishing-a-development-branch/
-├── scripts/                           # Structural guard for the dispatch contract
-│   └── agent-dispatch-guard.test.mjs
+├── extensions/                        # Runtime pi extensions (.mjs) with .ts type sources
+│   ├── phase-commands.mjs / .ts       # /skill: phase command expansion
+│   ├── set-phase.mjs / .ts            # set_phase tool + phase lifecycle
+│   ├── beads-molecule-widget.mjs / .ts # Live workflow-step widget above the editor
+│   ├── beads-molecule-widget-controller.mjs  # Widget state controller
+│   └── formula-seed.mjs / .ts         # Seed formulas into a workspace
+├── formulas/                          # Formula definitions (superpowers-workflow.formula.toml)
+├── test/                              # Decoupled node test scripts (extensions, widget, skills contract)
 └── README.md
 ```
 
@@ -307,10 +318,10 @@ pi-superpowers-plus/
 
 ```bash
 npm install
-npm test        # biome check . + structural guard + widget/phase tests
+npm test        # biome check . + test/ scripts + SDD script tests
 ```
 
-No compiled code ships in this package — it is skills and agent templates. `npm test` runs `biome check .` plus the node test scripts (extensions, SDD scripts, structural guard).
+No compiled code ships — the package is markdown skills, agent templates, and plain `.mjs` extensions. `npm test` runs `biome check .` plus the node test scripts under `test/` and the SDD script tests.
 
 ## Attribution
 

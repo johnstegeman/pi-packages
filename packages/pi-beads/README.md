@@ -144,6 +144,7 @@ MCP transport, and what comes back is a digest rather than raw JSON.
 | `beads_mol_pour` | Instantiate a proto formula as a persistent molecule (`bd mol pour`) |
 | `beads_mol_show` | Show a molecule/proto structure (`bd mol show ... --json`), read-only |
 | `beads_mol_current` | Show the current position in a molecule's workflow (`bd mol current ... --json`), read-only |
+| `beads_mol_ready` | Show the ready frontier of one molecule's steps (`bd ready --mol <id>`); accepts a molecule or a step id, read-only; aggregate-aware |
 | `beads_promote` | Promote a wisp (ephemeral issue) to a permanent bead |
 | `beads_memories` | Persistent memories (remember/recall/list/forget); injected at prime time |
 
@@ -193,6 +194,26 @@ umbrella aggregate is not allowed: routing by id prefix is the only path.
 Finally, `bd`'s output format is not a stable contract. Verified against 1.2.2; on other
 versions the parsing may drift away from reality.
 
+## Cost tracking
+
+A second registered extension (`src/cost-tracking.ts`) attributes subagent spend to
+task beads. It subscribes to pi-subagents' lifecycle events; when a top-level
+agent settles, it reads the `bead: <id>` token from the agent's description and
+merges `cost.*` metadata onto that bead — it never writes status, parent, or any
+other field.
+
+Nested and workflow (`SubagentWorkflow`) children emit no lifecycle events, so
+only top-level agents are recorded. Recording is independent of pi-subagents'
+`showCost` / `reportUsage` settings (those govern display and per-session totals).
+
+Keys written (merged, not overwritten):
+
+- `cost.agents.<agent-id>.total`, `.tokens.input`, `.tokens.output`, `.tokens.cacheRead`, `.role`, `.status`
+- derived: `cost.total`, `cost.tokens.input`, `cost.tokens.output`, `cost.tokens.cacheRead`, `cost.agents.count`
+
+Read them back with `beads_show({ id })` (or `bd show <id> --json`). Design:
+`docs/superpowers/specs/2026-09-10-cost-tracking-on-task-beads-design.md`.
+
 ## Not to be confused with
 
 npm carries an older `pi-beads` package by a different author, depending on the retired
@@ -200,9 +221,12 @@ npm carries an older `pi-beads` package by a different author, depending on the 
 
 ## Development
 
-There is no build step. `npm test` runs a lightweight `node:assert` suite
-(`test/pi-beads.test.mjs`) that exercises every tool's `bd` argv construction and
-the `beads:changed` emit in both single-repo and umbrella modes against a fixture
-`bd` binary shadowing the real one on `PATH`. After editing, `/reload` in pi.
+There is no build step. `npm test` runs three lightweight `node:assert` suites:
+`test/pi-beads.test.mjs` (every tool's `bd` argv construction and the
+`beads:changed` emit in single-repo and umbrella modes against a fixture `bd`
+binary), `test/cost-tracking.test.mjs` (the cost-attribution handler), and
+`test/tool-surface.test.mjs` (a structural guard that the enumerated tool tables
+in the README/pi-tools.md/SKILL.md stay in sync with the registered surface).
+After editing, `/reload` in pi.
 
 Licensed [MIT](https://github.com/abix5/pi-beads/blob/main/LICENSE).

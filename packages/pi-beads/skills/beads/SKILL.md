@@ -28,6 +28,7 @@ An issue's **id prefix tells you the owning project/repo**. Use `/beads-mode` to
 live umbrella path, prefix routes, and current default-create repo for this session.
 
 ## The tools
+High-frequency subset — see the pi-beads README for the full reference (all 23 tools).
 
 ### Read — always span ALL repos (from the aggregate by default)
 | tool | use |
@@ -39,6 +40,9 @@ live umbrella path, prefix routes, and current default-create repo for this sess
 | `beads_comments({ id })` | read the comments on one issue in time order — read-back after `beads_comment` |
 | `beads_stale({ days?, status?, limit? })` | list stale (not-updated-recently) issues across every repo — surfaces abandoned in-progress work; `status` = `open\|in_progress\|blocked\|deferred` |
 | `beads_lint({ ids?, status?, type? })` | check issues for missing template sections (e.g. Acceptance Criteria); pass `ids` to lint specific issues, or `status`/`type` filters to lint a set |
+| `beads_mol_show({ id })` | show a molecule/proto structure (`bd mol show ... --json`), read-only |
+| `beads_mol_current({ id })` | current position in a molecule's workflow (`bd mol current ... --json`), read-only |
+| `beads_mol_ready({ id })` | ready frontier of one molecule's steps (`bd ready --mol <id>`), read-only |
 
 Reads are already cross-repo — **do not** shell out to raw `bd list`, `bd dep tree`, `bd show | grep blocked_by`, or inspect `.beads/issues.jsonl` / umbrella JSON files directly for task state. `beads_show` already carries blocker ids and epic progress; `beads_deps` gives the tree and batch blocker triage. Use the id prefix to know which project a result belongs to.
 
@@ -49,9 +53,14 @@ Reads are already cross-repo — **do not** shell out to raw `bd list`, `bd dep 
 | `beads_create_list({ parent, gate?, tasks })` | create an optional gate bead + human gate, then each task bead in plan order under `parent`, then wire the blocks-chain; each `tasks[]` item may carry `acceptance` (`--acceptance`) so every task bead passes `bd lint` |
 | `beads_update({ id, status?, priority?, title?, parent?, notes?, appendNotes?, addLabels?, removeLabels? })` | update one issue; auto-routed by id prefix |
 | `beads_close({ ids, reason?, continue?, suggestNext?, claimNext?, noAuto? })` | close one or many (ids space/comma separated); `continue` auto-advances to the next molecule step, `suggestNext` shows newly unblocked issues, `claimNext` claims the next highest-priority issue, `noAuto` shows the next step without claiming it |
+| `beads_reopen({ ids, reason? })` | reopen one or more closed ids, with an optional reason |
 | `beads_dep({ issue, blocker })` | `blocker` must be done before `issue` |
 | `beads_undep({ issue, blocker })` | remove a dependency |
 | `beads_comment({ id, text })` | add a progress note / comment |
+| `beads_gate_create({ blocks, type?, reason?, timeout?, awaitId? })` | open an async gate (`human\|timer\|gh:run\|gh:pr`) blocking an issue until resolved |
+| `beads_gate_resolve({ id })` | resolve a gate and close the gated step(s) it was blocking in one call |
+| `beads_mol_pour({ proto, vars?, repo? })` | instantiate a proto formula as a persistent molecule (`bd mol pour`) |
+| `beads_promote({ id, reason? })` | promote a wisp (ephemeral issue) to a permanent bead |
 | `beads_memories({ action: "remember", content: "...", key: "..." })` | store a persistent memory (`forget` with `key` removes one; remember/forget are writes) |
 | `beads_memories({ action: "list" })` | list memories (`recall` with `key` reads one back) — reads run against the umbrella aggregate |
 

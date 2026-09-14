@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { createMoleculeWidgetController } from "./beads-molecule-widget-controller.mjs";
+import { createMoleculeWidgetController } from "../extensions/beads-molecule-widget-controller.mjs";
 
 const raw = (id, current, impl) =>
   JSON.stringify([

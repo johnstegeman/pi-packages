@@ -10,9 +10,10 @@
 # artifacts.
 #
 # The workspace lives in the working tree (not under .git/) because scratch
-# artifacts should be git-ignored and outside the git object store. A
-# self-ignoring .gitignore at .superpowers/sdd/ keeps every plan's workspace
-# out of `git status` and out of accidental commits.
+# artifacts should be git-ignored and outside the git object store. The root
+# .gitignore excludes .superpowers/, and a self-ignoring .gitignore here keeps
+# every plan's workspace out of `git status` and out of accidental commits
+# (defense in depth).
 #
 # Single source of truth for the workspace location.
 #
