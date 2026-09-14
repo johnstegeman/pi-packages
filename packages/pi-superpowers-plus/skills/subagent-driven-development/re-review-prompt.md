@@ -59,7 +59,9 @@ Dispatch a subagent with this prompt:
     answer into the verdict as evidence, and never delegate open-ended
     crawling. Treat the child's answer as an unverified claim: the evidence
     weight of a folded verdict rests on your own corroborating reading of the
-    diff and code, not the child's word alone. If no nested `Agent` tool is available
+    diff and code, not the child's word alone.
+    Under `SubagentWorkflow` the nested `Agent` tool is not available — the workflow path
+    exposes no nested delegation; do not attempt it there. If no nested `Agent` tool is available
     to you, verdict from the diff alone; unresolved items stay
     `NOT ADDRESSED` / `⚠️` as today.
 

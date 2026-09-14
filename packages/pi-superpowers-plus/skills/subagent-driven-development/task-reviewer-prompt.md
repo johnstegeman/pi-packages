@@ -49,10 +49,11 @@ Dispatch a subagent with this prompt:
     to evaluate a concrete risk you can name — one focused check per named
     risk, and name both the risk and what you checked in your report.
     When a named question can be settled by a bounded read-only lookup, do
-    it yourself: dispatch one nested `Explore` child for that question (when
-    the nested `Agent` tool is available to you) and fold its answer into
-    your verdict, instead of bouncing the question to the controller. If no
-    nested `Agent` tool is available, report the item as `⚠️` as before.
+    it yourself: dispatch one nested `Explore` child for that question (direct
+    `Agent` dispatch only — Under `SubagentWorkflow` the nested `Agent` tool is not available,
+    so skip the lookup). Fold its answer into your verdict, instead of
+    bouncing the question to the controller. If no nested `Agent` tool is available, report the item as `⚠️`
+    as before.
     Cross-cutting changes are legitimate named risks: if the diff changes
     lock ordering, a function or API contract, or shared mutable state,
     checking the call sites is the right method.

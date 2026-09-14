@@ -135,4 +135,22 @@ test("final-review refuters dispatch the read-only verifier type", () => {
   );
 });
 
+test("nested-lookup claim is conditional on direct dispatch in all four files", () => {
+  const files = [
+    join(root, "agent-templates", "task-reviewer.md"),
+    join(root, "agent-templates", "code-reviewer.md"),
+    join(root, "skills", "subagent-driven-development", "task-reviewer-prompt.md"),
+    join(root, "skills", "subagent-driven-development", "re-review-prompt.md"),
+  ];
+  for (const f of files) {
+    const src = readFileSync(f, "utf8");
+    assert.match(src, /nested `Explore` child/i, `${f} must keep the Explore capability`);
+    assert.match(
+      src,
+      /Under `SubagentWorkflow` the nested `Agent` tool is not available/,
+      `${f} must state the SubagentWorkflow caveat`,
+    );
+  }
+});
+
 run();
