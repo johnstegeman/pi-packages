@@ -144,6 +144,7 @@ MCP transport, and what comes back is a digest rather than raw JSON.
 | `beads_mol_pour` | Instantiate a proto formula as a persistent molecule (`bd mol pour`) |
 | `beads_mol_show` | Show a molecule/proto structure (`bd mol show ... --json`), read-only |
 | `beads_mol_current` | Show the current position in a molecule's workflow (`bd mol current ... --json`), read-only |
+| `beads_mol_ready` | Show the ready frontier of one molecule's steps (`bd ready --mol <id>`); accepts a molecule or a step id, read-only; aggregate-aware |
 | `beads_promote` | Promote a wisp (ephemeral issue) to a permanent bead |
 | `beads_memories` | Persistent memories (remember/recall/list/forget); injected at prime time |
 
