@@ -162,7 +162,10 @@ four places — `agent-templates/task-reviewer.md`, `agent-templates/code-review
 > not available** — the workflow path exposes no nested delegation. Do not attempt to
 > delegate there; report the item as `⚠️ Cannot verify` instead.
 
-The existing capability sentence, the one-child bound, and the `⚠️ Cannot verify`
+The existing capability sentence, the one-child bound, and each file's existing fallback
+wording stay. Only the shared condition sentence `Under `SubagentWorkflow` the nested
+`Agent` tool is not available` is added identically across all four files (caveat wording
+parity); the surrounding fallback phrasing intentionally differs per file.
 fallback stay; only the availability condition is added, identically across all four
 files.
 
