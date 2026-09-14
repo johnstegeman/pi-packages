@@ -576,6 +576,34 @@ test("single-repo: beads_create still defaults when repo is omitted", async () =
   findInvocation(["create", "Do the thing"]);
 });
 
+test("single-repo: beads_create passes --acceptance when supplied", async () => {
+  const s = await openSession("single", repoDir);
+  resetLog();
+  const r = await s.byName.get("beads_create").execute("c", { title: "Do the thing", acceptance: "it works" });
+  assert.ok(okResult(r), JSON.stringify(r));
+  findInvocation(["create", "Do the thing", "--acceptance", "it works"]);
+});
+
+test("single-repo: beads_create omits --acceptance when not supplied", async () => {
+  const s = await openSession("single", repoDir);
+  resetLog();
+  const r = await s.byName.get("beads_create").execute("c", { title: "Do the thing" });
+  assert.ok(okResult(r), JSON.stringify(r));
+  findInvocation(["create", "Do the thing"]);
+});
+
+test("single-repo: beads_create_list passes per-task --acceptance", async () => {
+  const s = await openSession("single", repoDir);
+  resetLog();
+  const r = await s.byName.get("beads_create_list").execute("c", {
+    parent: "proj-m1-imp",
+    gate: { description: "c", reason: "Plan approval" },
+    tasks: [{ title: "Task 1: setup", acceptance: "test passes" }],
+  });
+  assert.ok(okResult(r), JSON.stringify(r));
+  findInvocation(["create", "Task 1: setup", "--parent", "proj-m1-imp", "--acceptance", "test passes", "--silent"]);
+});
+
 test("single-repo: beads_mol_pour rejects an unknown repo", async () => {
   const s = await openSession("single", repoDir);
   resetLog();

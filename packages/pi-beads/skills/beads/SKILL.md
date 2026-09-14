@@ -45,7 +45,7 @@ Reads are already cross-repo — **do not** shell out to raw `bd list`, `bd dep 
 ### Write — routed to the OWNING repo, then the aggregate refreshes itself
 | tool | use |
 |---|---|
-| `beads_create({ title, repo?, type?, priority?, description?, parent?, labels?, notes?, design?, ephemeral? })` | create in the owning repo; `parent` must be in the same repo; `ephemeral: true` (or `"true"`) passes `--ephemeral`, creating a wisp |
+| `beads_create({ title, repo?, type?, priority?, description?, acceptance?, parent?, labels?, notes?, design?, ephemeral? })` | create in the owning repo; `parent` must be in the same repo; `acceptance` passes `--acceptance` (the task's acceptance criteria, so `bd lint` is clean); `ephemeral: true` (or `"true"`) passes `--ephemeral`, creating a wisp |
 | `beads_update({ id, status?, priority?, title?, parent?, notes?, appendNotes?, addLabels?, removeLabels? })` | update one issue; auto-routed by id prefix |
 | `beads_close({ ids, reason?, continue?, suggestNext?, claimNext?, noAuto? })` | close one or many (ids space/comma separated); `continue` auto-advances to the next molecule step, `suggestNext` shows newly unblocked issues, `claimNext` claims the next highest-priority issue, `noAuto` shows the next step without claiming it |
 | `beads_dep({ issue, blocker })` | `blocker` must be done before `issue` |

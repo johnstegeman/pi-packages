@@ -840,6 +840,7 @@ export default function piBeadsLean(pi: any) {
           type: "string",
           description: "Optional longer description",
         },
+        acceptance: { type: "string", description: "Optional acceptance criteria (bd create --acceptance)" },
         parent: {
           type: "string",
           description: "Optional parent/epic id in the SAME repo",
@@ -868,6 +869,7 @@ export default function piBeadsLean(pi: any) {
       if (params.priority !== undefined && params.priority !== null)
         args.push("-p", String(params.priority));
       if (params.description) args.push("-d", String(params.description));
+      if (params.acceptance) args.push("--acceptance", String(params.acceptance));
       if (params.parent) {
         if (
           dirForPrefix(String(params.parent)) &&
@@ -915,6 +917,7 @@ export default function piBeadsLean(pi: any) {
               title: { type: "string" },
               type: { type: "string", description: "task|bug|feature|chore|epic|decision... (default task)" },
               description: { type: "string" },
+              acceptance: { type: "string", description: "Optional acceptance criteria (--acceptance)" },
               labels: { type: "string", description: "Comma-separated" },
               priority: { type: "number", description: "0-4" },
             },
@@ -969,6 +972,7 @@ export default function piBeadsLean(pi: any) {
         const a = ["create", String(t.title), "--parent", String(params.parent)];
         if (t.type) a.push("-t", String(t.type));
         if (t.description) a.push("-d", String(t.description));
+        if (t.acceptance) a.push("--acceptance", String(t.acceptance));
         if (t.labels) a.push("-l", String(t.labels));
         if (t.priority !== undefined && t.priority !== null) a.push("-p", String(t.priority));
         a.push("--silent");

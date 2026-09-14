@@ -130,8 +130,8 @@ MCP transport, and what comes back is a digest rather than raw JSON.
 | `beads_deps` | Blockers or dependents: a tree for one id, compact lines for several |
 | `beads_stale` | Stale issues (not updated recently); surfaces abandoned work; optional `days`, `status` (`open\|in_progress\|blocked\|deferred`), `limit` |
 | `beads_lint` | Check issues for missing template sections (e.g. Acceptance Criteria); optional `ids`, `status`, `type` filters |
-| `beads_create` | Create an issue in the right repository (`repo` is a folder name or a prefix), return its id |
-| `beads_create_list` | Create an optional gate bead + its human gate, then the task beads sequentially under one parent in declared (plan) order, then wire the blocks-chain; returns `gate:`/`human-gate:` ids and `t1:..tN:` in plan order |
+| `beads_create` | Create an issue in the right repository (`repo` is a folder name or a prefix), return its id; optional `acceptance` maps to `bd create --acceptance` |
+| `beads_create_list` | Create an optional gate bead + its human gate, then the task beads sequentially under one parent in declared (plan) order, then wire the blocks-chain; each task may carry `acceptance` (`--acceptance`); returns `gate:`/`human-gate:` ids and `t1:..tN:` in plan order |
 | `beads_update` | Status, priority, title, parent, notes, labels; plus `claim`, `setMetadata` (`key=value,...`), `description` (replaces the body); routed by id prefix |
 | `beads_close` | Close one or more ids, with a reason; optional `continue`, `suggestNext`, `claimNext`, `noAuto` map to the matching `bd close` flags |
 | `beads_reopen` | Reopen one or more closed ids, with an optional reason |
