@@ -19,7 +19,7 @@ For shipped history see [CHANGELOG.md](./CHANGELOG.md).
 
 ## Current state
 
-`pi-superpowers-plus` ships Superpowers workflow skills, 4 agent templates, and
+`pi-superpowers-plus` ships Superpowers workflow skills, 5 agent templates, and
 its own pi extensions (`phase-commands`, `set-phase`, `beads-molecule-widget`,
 `formula-seed`) plus the `superpowers-workflow` formula. It has no compiled output
 and no `src/` tree. Tests are plain `node:*` scripts under `test/` (plus the
