@@ -87,7 +87,12 @@ case "$1" in
     fi
     exit 0
     ;;
-  info) echo "bd 1.2.2 (fixture)"; exit 0 ;;
+  info)
+    if [ "$MODE" = "none" ]; then
+      echo "Error: no beads database found" >&2
+      exit 1
+    fi
+    echo "bd 1.2.2 (fixture)"; exit 0 ;;
   ready)
     if [ "$2" = "--mol" ]; then
       MOLP="proj"; [ "$MODE" = "umbrella" ] && MOLP="umb"
@@ -395,6 +400,7 @@ async function run() {
 // ---------------------------------------------------------------------------
 function makePi() {
   const emitted = [];
+  const status = [];
   const handlers = {};
   const tools = [];
   const pi = {
@@ -405,13 +411,14 @@ function makePi() {
   };
   piBeadsLean(pi);
   const byName = new Map(tools.map((t) => [t.name, t]));
-  return { pi, emitted, handlers, byName, tools };
+  return { pi, emitted, status, handlers, byName, tools };
 }
 
 async function openSession(env, cwd) {
   process.env.FAKE_BD_MODE = env;
   const s = makePi();
-  await s.handlers.session_start[0]({}, { cwd });
+  const ui = { setStatus: (...args) => s.status.push(args) };
+  await s.handlers.session_start[0]({}, { cwd, ui });
   return s;
 }
 
@@ -574,6 +581,16 @@ test("single-repo: session_start resolves, registers tools, emits nothing", asyn
   const s = await openSession("single", repoDir);
   assert.equal(s.emitted.length, 0, "session_start must not emit beads:changed");
   assert.equal(s.tools.length, 23);
+});
+
+test("no workspace: startup probes info once, sets no status, emits nothing", async () => {
+  resetLog();
+  const s = await openSession("none", repoDir);
+  assert.equal(s.emitted.length, 0, "must not emit beads:changed");
+  assert.deepEqual(s.status, [], "must not set a status segment when beads is absent");
+  const invs = invocations();
+  assert.equal(invs.length, 1, `expected exactly one bd call; got ${JSON.stringify(invs)}`);
+  assert.deepEqual(invs[0], ["info"], "the single startup probe is bd info");
 });
 
 test("single-repo: beads_create builds argv and emits beads:changed", async () => {

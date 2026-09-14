@@ -585,8 +585,16 @@ export default function piBeadsLean(pi: any) {
   pi.on("session_start", async (_event: any, ctx: any) => {
     try {
       activeCwd = ctx?.cwd ?? process.cwd();
+      // Cheap usable-DB probe: one `bd info`. If beads is not set up (including a
+      // config-only .beads/ with no database), stop here — no topology walk, no
+      // status segment, no output. Beads is optional at startup.
+      const probe = await bd(["info"], activeCwd);
+      if (!probe.ok) {
+        beadsReady = false;
+        return;
+      }
       await resolveTopology();
-      setStatusLine(ctx);
+      if (beadsReady) setStatusLine(ctx);
     } catch (e: any) {
       ctx?.ui?.notify?.(
         `pi-beads-lean init failed: ${e?.message ?? e}`,
