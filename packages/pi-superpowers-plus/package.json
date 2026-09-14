@@ -11,7 +11,7 @@
     "check": "biome check ."
   },
   "license": "MIT",
-  "author": "coctostan",
+  "author": "John Stegeman",
   "repository": {
     "type": "git",
     "url": "https://github.com/johnstegeman/pi-packages.git"
