@@ -20,6 +20,7 @@ test("saveConfig corrects the mode of an existing world-readable config", () => 
   const dir = mkdtempSync(join(tmpdir(), "pi-bifrost-config-"));
   const configPath = join(dir, "bifrost-config.json");
   writeFileSync(configPath, JSON.stringify({ gatewayUrl: "https://old.example.com" }), { mode: 0o644 });
+  chmodSync(configPath, 0o644); // umask can only tighten; force the loose mode we assert against
 
   saveConfig({ virtualKey: "sk-bf-test" }, configPath);
 
@@ -52,6 +53,7 @@ test("loadConfig repairs an existing world-readable config", () => {
     JSON.stringify({ gatewayUrl: "https://gw.example.com", virtualKey: "sk-bf-file" }),
     { mode: 0o644 },
   );
+  chmodSync(configPath, 0o644); // umask can only tighten; force the loose mode we assert against
 
   const config = loadConfig(configPath);
 
@@ -64,10 +66,21 @@ test("loadConfig returns an empty config for a missing file without creating it"
   const dir = mkdtempSync(join(tmpdir(), "pi-bifrost-config-"));
   const configPath = join(dir, "absent.json");
 
-  const config = loadConfig(configPath);
+  const priorUrl = process.env.BIFROST_GATEWAY_URL;
+  const priorKey = process.env.BIFROST_VIRTUAL_KEY;
+  delete process.env.BIFROST_GATEWAY_URL;
+  delete process.env.BIFROST_VIRTUAL_KEY;
+  try {
+    const config = loadConfig(configPath);
 
-  assert.deepEqual(config, { gatewayUrl: undefined, virtualKey: undefined });
-  assert.equal(existsSync(configPath), false);
+    assert.deepEqual(config, { gatewayUrl: undefined, virtualKey: undefined });
+    assert.equal(existsSync(configPath), false);
+  } finally {
+    if (priorUrl === undefined) delete process.env.BIFROST_GATEWAY_URL;
+    else process.env.BIFROST_GATEWAY_URL = priorUrl;
+    if (priorKey === undefined) delete process.env.BIFROST_VIRTUAL_KEY;
+    else process.env.BIFROST_VIRTUAL_KEY = priorKey;
+  }
 });
 
 test("loadConfig lets env vars override file values", () => {
