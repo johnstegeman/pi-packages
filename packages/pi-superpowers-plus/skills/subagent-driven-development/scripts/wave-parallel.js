@@ -18,17 +18,29 @@ export const meta = {
   phases: [{ title: 'Implement' }, { title: 'Review' }],
 }
 
-// Defensive: some hosts deliver `args` to the sandbox as a JSON string
-// rather than the documented object (same guard as final-review.js).
-let parsedArgs
-try {
-  parsedArgs = typeof args === 'string' ? JSON.parse(args) : args
-} catch {
-  parsedArgs = null
+// Malformed/missing args are a caller bug: fail loud rather than no-op a wave.
+function failArgs(message) {
+  throw new Error('wave-parallel.js: ' + message)
 }
-const ARGS = parsedArgs ?? {}
-
-const WAVE = Array.isArray(ARGS.wave) ? ARGS.wave : []
+let parsedArgs = args
+if (typeof args === 'string') {
+  try {
+    parsedArgs = JSON.parse(args)
+  } catch (e) {
+    failArgs('args was a JSON string but did not parse: ' + e.message)
+  }
+}
+if (parsedArgs === null || typeof parsedArgs !== 'object' || Array.isArray(parsedArgs)) {
+  failArgs('args must be an object; got ' + (parsedArgs === null ? 'null' : Array.isArray(parsedArgs) ? 'array' : typeof parsedArgs))
+}
+const ARGS = parsedArgs
+const REQUIRED_ARGS = ['base', 'reportDir', 'gateBeadId', 'reviewPackage']
+const missingArgs = REQUIRED_ARGS.filter((f) => typeof ARGS[f] !== 'string' || ARGS[f].trim() === '')
+if (missingArgs.length > 0) failArgs('missing required args: ' + missingArgs.join(', '))
+if (!Array.isArray(ARGS.wave) || ARGS.wave.length === 0) {
+  failArgs('args.wave must be a non-empty array')
+}
+const WAVE = ARGS.wave
 
 const IMPLEMENT_RESULT_SCHEMA = {
   type: 'object',

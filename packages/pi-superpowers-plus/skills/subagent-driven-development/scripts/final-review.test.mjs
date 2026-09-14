@@ -51,9 +51,21 @@ test("stages: two parallel( calls + filter(Boolean) + dedupe", () => {
   assert.match(src, /function dedupe\(/);
 });
 
-test("defensive args normalization present", () => {
-  assert.match(src, /typeof args === 'string'/);
-});
+test("args: malformed, non-object, and missing required fields fail loud", async () => {
+  const { agent } = liveAgent({ empty: true })
+  await assert.rejects(
+    runWorkflow(src, { args: '{not json', agent }),
+    /final-review\.js: args was a JSON string but did not parse/,
+  )
+  await assert.rejects(
+    runWorkflow(src, { args: 42, agent }),
+    /final-review\.js: args must be an object; got number/,
+  )
+  await assert.rejects(
+    runWorkflow(src, { args: {}, agent }),
+    /final-review\.js: missing required args: base, head, packagePath, gateBeadId/,
+  )
+})
 
 test("dimensions: DEFAULT_DIMENSIONS + membership guard + fallback", () => {
   assert.match(src, /const DEFAULT_DIMENSIONS = \['correctness', 'security', 'performance', 'plan', 'maintainability'\]/);

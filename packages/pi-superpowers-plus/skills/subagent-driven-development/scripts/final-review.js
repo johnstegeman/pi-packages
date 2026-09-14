@@ -16,17 +16,26 @@ export const meta = {
   phases: [{ title: 'Find' }, { title: 'Verify' }],
 }
 
-// Defensive: some hosts deliver `args` to the sandbox as a JSON string
-// rather than the documented object (smoke-test discovery, pi-packages-1fjq).
-let parsedArgs
-try {
-  parsedArgs = typeof args === 'string' ? JSON.parse(args) : args
-} catch {
-  // Malformed args string degrades to an empty object, never a fatal throw
-  // (same fail-safe direction as every other guard in this file).
-  parsedArgs = null
+// Malformed/missing args are a caller bug: fail loud rather than run the
+// review against undefined inputs (pi-packages-1fjq).
+function failArgs(message) {
+  throw new Error('final-review.js: ' + message)
 }
-const ARGS = parsedArgs ?? {}
+let parsedArgs = args
+if (typeof args === 'string') {
+  try {
+    parsedArgs = JSON.parse(args)
+  } catch (e) {
+    failArgs('args was a JSON string but did not parse: ' + e.message)
+  }
+}
+if (parsedArgs === null || typeof parsedArgs !== 'object' || Array.isArray(parsedArgs)) {
+  failArgs('args must be an object; got ' + (parsedArgs === null ? 'null' : Array.isArray(parsedArgs) ? 'array' : typeof parsedArgs))
+}
+const ARGS = parsedArgs
+const REQUIRED_ARGS = ['base', 'head', 'packagePath', 'gateBeadId']
+const missingArgs = REQUIRED_ARGS.filter((f) => typeof ARGS[f] !== 'string' || ARGS[f].trim() === '')
+if (missingArgs.length > 0) failArgs('missing required args: ' + missingArgs.join(', '))
 
 const FINDINGS_SCHEMA = {
   type: 'object',
