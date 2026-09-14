@@ -238,7 +238,17 @@ This package can inject a chosen model into each `Agent` call by subagent type, 
 - Global: `~/.pi/agent/subagent-models.json`
 - Project: `<cwd>/.pi/subagent-models.json`
 
-Both use the same shape — a `models` map whose keys are the six supported agent types and whose values are model ids:
+The file is optional. With an empty (or absent) `models` map, every subagent type
+simply **inherits the session model** — nothing is injected:
+
+```json
+{
+  "models": {}
+}
+```
+
+Set only the types you want to override. For example, to run the builders and
+reviewers on a stronger model than the session default:
 
 ```json
 {
@@ -246,8 +256,7 @@ Both use the same shape — a `models` map whose keys are the six supported agen
     "implementer": "claude-sonnet-4-5",
     "task-reviewer": "claude-sonnet-4-5",
     "code-reviewer": "claude-sonnet-4-5",
-    "verifier": "claude-sonnet-4-5",
-    "worker": "claude-haiku-4-5"
+    "verifier": "claude-sonnet-4-5"
   }
 }
 ```
@@ -260,7 +269,7 @@ Two things beat the injection: a per-call `model` on the `Agent()` call, and a `
 
 **Explore.** The shipped `explore` template is deliberately unpinned (it overrides the built-in `Explore` and inherits the session model). Setting the `explore` key here is how you give that override an explicit model.
 
-To use the example, copy it in — copy-in only, like the templates:
+To start from the (empty) example, copy it in — copy-in only, like the templates:
 
 ```bash
 # Global (available everywhere) — pick this or the project-local option:
