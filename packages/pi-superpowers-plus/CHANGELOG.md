@@ -221,7 +221,7 @@ Synced skill content with the original [`obra/superpowers`](https://github.com/o
 
 - **executing-plans keeps batch-with-checkpoints** — the fork frames executing-plans as the checkpointed alternative to SDD's continuous execution; removing batching would contradict the fork's own writing-plans/SDD framing.
 - **Brainstorming visual companion not ported** (Tier 3) — the fork lacks `visual-companion.md`.
-- **Per-role model selection deferred** — the SDD rework keeps one model across all 5 fix rounds; a separate "pick the best model for each phase" change can come later.
+- **Per-role model selection deferred** — the SDD rework keeps one model across all 5 fix rounds — **shipped**: see per-agent-type models (`subagent-models.json`).
 - **`writing-skills` meta-skill not ported** — it's a skill-authoring guide, low priority for end-users.
 
 ---

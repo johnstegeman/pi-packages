@@ -231,6 +231,46 @@ dispatches receive nested tools (verified by code trace, l8x9.11).
 
 **Context costs.** With workflows enabled, tool-spec context per turn is dominated by pi-subagents' `SubagentWorkflow` description (≈ 4.9k tokens of prose — the fixed cost of having workflows, not reducible here) plus the `Agent` tool description. `toolDescriptionMode: "compact"` cuts the Agent description ~75% (≈ 1.1–1.4k → ≈ 250 tokens, roughly 0.9k saved per turn): worthwhile on small/local/flash models where tool-spec tokens are expensive relative to context, harmless on large ones. Compact is the recommended mode — pi-subagents' CI contract test keeps its load-bearing guardrails in lockstep with the full description, so nothing to maintain. Want your own prose? Set `custom` and ship `<cwd>/.pi/agent-tool-description.md` (project; `{{placeholders}}` keep the agent list live, a missing file falls back to `full`). Configure via `/agents → Settings → Tool description` or `subagents.json` (global `~/.pi/agent/subagents.json`, project `<cwd>/.pi/subagents.json`); takes effect on the next pi session.
 
+### Per-agent-type models
+
+This package can inject a chosen model into each `Agent` call by subagent type, instead of running every subagent on the session model. Configure it in either location:
+
+- Global: `~/.pi/agent/subagent-models.json`
+- Project: `<cwd>/.pi/subagent-models.json`
+
+Both use the same shape — a `models` map whose keys are the six supported agent types and whose values are model ids:
+
+```json
+{
+  "models": {
+    "implementer": "claude-sonnet-4-5",
+    "task-reviewer": "claude-sonnet-4-5",
+    "code-reviewer": "claude-sonnet-4-5",
+    "verifier": "claude-sonnet-4-5",
+    "worker": "claude-haiku-4-5",
+    "explore": "claude-sonnet-4-5"
+  }
+}
+```
+
+Supported keys: `implementer`, `task-reviewer`, `code-reviewer`, `verifier`, `worker`, and `explore`. The project file wins per key over the global file (a key set only globally still applies; a key set in both takes the project value). Any type you leave unset (or unlisted) is injected nothing and simply **inherits the session model** — so a partial config is fine.
+
+Two things beat the injection: a per-call `model` on the `Agent()` call, and a `model:` pin in the agent file's frontmatter. Both are honored as-is — if you (or a template) already chose a model, the config leaves it alone.
+
+**`scopeModels` caveat.** With pi-subagents' `scopeModels: true` (shipped in [`config-examples/subagents.global.json`](config-examples/subagents.global.json)), an injected model is treated as caller-supplied and is validated against the model-scope allowlist; if it is out of scope the dispatch may **hard-error** rather than fall back. Use in-scope model ids in this config, or turn scoping off.
+
+**Explore.** The shipped `explore` template is deliberately unpinned (it overrides the built-in `Explore` and inherits the session model). Setting the `explore` key here is how you give that override an explicit model.
+
+To use the example, copy it in — copy-in only, like the templates:
+
+```bash
+# Global (available everywhere) — pick this or the project-local option:
+cp config-examples/subagent-models.json ~/.pi/agent/subagent-models.json
+
+# Or project-local (this project only):
+mkdir -p .pi && cp config-examples/subagent-models.json .pi/subagent-models.json
+```
+
 ### Single Agent
 
 ```ts
@@ -274,7 +314,7 @@ Based on [Superpowers](https://github.com/obra/superpowers) by Jesse Vincent, po
 | **Skills** | 13 workflow skills | Same 13 skills (pi port) | Same 13 skills (three-scenario TDD, restored inline guidance) |
 | **TDD discipline** | Skill tells agent the rules | Skill tells agent the rules | Skill tells agent the rules (three-scenario model) |
 | **Debug discipline** | Manual discipline | Manual discipline | Manual discipline |
-| **Subagent dispatch** | — | — | `@tintinweb/pi-subagents` (`Agent` tool) + 5 agent templates |
+| **Subagent dispatch** | — | — | `@tintinweb/pi-subagents` (`Agent` tool) + 6 agent templates |
 | **TDD in subagents** | — | — | Three-scenario TDD instructions in agent templates + prompt templates |
 | **Task tracking** | — | — | beads via forked `pi-beads` (`beads_create`/`beads_update`/`beads_close`) — persistent issues + wisps |
 | **Reference content** | Everything in SKILL.md | Everything in SKILL.md | Inline guidance + separate reference files loaded on demand |
