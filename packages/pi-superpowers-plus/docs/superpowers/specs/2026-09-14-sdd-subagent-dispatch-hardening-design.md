@@ -166,8 +166,6 @@ The existing capability sentence, the one-child bound, and each file's existing 
 wording stay. Only the shared condition sentence `Under `SubagentWorkflow` the nested
 `Agent` tool is not available` is added identically across all four files (caveat wording
 parity); the surrounding fallback phrasing intentionally differs per file.
-fallback stay; only the availability condition is added, identically across all four
-files.
 
 ## Testing
 
