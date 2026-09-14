@@ -32,8 +32,8 @@ Call `set_phase({ phase: "development" })`.
    (`beads_show({ id: "<task-id>" })`) and identify any questions or concerns about the plan.
 3. If concerns: Raise them with your human partner before starting.
 4. If no concerns: confirm the `plan-approved` gate is resolved
-   (`beads_show({ id: "<plan-approved-gate-id>" })` — status should be `closed`; if not, stop and ask
-   the human to run `beads_gate_resolve({ id: "<plan-approved-gate-id>" })` before proceeding).
+   (`beads_show({ id: "<plan-approval-human-gate-id>" })` — status should be `closed`; if not, stop and ask
+   the human to run `beads_gate_resolve({ id: "<plan-approval-human-gate-id>" })` before proceeding).
 
 ### Step 2: Execute Batch
 **Default: First 3 tasks**

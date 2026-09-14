@@ -1,5 +1,7 @@
 # Task Reviewer Prompt Template
 
+The reviewer's identity and output contract are defined in [`../../agent-templates/task-reviewer.md`](../../agent-templates/task-reviewer.md). This template supplies the task context.
+
 Use this template when dispatching a task reviewer subagent. The reviewer
 reads the task's diff once and returns two verdicts: spec compliance and
 code quality.
@@ -17,7 +19,7 @@ Dispatch a subagent with this prompt:
 
     ## What Was Requested
 
-    call set_phase({ phase: "brainstorming" }).
+    call set_phase({ phase: "development" }).
     Read your task bead: beads_show({ id: "<TASK_ID>", full: true }).
     It contains the exact, full text of the task.
 

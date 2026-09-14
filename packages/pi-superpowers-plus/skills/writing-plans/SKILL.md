@@ -15,7 +15,7 @@ Write comprehensive implementation plans assuming the engineer has zero context 
 Assume they are a skilled developer, but know almost nothing about our toolset or problem domain. Assume they don't know good test design very well.
 
 **Announce at start:** "I'm using the writing-plans skill to create the implementation plan."
-Call `set_phase({ phase: "writing plan" })`
+Call `set_phase({ phase: "brainstorming" })`
 
 At the start of planning, resolve the implement step id via
 `beads_list({ label: "step:implement", mol: "<root-id>" })`, then claim it:
@@ -184,6 +184,7 @@ HUMAN_GATE_ID  = RESULT.human-gate    # the human gate the task beads are blocke
 TASK1_ID       = RESULT.t1
 TASK2_ID       = RESULT.t2
 ```
+`RESULT.gate` ≡ `<plan-approval-gate-bead-id>`; `RESULT.human-gate` ≡ `<plan-approval-human-gate-id>`.
 
 `RESULT.gate` (`parent.1`) is the gate **task bead** — never pass it to
 `beads_gate_resolve`, and never `beads_gate_resolve` any task-bead id.
@@ -258,7 +259,7 @@ reading `beads_mol_show({ id: "<implement-step-id>" })` to see what's already wi
 Then offer execution choice:
 
 **"Plan complete — <N> tasks created under `<implement-step-id>`, gated by
-`<plan-approved-gate-id>`. Once you approve, I'll record `review.verdict=done` and
+`<plan-approval-human-gate-id>`. Once you approve, I'll record `review.verdict=done` and
 resolve the gate to unblock execution (see Step 3's verdict recording). Two execution
 options:**
 

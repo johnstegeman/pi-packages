@@ -114,7 +114,9 @@ digraph process {
     "Stop and ask user: ready for final review?" [shape=box];
     "Dispatch final code reviewer (../requesting-code-review/code-reviewer.md)" [shape=box];
     "Final findings? ONE fix dispatch, one scoped re-review, adjudicate residuals" [shape=box];
-    "Final review clean: delete this plan's workspace" [shape=box];
+    "Final review clean" [shape=box];
+    "Close implement step" [shape=box];
+    "Claim verify (/skill:verification-before-completion)" [shape=box];
     "Use /skill:finishing-a-development-branch" [shape=box style=filled fillcolor=lightgreen];
 
     "Setup: worktree, ledger check, read plan, pre-flight review" -> "Dispatch implementer subagent (./implementer-prompt.md)";
@@ -144,8 +146,10 @@ digraph process {
     "More tasks remain?" -> "Stop and ask user: ready for final review?" [label="no"];
     "Stop and ask user: ready for final review?" -> "Dispatch final code reviewer (../requesting-code-review/code-reviewer.md)" [label="user confirms"];
     "Dispatch final code reviewer (../requesting-code-review/code-reviewer.md)" -> "Final findings? ONE fix dispatch, one scoped re-review, adjudicate residuals";
-    "Final findings? ONE fix dispatch, one scoped re-review, adjudicate residuals" -> "Final review clean: delete this plan's workspace";
-    "Final review clean: delete this plan's workspace" -> "Use /skill:finishing-a-development-branch";
+    "Final findings? ONE fix dispatch, one scoped re-review, adjudicate residuals" -> "Final review clean";
+    "Final review clean" -> "Close implement step";
+    "Close implement step" -> "Claim verify (/skill:verification-before-completion)";
+    "Claim verify (/skill:verification-before-completion)" -> "Use /skill:finishing-a-development-branch";
 }
 ```
 
@@ -193,12 +197,12 @@ and `beads_mol_show({ id: "<implement-step-id>" })` for reading the task beads u
   that happens, recover from `git log`.
 
 Read the molecule once (`beads_mol_current({ id: "<implement-step-id>" })`), note its context, and
-confirm the `plan-approved` gate is closed (`beads_show({ id: "<plan-approved-gate-id>" })`) before
+confirm the `plan-approved` gate is closed (`beads_show({ id: "<plan-approval-gate-bead-id>" })`) before
 dispatching any subagent — the plan's canonical Global Constraints live in that gate bead's
-description (`beads_show({ id: "<plan-approved-gate-id>", full: true })`) and are the single source handed
+description (`beads_show({ id: "<plan-approval-gate-bead-id>", full: true })`) and are the single source handed
 to reviewers (task beads still inline the constraints for implementers). Task ids and their
-`needs` ordering already exist as real dependency edges —
-no `TaskCreate`-equivalent step is needed here; `writing-plans` already created them
+`needs` ordering are already wired; the task beads exist as real dependency edges and
+`writing-plans` created them
 (see its Task Structure section).
 
 Before dispatching Task 1, scan the plan once for conflicts:
@@ -304,7 +308,7 @@ needed.
   id holding the plan's canonical Global Constraints.
 - The Global Constraints block is the reviewer's attention lens. Read it
   once from the plan-approval gate bead's description
-  (`beads_show({ id: "<plan-approved-gate-id>", full: true })`, populated by `writing-plans`) and pass that
+  (`beads_show({ id: "<plan-approval-gate-bead-id>", full: true })`, populated by `writing-plans`) and pass that
   gate id to the reviewer dispatch — the reviewer template carries the read instruction itself,
   so the constraints are byte-identical across every task review. The reviewer's template
   already carries the process rules (YAGNI, test hygiene, review method) — the constraints are
@@ -448,7 +452,7 @@ Do NOT automatically dispatch final review or start the finishing skill. The use
 
 ## Final Review
 
-After the user confirms, At the start of the skill, call `set_phase({ phase: "final review" })`.
+After the user confirms, call `set_phase({ phase: "development" })`.
 The final whole-branch review gets a package too:
 run `scripts/review-package <implement-step-id> MERGE_BASE HEAD` (MERGE_BASE is the
 branch point) and dispatch the `code-reviewer` agent with the
@@ -457,8 +461,12 @@ the requesting-code-review skill, passing the printed package path.
 
 Final review findings get ONE fix dispatch (a fresh implementer) plus one
 scoped re-review, then adjudicate any residuals with the breaker rules
-above. When the final review is clean, delete this plan's workspace (the
-record now lives in git) and use `/skill:finishing-a-development-branch`.
+above. When the final review is clean:
+1. Delete this plan's workspace (the record now lives in git).
+2. Confirm `executing-plans` readiness — `beads_mol_ready({ id: "<implement-step-id>" })` must return no ready steps — then close the `implement` step — `beads_close({ ids: "<implement-step-id>", reason: "all tasks complete" })` — which unblocks `verify`.
+3. Claim `verify` (`beads_update({ id: "<verify-step-id>", claim: true })` — resolve `<verify-step-id>`/`<finish-step-id>` with `beads_list({ label: "step:verify" | "step:finish", mol: "<root-id>" })`) and proceed to that work before the finishing handoff below — use `/skill:verification-before-completion`, which closes `verify`, surfaces the human `smoke-test-approved` gate, and works `finish`.
+4. Then announce "I'm using the finishing-a-development-branch skill to complete this work." and hand off: **REQUIRED SUB-SKILL:** `/skill:finishing-a-development-branch` — tell the user to type `/finish` to load it.
+
 After generating the package, choose the review path:
 
 - **Workflow path** (preferred when `SubagentWorkflow` is present and the branch is large or broad — multi-file, many commits, security-sensitive, or deferred minors to triage): invoke the skill's final-review workflow:
@@ -470,7 +478,7 @@ After generating the package, choose the review path:
           base: "<MERGE_BASE>",
           head: "<HEAD>",
           description: "<what was implemented — one paragraph from the After-All-Tasks summary>",
-          gateBeadId: "<plan-approval gate bead id>",
+          gateBeadId: "<plan-approval-gate-bead-id>",
           findingsFile: "<sdd-workspace>/final-review-<run-id>.jsonl", // absolute path, git-ignored — keeps the run's return envelope compact
         },
       })

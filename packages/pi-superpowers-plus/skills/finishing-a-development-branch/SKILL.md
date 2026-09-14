@@ -14,7 +14,7 @@ disable-model-invocation: true
 
 **Announce at start:** "I'm using the finishing-a-development-branch skill to complete this work."
 
-**At the start of the skill**, call `set_phase({ phase: "finishing" })`.
+**At the start of the skill**, call `set_phase({ phase: "development" })`.
 
 ## Step 1: Verify Tests
 

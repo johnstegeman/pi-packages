@@ -6,11 +6,11 @@ export default function (pi: ExtensionAPI) {
     name: "set_phase",
     label: "Set Phase",
     description:
-      "Emit the current Superpowers workflow phase on the superpowers:phase event bus channel for observability (e.g. cost tracking by phase). Pass `brainstorming` during brainstorming or planning, `development` during implementation or code review. Only the Superpowers skills should call this — do not use it for ordinary work.",
+      'Emit the current Superpowers workflow phase on the superpowers:phase event bus channel for observability (e.g. cost tracking by phase). Canonical phases: `brainstorming` (brainstorming and planning) and `development` (implementation, code review, final review, finishing); pass `""` to clear. Only the Superpowers skills should call this — do not use it for ordinary work.',
     parameters: Type.Object({
       phase: Type.String({
         description:
-          "The workflow phase. Superpowers skills pass `brainstorming` or `development`. Accepts any string for future extension.",
+          'The workflow phase: `brainstorming` or `development` (or `""` to clear). Superpowers skills pass only these; other strings are accepted for future extension.',
       }),
     }),
     async execute(_toolCallId, params) {
