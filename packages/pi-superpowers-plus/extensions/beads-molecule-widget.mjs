@@ -105,8 +105,8 @@ export function parseMoleculeCurrent(json) {
 /**
  * True when a molecule lock is actually usable: null, undefined, or an empty
  * string all mean "no lock" (a blank id is never a valid query target). Both
- * nextRefreshArgs and the .ts refreshMolecule use this single predicate so the
- * should-query-by-id decision can never drift between the two call sites.
+ * nextRefreshArgs and the controller's refresh() use this single predicate so
+ * the should-query-by-id decision can never drift between the two call sites.
  */
 export function hasLockedMolecule(lockedMoleculeId) {
   return lockedMoleculeId != null && lockedMoleculeId !== "";

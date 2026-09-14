@@ -9,6 +9,23 @@ import {
   parseMoleculeCurrent,
 } from "./beads-molecule-widget.mjs";
 
+const MAX_LOG_TEXT = 200;
+
+/**
+ * Bounded, sanitized log fragment: replaces control characters (including ANSI
+ * escape bytes) with spaces and caps length, so raw bd stdout/stderr and thrown
+ * errors can't inject control sequences into the terminal log. Filtering by code
+ * point avoids embedding literal control chars in the source or a regex.
+ */
+function sanitizeLogText(value) {
+  let out = "";
+  for (const ch of String(value ?? "")) {
+    const cp = ch.codePointAt(0);
+    out += cp < 0x20 || (cp >= 0x7f && cp <= 0x9f) ? " " : ch;
+  }
+  return out.slice(0, MAX_LOG_TEXT);
+}
+
 /**
  * Session-scoped lifecycle controller for the molecule widget. Owns the mutable
  * refresh state, the coalesced change trigger, the beads:changed subscription,
@@ -45,7 +62,7 @@ export function createMoleculeWidgetController({
         { placement: "aboveEditor" },
       );
     } catch (err) {
-      warn("[pi-superpowers-plus] molecule widget render failed:", err);
+      warn("[pi-superpowers-plus] molecule widget render failed:", sanitizeLogText(err?.message ?? err));
     }
   }
 
@@ -59,7 +76,8 @@ export function createMoleculeWidgetController({
     try {
       r = await exec("bd", args, { cwd, timeout: 5000 });
     } catch (err) {
-      if (gen === refreshGen) warn("[pi-superpowers-plus] molecule refresh failed:", err);
+      if (gen === refreshGen)
+        warn("[pi-superpowers-plus] molecule refresh failed:", sanitizeLogText(err?.message ?? err));
       return;
     }
     if (gen !== refreshGen) return;
@@ -68,7 +86,12 @@ export function createMoleculeWidgetController({
       const next = applyErrorFrame(activeMolecule, lockedMoleculeId, r);
       activeMolecule = next.activeMolecule;
       lockedMoleculeId = next.lockedMoleculeId;
-      if (!isCleanNotFound(r)) warn("[pi-superpowers-plus] molecule refresh error:", r);
+      if (!isCleanNotFound(r))
+        warn(
+          "[pi-superpowers-plus] molecule refresh error:",
+          r?.code,
+          sanitizeLogText(`${r?.stdout ?? ""}\n${r?.stderr ?? ""}`),
+        );
       return;
     }
 

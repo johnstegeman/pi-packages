@@ -75,7 +75,10 @@ const tick = () => new Promise((resolve) => setTimeout(resolve, 0));
   assert.equal(typeof state.onChange, "function", "subscribes to changes on bind");
   assert.deepEqual(calls.at(-1), ["bd", "mol", "current", "--json"], "no-id inference on first bind");
   const lines = ui.lastLines();
-  assert.ok(lines && lines.some((l) => l.includes("Ask clarifying questions")), `rendered frame: ${lines}`);
+  assert.ok(
+    lines?.some((l) => l.includes("Ask clarifying questions")),
+    `rendered frame: ${lines}`,
+  );
 }
 
 // ---------- race: overlapping refreshes are last-write-wins ----------
@@ -143,25 +146,56 @@ const tick = () => new Promise((resolve) => setTimeout(resolve, 0));
 {
   const warns = [];
   const ui = makeFakeUi();
+  let call = 0;
   const controller = createMoleculeWidgetController({
-    exec: async () => ({ code: 1, stdout: "", stderr: "connection refused" }),
+    exec: async () => {
+      call += 1;
+      return call === 1
+        ? { code: 0, stdout: RAW_A, stderr: "" }
+        : { code: 1, stdout: "", stderr: "connection refused" };
+    },
     subscribeChanges: () => () => {},
     warn: (...a) => warns.push(a),
   });
-  controller.bindSession({ ui, cwd: "/repo" });
+  controller.bindSession({ ui, cwd: "/repo" }); // seeds a frame
   await tick();
+  const seeded = ui.lastLines();
+  assert.ok(
+    seeded?.some((l) => l.includes("Ask clarifying questions")),
+    `frame seeded before transient failure: ${seeded}`,
+  );
+  await controller.refresh(); // transient non-zero error
+  controller.render();
+  const after = ui.lastLines();
+  assert.ok(
+    after?.some((l) => l.includes("Ask clarifying questions")),
+    `transient failure keeps the prior frame: ${after}`,
+  );
   assert.equal(warns.length, 1, "transient failure warns and is non-fatal");
 }
 {
   const warns = [];
   const ui = makeFakeUi();
+  let call = 0;
   const controller = createMoleculeWidgetController({
-    exec: async () => ({ code: 1, stdout: "no active molecule", stderr: "" }),
+    exec: async () => {
+      call += 1;
+      return call === 1
+        ? { code: 0, stdout: RAW_A, stderr: "" }
+        : { code: 1, stdout: "no active molecule", stderr: "" };
+    },
     subscribeChanges: () => () => {},
     warn: (...a) => warns.push(a),
   });
-  controller.bindSession({ ui, cwd: "/repo" });
+  controller.bindSession({ ui, cwd: "/repo" }); // seeds a frame
   await tick();
+  assert.ok(
+    ui.lastLines()?.some((l) => l.includes("Ask clarifying questions")),
+    "frame seeded before clean not-found",
+  );
+  await controller.refresh(); // clean not-found
+  controller.render();
+  assert.equal(ui.lastLines(), null, "clean not-found clears the frame");
   assert.equal(warns.length, 0, "clean not-found clears silently");
 }
 {
@@ -192,6 +226,93 @@ const tick = () => new Promise((resolve) => setTimeout(resolve, 0));
   controller.bindSession({ ui, cwd: "/repo" });
   await tick();
   assert.equal(warns.length, 1, "render throw warns and is non-fatal");
+}
+
+// ---------- setCwd: agent_start per-turn refresh against the new cwd ----------
+{
+  const ui = makeFakeUi();
+  const calls = [];
+  const controller = createMoleculeWidgetController({
+    exec: async (cmd, args, opts) => {
+      calls.push({ cmd, args, cwd: opts?.cwd });
+      return { code: 0, stdout: RAW_A, stderr: "" };
+    },
+    subscribeChanges: () => () => {},
+  });
+  controller.bindSession({ ui, cwd: "/repo-old" });
+  await tick();
+  calls.length = 0;
+  controller.setCwd("/repo-new");
+  await tick();
+  controller.render();
+  assert.equal(calls.at(-1)?.cwd, "/repo-new", "setCwd refreshes against the new cwd");
+  assert.ok(
+    ui.lastLines()?.some((l) => l.includes("Ask clarifying questions")),
+    "setCwd renders the refreshed frame",
+  );
+}
+
+// ---------- race (non-zero-code path): stale clean not-found is discarded ----------
+{
+  const ui = makeFakeUi();
+  const resolvers = [];
+  const controller = createMoleculeWidgetController({
+    exec: (_cmd, args) => new Promise((resolve) => resolvers.push({ args, resolve })),
+    subscribeChanges: () => () => {},
+  });
+  controller.bindSession({ ui, cwd: "/repo" }); // refresh #1 (older)
+  const second = controller.refresh(); // refresh #2 (newer)
+  assert.equal(resolvers.length, 2, "two overlapping refreshes issued");
+  resolvers[1].resolve({ code: 0, stdout: RAW_B, stderr: "" }); // newest resolves first
+  await second;
+  resolvers[0].resolve({ code: 1, stdout: "no active molecule", stderr: "" }); // stale clear resolves late
+  await tick();
+  controller.render();
+  const lines = ui.lastLines();
+  assert.ok(
+    lines.some((l) => l.includes("Propose approaches")),
+    `newest frame wins: ${lines}`,
+  );
+  assert.ok(!lines.some((l) => l.includes("Ask clarifying questions")), `stale clear discarded: ${lines}`);
+}
+
+// ---------- bindSession idempotency + triggerChange no-op ----------
+{
+  let subscribeCount = 0;
+  let scheduled = 0;
+  const timers = {
+    setTimeout: () => {
+      scheduled += 1;
+      return {};
+    },
+    clearTimeout: () => {},
+  };
+  const ui = makeFakeUi();
+  const subs = makeFakeSubscribe();
+  const controller = createMoleculeWidgetController({
+    exec: async () => ({ code: 0, stdout: RAW_A, stderr: "" }),
+    subscribeChanges: (onChange) => {
+      subscribeCount += 1;
+      return subs.subscribeChanges(onChange);
+    },
+    timers,
+  });
+  controller.triggerChange(); // before bind: safe no-op
+  controller.bindSession({ ui, cwd: "/repo" });
+  await tick();
+  assert.equal(subscribeCount, 1, "subscribes once on first bind");
+  subs.state.onChange(); // leading edge opens a coalescer window
+  assert.equal(scheduled, 1, "a change opens a coalescer window");
+  controller.bindSession({ ui, cwd: "/repo" }); // second bind must not rebuild
+  await tick();
+  assert.equal(subscribeCount, 1, "second bind does not double-subscribe");
+  subs.state.onChange();
+  assert.equal(scheduled, 1, "second bind did not rebuild the coalescer (window still open)");
+
+  controller.unbindSession();
+  controller.triggerChange(); // after unbind: safe no-op
+  controller.triggerChange();
+  assert.equal(subscribeCount, 1, "trigger after unbind is a no-op");
 }
 
 console.log("beads-molecule-widget-controller: all assertions passed");

@@ -112,22 +112,25 @@ pi  ──►  set-phase.ts  ──►  set-phase.mjs (createPhaseLifecycle)
 - `parseMoleculeCurrent` derives `total` from the **filtered** step count.
 
 **New core — `extensions/beads-molecule-widget-controller.mjs`:**
-`createMoleculeWidgetController({ exec, setWidget, getTheme, subscribeChanges, warn, windowMs = 10000, timers })`.
-Owns all session-scoped mutable state (`ui`, `cwd`, `activeMolecule`,
-`lockedMoleculeId`, `refreshGen`, `coalescer`, `unsubscribe`). Knows nothing about
-`pi`. Exposes `bindSession`, `unbindSession`, `setCwd`, `refresh`, `render`,
+`createMoleculeWidgetController({ exec, subscribeChanges, warn = console.warn, windowMs = 10000, timers })`.
+Owns all session-scoped mutable state (`ui` — set via `bindSession`, `cwd`,
+`activeMolecule`, `lockedMoleculeId`, `refreshGen`, `coalescer`, `unsubscribe`).
+It does not inject `setWidget`/`getTheme`: the `ui` object (with `setWidget` and an
+optional `theme`) arrives through `bindSession`. Knows nothing about `pi`.
+Exposes `bindSession`, `unbindSession`, `setCwd`, `refresh`, `render`,
 `triggerChange`.
 
 **New core — `extensions/set-phase.mjs`:**
 `createPhaseLifecycle({ emit, on })` registers the clear-on-`session_start` and
-clear-on-`session_shutdown` behavior and returns `{ clear }`. The
+clear-on-`session_shutdown` behavior (the internal `clear` is not returned). The
 `set_phase` tool registration (Typebox schema) stays in the `.ts` adapter.
 
 **Thin adapters — `.ts`:**
-- `extensions/beads-molecule-widget.ts`: builds the controller with `pi.exec`, a
-  `setWidget` callback, and `subscribeChanges: (fn) => pi.events.on("beads:changed", fn)`;
-  wires `pi.on("session_start" | "agent_start" | "session_shutdown")` into
-  controller methods. No business logic.
+- `extensions/beads-molecule-widget.ts`: builds the controller with `pi.exec` and
+  `subscribeChanges: (fn) => pi.events.on("beads:changed", fn)`; passes `ctx.ui`
+  into `bindSession` (the controller's `setWidget`/`getTheme` surface); wires
+  `pi.on("session_start" | "agent_start" | "session_shutdown")` into controller
+  methods. No business logic.
 - `extensions/set-phase.ts`: keeps `pi.registerTool` + schema and delegates the
   session-clearing wiring to `createPhaseLifecycle`.
 
@@ -141,9 +144,9 @@ imports `pi`, `typebox`, or `@earendil-works`.
 
 **`bindSession({ ui, cwd })`** (called from `session_start`):
 1. store `ui`, `cwd`;
-2. if not subscribed, `unsubscribe = subscribeChanges(() => coalescer?.trigger())`;
-3. if no coalescer, `coalescer = createChangeCoalescer(refresh, windowMs, timers)`;
-4. fire an immediate `refresh()`.
+2. if not subscribed, `unsubscribe = subscribeChanges(triggerChange)`;
+3. if no coalescer, `coalescer = createChangeCoalescer(refreshAndRender, windowMs, timers, warn)`;
+4. fire an immediate `refreshAndRender()`.
 
 **`unbindSession()`** (called from `session_shutdown`):
 1. `coalescer?.cancel()`; `coalescer = null`;
@@ -165,7 +168,7 @@ imports `pi`, `typebox`, or `@earendil-works`.
 
 The `gen` check is re-evaluated after every `await` before mutating state.
 
-**`render()`:** call `setWidget(lines | undefined)`; a throw is caught, warned,
+**`render()`:** call `ui.setWidget(lines | undefined)`; a throw is caught, warned,
 and non-fatal (non-interactive runs must not break).
 
 **`triggerChange()`:** no-op when unbound; otherwise `coalescer.trigger()`.

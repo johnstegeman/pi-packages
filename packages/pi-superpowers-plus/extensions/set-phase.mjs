@@ -9,5 +9,4 @@ export function createPhaseLifecycle({ emit, on }) {
   const clear = () => emit("superpowers:phase", { phase: PHASE_CLEAR });
   on("session_start", clear);
   on("session_shutdown", clear);
-  return { clear };
 }

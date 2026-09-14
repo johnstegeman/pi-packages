@@ -1256,6 +1256,16 @@ assert.deepEqual(nextRefreshArgs("bd-mol-abc"), ["mol", "current", "bd-mol-abc",
   assert.equal(isCleanNotFound({ code: 1, stdout: "", stderr: "no active molecule" }), true);
   assert.equal(isCleanNotFound({ code: 1, stdout: "connection refused", stderr: "" }), false);
   assert.equal(isCleanNotFound(null), false);
+  // captured real bd output: exit 1, single-line JSON error on stdout
+  assert.equal(
+    isCleanNotFound({
+      code: 1,
+      stdout: `{"error": "molecule 'bd-mol-g0z' not found", "status": "error"}`,
+      stderr: "",
+    }),
+    true,
+    "captured real-bd JSON not-found on stdout is clean",
+  );
   // "molecule" in stdout must not pair with "not found" in stderr across the newline
   assert.equal(isCleanNotFound({ code: 1, stdout: "molecule x", stderr: "not found" }), false);
 }
@@ -1288,6 +1298,29 @@ assert.deepEqual(nextRefreshArgs("bd-mol-abc"), ["mol", "current", "bd-mol-abc",
   assert.equal(malformed.doneCount, 2, "both parsed steps are done");
   const released = applyMoleculeFrame(null, "bd-mol-mal", malformed, true);
   assert.equal(released.lockedMoleculeId, null, "fully-done molecule with a malformed raw step releases the lock");
+}
+
+// ---------- lock-release guard boundary: all-malformed steps => total 0, lock released ----------
+{
+  // CONTROLLER RULING: a molecule whose `steps` are ALL malformed parses to an
+  // empty frame (total 0, doneCount 0); applyMoleculeFrame treats it as finished
+  // and releases the lock. Boundary pinned deliberately — no parsed steps to
+  // display, so the finished frame is shown once and the next refresh re-infers.
+  const RAW_ALL_MALFORMED = JSON.stringify([
+    {
+      molecule_id: "bd-mol-nosteps",
+      molecule_title: "superpowers-workflow",
+      current_step: null,
+      next_step: null,
+      steps: [{ status: "done" }, { foo: "bar" }],
+    },
+  ]);
+  const parsed = parseMoleculeCurrent(RAW_ALL_MALFORMED);
+  assert.equal(parsed.total, 0, "all-malformed steps yield total 0");
+  assert.equal(parsed.doneCount, 0, "all-malformed steps yield doneCount 0");
+  const applied = applyMoleculeFrame(null, "bd-mol-nosteps", parsed, true);
+  assert.equal(applied.activeMolecule, parsed, "the empty frame is still displayed once");
+  assert.equal(applied.lockedMoleculeId, null, "all-malformed steps release the lock");
 }
 
 // ---------- Finding 2: current-row staleness fallback (close-as-you-go gap) ----------
