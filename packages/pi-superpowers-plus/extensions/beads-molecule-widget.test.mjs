@@ -1205,6 +1205,36 @@ assert.deepEqual(nextRefreshArgs("bd-mol-abc"), ["mol", "current", "bd-mol-abc",
   assert.equal(isCleanNotFound({ code: 1, stdout: "molecule x", stderr: "not found" }), false);
 }
 
+// ---------- lock-release guard: total counts only parsed steps ----------
+{
+  const RAW_WITH_MALFORMED = JSON.stringify([
+    {
+      molecule_id: "bd-mol-mal",
+      molecule_title: "superpowers-workflow",
+      current_step: null,
+      next_step: null,
+      steps: [
+        {
+          issue: { id: "mal.1", title: "Explore project context: x", issue_type: "task", status: "closed" },
+          status: "done",
+          is_current: false,
+        },
+        {
+          issue: { id: "mal.2", title: "Implement x", issue_type: "task", status: "closed" },
+          status: "done",
+          is_current: false,
+        },
+        { status: "done", is_current: false }, // malformed raw step: no `issue`
+      ],
+    },
+  ]);
+  const malformed = parseMoleculeCurrent(RAW_WITH_MALFORMED);
+  assert.equal(malformed.total, 2, "total counts only parsed steps");
+  assert.equal(malformed.doneCount, 2, "both parsed steps are done");
+  const released = applyMoleculeFrame(null, "bd-mol-mal", malformed, true);
+  assert.equal(released.lockedMoleculeId, null, "fully-done molecule with a malformed raw step releases the lock");
+}
+
 // ---------- Finding 2: current-row staleness fallback (close-as-you-go gap) ----------
 // No step is_current and no awaitingStep: the DEEPEST open/ready (non-done, non-gate) step
 // in the view's render set leads, instead of nothing being marked active.

@@ -98,7 +98,7 @@ export function parseMoleculeCurrent(json) {
     next_step: obj.next_step ?? null,
     steps,
     doneCount,
-    total: obj.steps.length,
+    total: steps.length,
   };
 }
 
