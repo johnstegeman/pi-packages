@@ -486,6 +486,7 @@ export default function piBeadsLean(pi: any) {
     if (o.length === 0) return "(no comments)";
     return o
       .map((c: any) => {
+        if (!c || typeof c !== "object") return String(c ?? "");
         const who = c.author ?? c.actor ?? c.user ?? "?";
         const when = c.created_at ?? c.timestamp ?? c.time ?? "";
         const body = String(c.text ?? c.body ?? c.content ?? "");
@@ -510,7 +511,11 @@ export default function piBeadsLean(pi: any) {
     if (!Array.isArray(results)) return (json ?? "").trim() || "no template warnings";
     if (results.length === 0) return "no template warnings";
     return results
-      .map((x: any) => `${x.id}: missing ${Array.isArray(x.missing) ? x.missing.join(", ") : "?"}`)
+      .map((x: any) => {
+        const miss = Array.isArray(x.missing) ? x.missing : null;
+        if (!miss || miss.length === 0) return `${x.id}: no missing sections`;
+        return `${x.id}: missing ${miss.join(", ")}`;
+      })
       .join("\n");
   }
 
@@ -632,7 +637,7 @@ export default function piBeadsLean(pi: any) {
         claim: {
           type: "boolean",
           description:
-            "Atomically claim the first ready issue matching the filters (bd ready --claim). Read-only when omitted.",
+            "Atomically claim the first ready issue matching the filters (bd ready --claim). This is a write: the claim is persisted in the owning repo and emits beads:changed. Read-only when omitted.",
         },
       },
     },
@@ -643,12 +648,26 @@ export default function piBeadsLean(pi: any) {
           `unknown repo '${params.repo}' (known: ${knownRepos()})`,
         );
       await ensureFresh();
+      const claim = params?.claim === true || params?.claim === "true";
       const rargs = ["ready", "--json", "--include-ephemeral", "-n", String(params?.limit ?? 15)];
       if (params?.label) rargs.push("--label", String(params.label));
       if (params?.labelAny) rargs.push("--label-any", String(params.labelAny));
-      if (params?.claim === true || params?.claim === "true") rargs.push("--claim");
+      if (claim) rargs.push("--claim");
       const r = await bd(rargs, scope);
       if (!r.ok) return textResult(`bd ready failed: ${r.err}`);
+      if (!claim) return textResult(fmtRows(r.out));
+      // bd ready --claim is atomic, but in umbrella mode it mutates only the
+      // aggregate read-replica (reverted on the next repo sync). Re-assert the
+      // claim in the owning repo so it persists and emits beads:changed once.
+      const parsed = jparse(r.out);
+      const claimed = Array.isArray(parsed) ? parsed[0] : parsed?.issues?.[0];
+      const claimedId = claimed?.id ? String(claimed.id) : null;
+      const dir = claimedId ? dirForPrefix(claimedId) : null;
+      if (!claimedId || !dir) return textResult(fmtRows(r.out));
+      const c = await bd(["update", claimedId, "--claim"], dir);
+      if (!c.ok)
+        return textResult(`claimed ${claimedId} in aggregate but repo claim failed: ${c.err}`);
+      await afterWrite(dir);
       return textResult(fmtRows(r.out));
     },
   });
@@ -1275,7 +1294,10 @@ export default function piBeadsLean(pi: any) {
     async execute(_id: string, params: any) {
       if (!params?.id) return textResult("id is required");
       const dir = dirForPrefix(String(params.id));
-      if (!dir) return textResult(`unknown repo for id '${params.id}'`);
+      if (!dir)
+        return textResult(
+          `unknown repo for id '${params.id}' (known prefixes: ${Array.from(prefixToDir.keys()).join(", ")})`,
+        );
       const args = ["promote", String(params.id)];
       if (params.reason) args.push("--reason", String(params.reason));
       const r = await bd(args, dir);
@@ -1375,12 +1397,23 @@ export default function piBeadsLean(pi: any) {
       properties: {
         ids: { type: "string", description: "One or more issue ids, space or comma separated" },
         status: { type: "string", description: "Filter by status (default open, 'all' for all)" },
-        type: { type: "string", description: "Filter by type: bug|task|feature|epic" },
+        type: { type: "string", description: "Filter by type: bug|task|feature|epic|chore" },
       },
     },
     async execute(_id: string, params: any) {
       const ids = params?.ids ? String(params.ids).split(/[\s,]+/).filter(Boolean) : [];
-      await ensureFresh();
+      if (params?.status) {
+        const st = String(params.status);
+        if (!["open", "in_progress", "blocked", "deferred", "closed", "all"].includes(st))
+          return textResult(
+            `invalid status '${st}' (allowed: open|in_progress|blocked|deferred|closed|all)`
+          );
+      }
+      if (params?.type) {
+        const ty = String(params.type);
+        if (!["bug", "task", "feature", "epic", "chore"].includes(ty))
+          return textResult(`invalid type '${ty}' (allowed: bug|task|feature|epic|chore)`);
+      }
       const args = ["lint", ...ids, "--json"];
       if (params?.status) args.push("--status", String(params.status));
       if (params?.type) args.push("--type", String(params.type));

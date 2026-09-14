@@ -99,6 +99,16 @@ case "$1" in
       esac
       exit 0
     fi
+    CLAIMFLAG=0
+    for a in "$@"; do [ "$a" = "--claim" ] && CLAIMFLAG=1; done
+    if [ "$CLAIMFLAG" = "1" ]; then
+      if [ "$MODE" = "umbrella" ]; then
+        printf '[{"id":"crmback-1a2","priority":1,"status":"open","title":"Backend work"}]\n'
+      else
+        printf '[{"id":"proj-1a2","priority":1,"status":"open","title":"Repo work"}]\n'
+      fi
+      exit 0
+    fi
     echo "ok"; exit 0
     ;;
   mol)
@@ -418,6 +428,23 @@ function invocations() {
       invs.push(cur);
     } else if (ln.startsWith("ARG ") && cur) {
       cur.push(ln.slice(4));
+    }
+  }
+  return invs;
+}
+
+// like invocations(), but keeps each call's cwd so a test can assert that a
+// routed write actually ran in the owning repo's directory.
+function invocationsWithCwd() {
+  const invs = [];
+  let cur = null;
+  for (const ln of readFileSync(logFile, "utf8").split("\n")) {
+    if (ln.startsWith("INV ")) {
+      const m = ln.match(/cwd=(\S+)/);
+      cur = { cwd: m ? m[1] : null, args: [] };
+      invs.push(cur);
+    } else if (ln.startsWith("ARG ") && cur) {
+      cur.args.push(ln.slice(4));
     }
   }
   return invs;
@@ -883,6 +910,21 @@ test("single-repo: beads_lint formats missing sections and never emits", async (
   assert.equal(s.emitted.length, 0);
 });
 
+test("single-repo: beads_lint rejects invalid status/type before any bd call", async () => {
+  const s = await openSession("single", repoDir);
+  resetLog();
+  const rs = await s.byName.get("beads_lint").execute("c", { status: "nonsense" });
+  assert.match(
+    rs.content[0].text,
+    /invalid status 'nonsense' \(allowed: open\|in_progress\|blocked\|deferred\|closed\|all\)/,
+    rs.content[0].text,
+  );
+  assert.equal(invocations().length, 0, "validation must not call bd");
+  const rt = await s.byName.get("beads_lint").execute("c", { type: "nonsense" });
+  assert.match(rt.content[0].text, /invalid type 'nonsense' \(allowed: bug\|task\|feature\|epic\|chore\)/, rt.content[0].text);
+  assert.equal(invocations().length, 0, "validation must not call bd");
+});
+
 test("single-repo: beads_stale rejects an invalid status before bd", async () => {
   const s = await openSession("single", repoDir);
   resetLog();
@@ -1043,13 +1085,16 @@ test("single-repo: close cascade treats an already-closed parent as success", as
   findInvocation(["show", "proj-closed-parent", "--json"]);
 });
 
-test("single-repo: beads_ready claim appends --claim and does not emit", async () => {
+test("single-repo: beads_ready claim re-asserts in the owning repo and emits", async () => {
   const s = await openSession("single", repoDir);
   resetLog();
   const r = await s.byName.get("beads_ready").execute("c", { limit: 5, claim: true });
   assert.ok(okResult(r), JSON.stringify(r));
   findInvocation(["ready", "--json", "--include-ephemeral", "-n", "5", "--claim"]);
-  assert.equal(s.emitted.length, 0);
+  // the claim is a write: it is re-asserted in the owning repo and emits once
+  findInvocation(["update", "proj-1a2", "--claim"]);
+  assert.equal(s.emitted.length, 1);
+  assert.equal(s.emitted.at(-1), "beads:changed");
 });
 
 test("single-repo: beads_close maps continue/next flags and still cascades", async () => {
@@ -1364,6 +1409,27 @@ test("umbrella: update/close/reopen/gate create/mol pour route to owning repo an
   findInvocation(["mol", "pour", "f"]);
   assert.equal(s.emitted.length, 4);
   assert.ok(s.emitted.every((e) => e === "beads:changed"), `all emits are beads:changed: ${s.emitted}`);
+});
+
+test("umbrella: beads_ready claim routes the re-assert to the owning repo and emits", async () => {
+  const s = await openSession("umbrella", projDir);
+  resetLog();
+  const r = await s.byName.get("beads_ready").execute("c", { limit: 5, claim: true });
+  assert.ok(okResult(r), JSON.stringify(r));
+  // atomic selection still runs against the umbrella aggregate
+  findInvocation(["ready", "--json", "--include-ephemeral", "-n", "5", "--claim"]);
+  // the durable re-assert is routed to the claimed id's owning repo (backend)
+  const upd = invocationsWithCwd().find(
+    (iv) =>
+      iv.args.length === 3 &&
+      iv.args[0] === "update" &&
+      iv.args[1] === "crmback-1a2" &&
+      iv.args[2] === "--claim",
+  );
+  assert.ok(upd, `expected routed update; got ${JSON.stringify(invocationsWithCwd())}`);
+  assert.equal(upd.cwd, backendDir, "claim re-assert must run in the owning repo");
+  assert.equal(s.emitted.length, 1);
+  assert.equal(s.emitted.at(-1), "beads:changed");
 });
 
 test("umbrella: gate_resolve resolves, lists dependents, closes none when dep list empty, one emit", async () => {
