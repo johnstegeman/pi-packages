@@ -193,7 +193,7 @@ Subagent dispatch is provided by [`@tintinweb/pi-subagents`](https://github.com/
 
 ### Agent Templates
 
-This package ships 5 agent templates (copy-in only — see Install):
+This package ships 6 agent templates (copy-in only — see Install):
 
 | Agent | Purpose | Tools |
 |-------|---------|-------|
@@ -202,8 +202,11 @@ This package ships 5 agent templates (copy-in only — see Install):
 | `code-reviewer` | Production readiness review (read-only); may spawn one nested `Explore` lookup per named question | read, bash, find, grep, ls |
 | `task-reviewer` | Task review: spec compliance + code quality (read-only); may spawn one nested `Explore` lookup per named question | read, bash, find, grep, ls |
 | `verifier` | Adversarial refutation of a single review finding (read-only) | read, bash, find, grep, ls |
+| `explore` | Read-only code location/search (overrides the built-in Explore; inherits the session model) | read, bash, find, grep, ls |
 
 Templates live in `agent-templates/*.md` and use YAML frontmatter (per the `pi-subagents` schema) to declare tools and a system prompt body. Copy them into `.pi/agents/` (project) or `~/.pi/agent/agents/` (global) so `pi-subagents` discovers them.
+
+`explore.md` overrides the built-in `Explore` agent (pi-subagents overlays custom agents onto its defaults by exact name, so the frontmatter declares `name: Explore`). Having no `model:` pin, it inherits the session model instead of the built-in's `anthropic/claude-haiku-4-5` default, while keeping the same read-only toolset and fast-recon prompt.
 
 **Nested lookups (`task-reviewer` and `code-reviewer`).** The `task-reviewer`
 and `code-reviewer` templates set `allowed_subagents: Explore`, so a reviewer
@@ -280,12 +283,13 @@ Based on [Superpowers](https://github.com/obra/superpowers) by Jesse Vincent, po
 
 ```
 pi-superpowers-plus/
-├── agent-templates/                  # Copy-in agent definitions (5 templates, not auto-loaded)
+├── agent-templates/                  # Copy-in agent definitions (6 templates, not auto-loaded)
 │   ├── implementer.md                # Strict TDD implementation agent
 │   ├── worker.md                     # General-purpose task agent
 │   ├── code-reviewer.md              # Production readiness reviewer
 │   ├── task-reviewer.md              # Task reviewer (spec + code quality)
-│   └── verifier.md                   # Adversarial single-finding verifier (read-only)
+│   ├── verifier.md                   # Adversarial single-finding verifier (read-only)
+│   └── explore.md                    # Built-in Explore override (read-only, inherits session model)
 ├── config-examples/                   # Recommended fail-closed dispatch configs
 │   ├── subagents.global.json          # → ~/.pi/agent/subagents.json (global)
 │   └── subagents.project.json         # → .pi/subagents.json (project-local)
