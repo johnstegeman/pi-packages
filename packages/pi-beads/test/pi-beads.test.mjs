@@ -1339,6 +1339,20 @@ test("umbrella: session_start hydrates the umbrella + backend repo", async () =>
   findInvocation(["list", "--json", "-n", "3"]);
 });
 
+test("umbrella: beads_lint ensureFresh runs repo sync before lint", async () => {
+  const s = await openSession("umbrella", projDir);
+  resetLog();
+  const r = await s.byName.get("beads_lint").execute("c", { ids: "crmback-1a2", type: "task" });
+  assert.ok(okResult(r), JSON.stringify(r));
+  const invs = invocations();
+  const syncIdx = invs.findIndex((inv) => inv[0] === "repo" && inv[1] === "sync");
+  const lintIdx = invs.findIndex((inv) => inv[0] === "lint");
+  assert.ok(syncIdx !== -1, `expected repo sync; got ${JSON.stringify(invs)}`);
+  assert.ok(lintIdx !== -1, `expected lint; got ${JSON.stringify(invs)}`);
+  assert.ok(syncIdx < lintIdx, `repo sync must precede lint; got ${JSON.stringify(invs)}`);
+  findInvocation(["lint", "crmback-1a2", "--json", "--type", "task"]);
+});
+
 test("umbrella: beads_create routes to the owning repo, re-exports JSONL, emits", async () => {
   const s = await openSession("umbrella", projDir);
   const before = s.emitted.length;

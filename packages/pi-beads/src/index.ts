@@ -1414,6 +1414,7 @@ export default function piBeadsLean(pi: any) {
         if (!["bug", "task", "feature", "epic", "chore"].includes(ty))
           return textResult(`invalid type '${ty}' (allowed: bug|task|feature|epic|chore)`);
       }
+      await ensureFresh();
       const args = ["lint", ...ids, "--json"];
       if (params?.status) args.push("--status", String(params.status));
       if (params?.type) args.push("--type", String(params.type));
