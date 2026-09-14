@@ -55,11 +55,22 @@ test("loadConfig repairs an existing world-readable config", () => {
   );
   chmodSync(configPath, 0o644); // umask can only tighten; force the loose mode we assert against
 
-  const config = loadConfig(configPath);
+  const priorUrl = process.env.BIFROST_GATEWAY_URL;
+  const priorKey = process.env.BIFROST_VIRTUAL_KEY;
+  delete process.env.BIFROST_GATEWAY_URL;
+  delete process.env.BIFROST_VIRTUAL_KEY;
+  try {
+    const config = loadConfig(configPath);
 
-  assert.equal(statSync(configPath).mode & 0o777, 0o600);
-  assert.equal(config.gatewayUrl, "https://gw.example.com");
-  assert.equal(config.virtualKey, "sk-bf-file");
+    assert.equal(statSync(configPath).mode & 0o777, 0o600);
+    assert.equal(config.gatewayUrl, "https://gw.example.com");
+    assert.equal(config.virtualKey, "sk-bf-file");
+  } finally {
+    if (priorUrl === undefined) delete process.env.BIFROST_GATEWAY_URL;
+    else process.env.BIFROST_GATEWAY_URL = priorUrl;
+    if (priorKey === undefined) delete process.env.BIFROST_VIRTUAL_KEY;
+    else process.env.BIFROST_VIRTUAL_KEY = priorKey;
+  }
 });
 
 test("loadConfig returns an empty config for a missing file without creating it", () => {
