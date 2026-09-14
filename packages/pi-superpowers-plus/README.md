@@ -298,8 +298,13 @@ pi-superpowers-plus/
 │   ├── dispatching-parallel-agents/
 │   ├── using-git-worktrees/
 │   └── finishing-a-development-branch/
-├── scripts/                           # Structural guard for the dispatch contract
-│   └── agent-dispatch-guard.test.mjs
+├── extensions/                        # Plain .mjs pi extensions (with .ts type sources)
+│   ├── beads-molecule-widget.mjs      # Live workflow-step widget above the editor
+│   ├── phase-commands.mjs             # /skill: phase command expansion
+│   ├── set-phase.mjs                  # set_phase tool + phase lifecycle
+│   └── formula-seed.mjs               # Seed formulas into a workspace
+├── formulas/                          # Formula definitions (superpowers-workflow.formula.toml)
+├── test/                              # Decoupled node test scripts
 └── README.md
 ```
 
@@ -307,10 +312,10 @@ pi-superpowers-plus/
 
 ```bash
 npm install
-npm test        # biome check . + structural guard + widget/phase tests
+npm test        # biome check . + test/ scripts + SDD script tests
 ```
 
-No compiled code ships in this package — it is skills and agent templates. `npm test` runs `biome check .` plus the node test scripts (extensions, SDD scripts, structural guard).
+No compiled code ships — the package is markdown skills, agent templates, and plain `.mjs` extensions. `npm test` runs `biome check .` plus the node test scripts under `test/` and the SDD script tests.
 
 ## Attribution
 

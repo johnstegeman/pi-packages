@@ -26,7 +26,7 @@ script exists.
 - Per-package tests: `cd packages/<name> && npm test`
 - Statusline tests: `cd packages/statusline && npm test`
 - Langfuse tests: `cd packages/langfuse && npm install` once for runtime dependencies, then `npm test`; the root workspace does not install those dependencies.
-- pi-beads has no automated tests (widget tests removed).
+- pi-beads: `cd packages/pi-beads && npm test` runs the tool suite and the cost-tracking suite.
 
 ### Statusline settings file isolation
 

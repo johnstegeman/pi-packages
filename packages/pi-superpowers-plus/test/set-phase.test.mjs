@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { createPhaseLifecycle, PHASE_CLEAR } from "./set-phase.mjs";
+import { createPhaseLifecycle, PHASE_CLEAR } from "../extensions/set-phase.mjs";
 
 const handlers = new Map();
 const emitted = [];

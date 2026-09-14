@@ -9,7 +9,7 @@ const fakePi = {
   },
   events: { emit() {}, on() {} },
 };
-const setup = (await import("./phase-commands.mjs")).default;
+const setup = (await import("../extensions/phase-commands.mjs")).default;
 setup(fakePi);
 
 assert.equal(handlers.length, 1, "setup must register exactly one input handler");
