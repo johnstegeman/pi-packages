@@ -101,7 +101,7 @@ function dedupe(all) {
 
 const requirement = (dimension) => {
   const lines = [
-    'You are a Senior Code Reviewer. Review the completed work on',
+    'Review the completed work on',
     ARGS.base + '..' + ARGS.head,
     '',
     'Read the review package ONCE at:',

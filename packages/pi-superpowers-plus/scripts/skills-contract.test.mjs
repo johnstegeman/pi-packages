@@ -16,7 +16,7 @@ function walk(dir) {
   });
 }
 
-const skillFiles = () => walk(join(root, "skills")).filter((f) => f.endsWith(".md"));
+const skillFiles = () => walk(join(root, "skills")).filter((f) => f.endsWith(".md") || f.endsWith(".js"));
 
 const ALLOWED_PHASES = new Set(["brainstorming", "development", ""]);
 
@@ -43,7 +43,7 @@ async function run() {
 }
 
 test("set_phase uses only the canonical vocabulary", () => {
-  const re = /set_phase\(\{\s*phase:\s*"([^"]*)"\s*\}\)/g;
+  const re = /set_phase\(\{\s*phase:\s*["']([^"']*)["']\s*\}\)/g;
   const offenders = [];
   for (const f of skillFiles()) {
     const src = readFileSync(f, "utf8");
@@ -59,18 +59,18 @@ test("the SDD prompt set emits one aligned phase", () => {
   const files = ["implementer-prompt.md", "re-review-prompt.md", "task-reviewer-prompt.md"];
   const phases = files.map((f) => {
     const src = readFileSync(join(dir, f), "utf8");
-    const m = src.match(/set_phase\(\{\s*phase:\s*"([^"]*)"\s*\}\)/);
-    assert.ok(m, `${f} must emit set_phase`);
-    return m[1];
+    const m = [...src.matchAll(/set_phase\(\{\s*phase:\s*["']([^"']*)["']\s*\}\)/g)];
+    assert.ok(m.length, `${f} must emit set_phase`);
+    return m.map((x) => x[1]);
   });
-  assert.deepEqual([...new Set(phases)], ["development"]);
+  assert.deepEqual([...new Set(phases.flat())], ["development"]);
 });
 
 test("plan-approval gate placeholders are not conflated", () => {
   for (const f of skillFiles()) {
     const src = readFileSync(f, "utf8");
     assert.ok(!src.includes("<plan-approved-gate-id>"), `${f} still uses <plan-approved-gate-id>`);
-    for (const m of src.matchAll(/beads_gate_resolve\(\{\s*id:\s*"([^"]*)"/g)) {
+    for (const m of src.matchAll(/beads_gate_resolve\(\{\s*id:\s*["']([^"']*)["']/g)) {
       assert.ok(!m[1].includes("gate-bead-id"), `${f} passes a gate task bead to beads_gate_resolve: ${m[1]}`);
     }
   }
@@ -83,6 +83,15 @@ test("no HEAD~1 review base in shipped skills", () => {
         assert.fail(`${f}:${i + 1} uses HEAD~1 as a review base (only "never HEAD~1" warnings are allowed)`);
       }
     }
+  }
+});
+
+test("no shipped skill restates the code-reviewer identity", () => {
+  for (const f of skillFiles()) {
+    assert.ok(
+      !readFileSync(f, "utf8").includes("You are a Senior Code Reviewer"),
+      `${f} restates the code-reviewer identity (canonical source is agent-templates/code-reviewer.md)`,
+    );
   }
 });
 

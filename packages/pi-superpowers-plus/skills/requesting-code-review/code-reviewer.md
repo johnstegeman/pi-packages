@@ -7,7 +7,7 @@ Use this template when dispatching a code reviewer subagent.
 ```
 Dispatch a subagent with this prompt:
   Agent({ subagent_type: "code-reviewer", prompt: `
-    Your role, bounded-lookup policy, and required output format are defined in `agent-templates/code-reviewer.md`.
+    Your role, bounded-lookup policy, and required output format are defined in [`../../agent-templates/code-reviewer.md`](../../agent-templates/code-reviewer.md).
 
     ## What Was Implemented
 

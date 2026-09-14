@@ -59,7 +59,7 @@ Dispatch a `code-reviewer` subagent, filling the template at [code-reviewer.md](
 
 You: Let me request code review before proceeding.
 
-BASE_SHA=$(git merge-base origin/main HEAD)
+BASE_SHA=$TASK_BASE   # the per-task base recorded before the implementer was dispatched
 HEAD_SHA=$(git rev-parse HEAD)
 
 [Dispatch code reviewer subagent]

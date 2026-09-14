@@ -201,7 +201,7 @@ confirm the `plan-approved` gate is closed (`beads_show({ id: "<plan-approval-ga
 dispatching any subagent — the plan's canonical Global Constraints live in that gate bead's
 description (`beads_show({ id: "<plan-approval-gate-bead-id>", full: true })`) and are the single source handed
 to reviewers (task beads still inline the constraints for implementers). Task ids and their
-`needs` ordering are already wired; the task beads already exist as real dependency edges and
+`needs` ordering are already wired; the task beads exist as real dependency edges and
 `writing-plans` created them
 (see its Task Structure section).
 
@@ -463,8 +463,8 @@ Final review findings get ONE fix dispatch (a fresh implementer) plus one
 scoped re-review, then adjudicate any residuals with the breaker rules
 above. When the final review is clean:
 1. Delete this plan's workspace (the record now lives in git).
-2. Close the `implement` step — `beads_close({ ids: "<implement-step-id>", reason: "all tasks complete" })` — which unblocks `verify`.
-3. Claim `verify` (`beads_update({ id: "<verify-step-id>", claim: true })`) and proceed to that work before the finishing handoff below — use `/skill:verification-before-completion`, which closes `verify`, surfaces the human `smoke-test-approved` gate, and works `finish`.
+2. Confirm `executing-plans` readiness — `beads_mol_ready({ id: "<implement-step-id>" })` must return no ready steps — then close the `implement` step — `beads_close({ ids: "<implement-step-id>", reason: "all tasks complete" })` — which unblocks `verify`.
+3. Claim `verify` (`beads_update({ id: "<verify-step-id>", claim: true })` — resolve `<verify-step-id>`/`<finish-step-id>` with `beads_list({ label: "step:verify" | "step:finish", mol: "<root-id>" })`) and proceed to that work before the finishing handoff below — use `/skill:verification-before-completion`, which closes `verify`, surfaces the human `smoke-test-approved` gate, and works `finish`.
 4. Then announce "I'm using the finishing-a-development-branch skill to complete this work." and hand off: **REQUIRED SUB-SKILL:** `/skill:finishing-a-development-branch` — tell the user to type `/finish` to load it.
 
 After generating the package, choose the review path:

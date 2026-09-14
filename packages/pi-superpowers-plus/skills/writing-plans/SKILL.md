@@ -259,7 +259,7 @@ reading `beads_mol_show({ id: "<implement-step-id>" })` to see what's already wi
 Then offer execution choice:
 
 **"Plan complete — <N> tasks created under `<implement-step-id>`, gated by
-`<plan-approval-gate-bead-id>`. Once you approve, I'll record `review.verdict=done` and
+`<plan-approval-human-gate-id>`. Once you approve, I'll record `review.verdict=done` and
 resolve the gate to unblock execution (see Step 3's verdict recording). Two execution
 options:**
 
