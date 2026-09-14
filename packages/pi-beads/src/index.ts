@@ -56,11 +56,16 @@ const TOOL = {
   dep: "beads_dep",
   undep: "beads_undep",
   comment: "beads_comment",
+  comments: "beads_comments",
   reopen: "beads_reopen",
   gateCreate: "beads_gate_create",
   gateResolve: "beads_gate_resolve",
   molPour: "beads_mol_pour",
   molShow: "beads_mol_show",
+  promote: "beads_promote",
+  memories: "beads_memories",
+  stale: "beads_stale",
+  lint: "beads_lint",
   molCurrent: "beads_mol_current",
   molReady: "beads_mol_ready",
 };
@@ -475,6 +480,45 @@ export default function piBeadsLean(pi: any) {
     return lines.join("\n");
   }
 
+  function fmtComments(json: string): string {
+    const o = jparse(json);
+    if (!Array.isArray(o)) return (json ?? "").trim() || "(no comments)";
+    if (o.length === 0) return "(no comments)";
+    return o
+      .map((c: any) => {
+        if (!c || typeof c !== "object") return String(c ?? "");
+        const who = c.author ?? c.actor ?? c.user ?? "?";
+        const when = c.created_at ?? c.timestamp ?? c.time ?? "";
+        const body = String(c.text ?? c.body ?? c.content ?? "");
+        return `${who}${when ? " " + when : ""}: ${body}`;
+      })
+      .join("\n");
+  }
+
+  function fmtMemories(json: string): string {
+    const o = jparse(json);
+    if (o && typeof o === "object" && !Array.isArray(o)) {
+      const entries = Object.entries(o).filter(([k]) => k !== "schema_version");
+      if (entries.length === 0) return "(no memories)";
+      return entries.map(([k, v]) => `${k}: ${v}`).join("\n");
+    }
+    return (json ?? "").trim() || "(no memories)";
+  }
+
+  function fmtLint(json: string): string {
+    const o = jparse(json);
+    const results = o?.results;
+    if (!Array.isArray(results)) return (json ?? "").trim() || "no template warnings";
+    if (results.length === 0) return "no template warnings";
+    return results
+      .map((x: any) => {
+        const miss = Array.isArray(x.missing) ? x.missing : null;
+        if (!miss || miss.length === 0) return `${x.id}: no missing sections`;
+        return `${x.id}: missing ${miss.join(", ")}`;
+      })
+      .join("\n");
+  }
+
   // strip bd's promotional / hint lines to keep tool output lean
   function clean(s: string): string {
     return s
@@ -590,6 +634,11 @@ export default function piBeadsLean(pi: any) {
           description:
             "Require AT LEAST ONE of these labels (comma-separated, bd --label-any semantics)",
         },
+        claim: {
+          type: "boolean",
+          description:
+            "Atomically claim the first ready issue matching the filters (bd ready --claim). This is a write: the claim is persisted in the owning repo and emits beads:changed. Read-only when omitted.",
+        },
       },
     },
     async execute(_id: string, params: any) {
@@ -599,11 +648,26 @@ export default function piBeadsLean(pi: any) {
           `unknown repo '${params.repo}' (known: ${knownRepos()})`,
         );
       await ensureFresh();
+      const claim = params?.claim === true || params?.claim === "true";
       const rargs = ["ready", "--json", "--include-ephemeral", "-n", String(params?.limit ?? 15)];
       if (params?.label) rargs.push("--label", String(params.label));
       if (params?.labelAny) rargs.push("--label-any", String(params.labelAny));
+      if (claim) rargs.push("--claim");
       const r = await bd(rargs, scope);
       if (!r.ok) return textResult(`bd ready failed: ${r.err}`);
+      if (!claim) return textResult(fmtRows(r.out));
+      // bd ready --claim is atomic, but in umbrella mode it mutates only the
+      // aggregate read-replica (reverted on the next repo sync). Re-assert the
+      // claim in the owning repo so it persists and emits beads:changed once.
+      const parsed = jparse(r.out);
+      const claimed = Array.isArray(parsed) ? parsed[0] : parsed?.issues?.[0];
+      const claimedId = claimed?.id ? String(claimed.id) : null;
+      const dir = claimedId ? dirForPrefix(claimedId) : null;
+      if (!claimedId || !dir) return textResult(fmtRows(r.out));
+      const c = await bd(["update", claimedId, "--claim"], dir);
+      if (!c.ok)
+        return textResult(`claimed ${claimedId} in aggregate but repo claim failed: ${c.err}`);
+      await afterWrite(dir);
       return textResult(fmtRows(r.out));
     },
   });
@@ -795,6 +859,7 @@ export default function piBeadsLean(pi: any) {
           type: "string",
           description: "Optional longer description",
         },
+        acceptance: { type: "string", description: "Optional acceptance criteria (bd create --acceptance)" },
         parent: {
           type: "string",
           description: "Optional parent/epic id in the SAME repo",
@@ -823,6 +888,7 @@ export default function piBeadsLean(pi: any) {
       if (params.priority !== undefined && params.priority !== null)
         args.push("-p", String(params.priority));
       if (params.description) args.push("-d", String(params.description));
+      if (params.acceptance) args.push("--acceptance", String(params.acceptance));
       if (params.parent) {
         if (
           dirForPrefix(String(params.parent)) &&
@@ -863,13 +929,14 @@ export default function piBeadsLean(pi: any) {
         },
         tasks: {
           type: "array",
-          description: "Task beads in PLAN ORDER (index order). Each: { title, type?, description?, labels?, priority? }",
+          description: "Task beads in PLAN ORDER (index order). Each: { title, type?, description?, acceptance?, labels?, priority? }",
           items: {
             type: "object",
             properties: {
               title: { type: "string" },
               type: { type: "string", description: "task|bug|feature|chore|epic|decision... (default task)" },
               description: { type: "string" },
+              acceptance: { type: "string", description: "Optional acceptance criteria (--acceptance)" },
               labels: { type: "string", description: "Comma-separated" },
               priority: { type: "number", description: "0-4" },
             },
@@ -924,6 +991,7 @@ export default function piBeadsLean(pi: any) {
         const a = ["create", String(t.title), "--parent", String(params.parent)];
         if (t.type) a.push("-t", String(t.type));
         if (t.description) a.push("-d", String(t.description));
+        if (t.acceptance) a.push("--acceptance", String(t.acceptance));
         if (t.labels) a.push("-l", String(t.labels));
         if (t.priority !== undefined && t.priority !== null) a.push("-p", String(t.priority));
         a.push("--silent");
@@ -1091,6 +1159,10 @@ export default function piBeadsLean(pi: any) {
           description: "One or more issue ids, space or comma separated",
         },
         reason: { type: "string", description: "Optional closing reason" },
+        continue: { type: "boolean", description: "Auto-advance to the next molecule step (--continue)" },
+        suggestNext: { type: "boolean", description: "Show newly unblocked issues after closing (--suggest-next)" },
+        claimNext: { type: "boolean", description: "Claim the next highest-priority issue (--claim-next)" },
+        noAuto: { type: "boolean", description: "With --continue, show the next step but don't claim it (--no-auto)" },
       },
       required: ["ids"],
     },
@@ -1114,6 +1186,10 @@ export default function piBeadsLean(pi: any) {
       for (const [dir, rids] of byRepo) {
         const args = ["close", ...rids];
         if (params.reason) args.push("-r", String(params.reason));
+        if (params?.continue === true || params?.continue === "true") args.push("--continue");
+        if (params?.suggestNext === true || params?.suggestNext === "true") args.push("--suggest-next");
+        if (params?.claimNext === true || params?.claimNext === "true") args.push("--claim-next");
+        if (params?.noAuto === true || params?.noAuto === "true") args.push("--no-auto");
         const r = await bd(args, dir);
         if (!r.ok) {
           const msg = `bd close failed for ${rids.join(", ")}: ${r.err}`;
@@ -1199,6 +1275,152 @@ export default function piBeadsLean(pi: any) {
       }
       if (failure) return textResult(failure);
       return textResult(`reopened ${reopenedIds.join(", ")}`);
+    },
+  });
+
+  pi.registerTool({
+    name: TOOL.promote,
+    label: "Beads promote",
+    description:
+      "Promote a wisp (ephemeral issue) to a permanent bead, preserving its id and links. Routed to the owning repo by id prefix.",
+    parameters: {
+      type: "object",
+      properties: {
+        id: { type: "string", description: "Wisp id" },
+        reason: { type: "string", description: "Optional reason for promotion" },
+      },
+      required: ["id"],
+    },
+    async execute(_id: string, params: any) {
+      if (!params?.id) return textResult("id is required");
+      const dir = dirForPrefix(String(params.id));
+      if (!dir)
+        return textResult(
+          `unknown repo for id '${params.id}' (known prefixes: ${Array.from(prefixToDir.keys()).join(", ")})`,
+        );
+      const args = ["promote", String(params.id)];
+      if (params.reason) args.push("--reason", String(params.reason));
+      const r = await bd(args, dir);
+      if (!r.ok) return textResult(`bd promote failed: ${r.err}`);
+      await afterWrite(dir);
+      return textResult(r.out.trim() || "promoted");
+    },
+  });
+
+  pi.registerTool({
+    name: TOOL.memories,
+    label: "Beads memories",
+    description:
+      "Persistent memories injected at prime time: action=remember|recall|list|forget. All run against the umbrella so they surface in every session.",
+    parameters: {
+      type: "object",
+      properties: {
+        action: { type: "string", description: "remember | recall | list | forget" },
+        key: { type: "string", description: "Memory key (recall/forget; optional for remember)" },
+        content: { type: "string", description: "Memory content (remember)" },
+        query: { type: "string", description: "Search text (list)" },
+      },
+      required: ["action"],
+    },
+    async execute(_id: string, params: any) {
+      const action = String(params?.action ?? "").toLowerCase();
+      if (!["remember", "recall", "list", "forget"].includes(action))
+        return textResult(`invalid action '${params?.action}' (allowed: remember|recall|list|forget)`);
+      await ensureFresh();
+      if (action === "remember") {
+        if (!params?.content) return textResult("content is required for remember");
+        const args = ["remember", String(params.content)];
+        if (params.key) args.push("--key", String(params.key));
+        const r = await bd(args, umbrella);
+        if (!r.ok) return textResult(`bd remember failed: ${r.err}`);
+        await afterWrite(umbrella);
+        return textResult(r.out.trim() || "remembered");
+      }
+      if (action === "recall") {
+        if (!params?.key) return textResult("key is required for recall");
+        const r = await bd(["recall", String(params.key), "--json"], umbrella);
+        if (!r.ok) return textResult(`bd recall failed: ${r.err}`);
+        return textResult(fmtMemories(r.out));
+      }
+      if (action === "forget") {
+        if (!params?.key) return textResult("key is required for forget");
+        const r = await bd(["forget", String(params.key)], umbrella);
+        if (!r.ok) return textResult(`bd forget failed: ${r.err}`);
+        await afterWrite(umbrella);
+        return textResult(r.out.trim() || "forgotten");
+      }
+      const args = ["memories"];
+      if (params?.query) args.push(String(params.query));
+      args.push("--json");
+      const r = await bd(args, umbrella);
+      if (!r.ok) return textResult(`bd memories failed: ${r.err}`);
+      return textResult(fmtMemories(r.out));
+    },
+  });
+
+  pi.registerTool({
+    name: TOOL.stale,
+    label: "Beads stale",
+    description:
+      "List stale issues (not updated recently) across ALL repos — abandoned in_progress work is visible at session start.",
+    parameters: {
+      type: "object",
+      properties: {
+        days: { type: "number", description: "Issues not updated in this many days (default 30)" },
+        status: { type: "string", description: "Filter by status: open|in_progress|blocked|deferred" },
+        limit: { type: "number", description: "Max issues (default 50)" },
+      },
+    },
+    async execute(_id: string, params: any) {
+      if (params?.status) {
+        const st = String(params.status);
+        if (!["open", "in_progress", "blocked", "deferred"].includes(st))
+          return textResult(`invalid status '${st}' (allowed: open|in_progress|blocked|deferred)`);
+      }
+      await ensureFresh();
+      const args = ["stale", "--json", "-n", String(params?.limit ?? 50)];
+      if (params?.days !== undefined && params?.days !== null) args.push("-d", String(params.days));
+      if (params?.status) args.push("-s", String(params.status));
+      const r = await bd(args, umbrella);
+      if (!r.ok) return textResult(`bd stale failed: ${r.err}`);
+      return textResult(fmtRows(r.out));
+    },
+  });
+
+  pi.registerTool({
+    name: TOOL.lint,
+    label: "Beads lint",
+    description:
+      "Check issues for missing recommended sections (e.g. Acceptance Criteria). Pass ids to lint specific issues, or status/type filters to lint a set.",
+    parameters: {
+      type: "object",
+      properties: {
+        ids: { type: "string", description: "One or more issue ids, space or comma separated" },
+        status: { type: "string", description: "Filter by status (default open, 'all' for all)" },
+        type: { type: "string", description: "Filter by type: bug|task|feature|epic|chore" },
+      },
+    },
+    async execute(_id: string, params: any) {
+      const ids = params?.ids ? String(params.ids).split(/[\s,]+/).filter(Boolean) : [];
+      if (params?.status) {
+        const st = String(params.status);
+        if (!["open", "in_progress", "blocked", "deferred", "closed", "all"].includes(st))
+          return textResult(
+            `invalid status '${st}' (allowed: open|in_progress|blocked|deferred|closed|all)`
+          );
+      }
+      if (params?.type) {
+        const ty = String(params.type);
+        if (!["bug", "task", "feature", "epic", "chore"].includes(ty))
+          return textResult(`invalid type '${ty}' (allowed: bug|task|feature|epic|chore)`);
+      }
+      await ensureFresh();
+      const args = ["lint", ...ids, "--json"];
+      if (params?.status) args.push("--status", String(params.status));
+      if (params?.type) args.push("--type", String(params.type));
+      const r = await bd(args, umbrella);
+      if (!r.ok) return textResult(`bd lint failed: ${r.err}`);
+      return textResult(fmtLint(r.out));
     },
   });
 
@@ -1514,6 +1736,25 @@ export default function piBeadsLean(pi: any) {
       if (!r.ok) return textResult(`bd comment failed: ${r.err}`);
       await afterWrite(dir);
       return textResult(r.out.trim() || "comment added");
+    },
+  });
+
+  pi.registerTool({
+    name: TOOL.comments,
+    label: "Beads comments",
+    description:
+      "Read the comments on one beads issue in time order. Works for any repo by id; use after beads_comment to read back SDD blocker/revision context.",
+    parameters: {
+      type: "object",
+      properties: { id: { type: "string", description: "Issue id" } },
+      required: ["id"],
+    },
+    async execute(_id: string, params: any) {
+      if (!params?.id) return textResult("id is required");
+      await ensureFresh();
+      const r = await bd(["comments", String(params.id), "--json"], umbrella);
+      if (!r.ok) return textResult(`bd comments failed: ${r.err}`);
+      return textResult(fmtComments(r.out));
     },
   });
 

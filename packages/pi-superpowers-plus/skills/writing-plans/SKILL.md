@@ -74,6 +74,9 @@ document:
 Set the bead title to `Task N: <name>`; the description body starts after the
 heading (do not include the `### Task N:` heading in the description).
 
+Each task's Acceptance Criteria are also passed as the `acceptance` field in
+`beads_create_list` so `bd lint` is clean for every task bead.
+
 **Optional `**Gate:**` line.** When a task's covering-test command is known up front (common for package-scoped tasks, e.g. `` `cd packages/statusline && npm test` ``), declare it as a `**Gate:** <re-runnable command>` line at the end of the task body. The wave-parallel execution route (subagent-driven-development) gates the implementer on a declared gate — a non-zero exit fails the agent. Omit it when the covering command is unknown or the task is doc-only (no gate); the implementer's report may still name a command for the fix loop.
 
 ````markdown
@@ -89,6 +92,9 @@ heading (do not include the `### Task N:` heading in the description).
 - Produces: [what later tasks rely on — exact function names, parameter
   and return types. A task's implementer sees only their own task; this
   block is how they learn the names and types neighboring tasks use.]
+
+**Acceptance Criteria:**
+- [ ] [observable, checkable outcome — one per line]
 
 - [ ] **Step 1: Write the failing test**
 
@@ -146,8 +152,8 @@ RESULT = beads_create_list({
     reason: "Plan approval",
   },
   tasks: [
-    { title: "Task 1: <name>", description: "<the Task 1 breakdown above, verbatim>" },
-    { title: "Task 2: <name>", description: "<the Task 2 breakdown above, verbatim>" },
+    { title: "Task 1: <name>", description: "<the Task 1 breakdown above, verbatim>", acceptance: "<the Task 1 Acceptance Criteria above>" },
+    { title: "Task 2: <name>", description: "<the Task 2 breakdown above, verbatim>", acceptance: "<the Task 2 Acceptance Criteria above>" },
     # ... one entry per task, IN PLAN ORDER (Task 1 → Task N)
   ],
 })

@@ -99,6 +99,16 @@ case "$1" in
       esac
       exit 0
     fi
+    CLAIMFLAG=0
+    for a in "$@"; do [ "$a" = "--claim" ] && CLAIMFLAG=1; done
+    if [ "$CLAIMFLAG" = "1" ]; then
+      if [ "$MODE" = "umbrella" ]; then
+        printf '[{"id":"crmback-1a2","priority":1,"status":"open","title":"Backend work"}]\n'
+      else
+        printf '[{"id":"proj-1a2","priority":1,"status":"open","title":"Repo work"}]\n'
+      fi
+      exit 0
+    fi
     echo "ok"; exit 0
     ;;
   mol)
@@ -330,6 +340,19 @@ case "$1" in
     esac
     echo "ok"; exit 0
     ;;
+  comments)
+    printf '%s\n' '[{"author":"alice","created_at":"2026-09-14T10:00:00Z","text":"first"},{"author":"bob","created_at":"2026-09-14T11:00:00Z","text":"second"}]'
+    exit 0
+    ;;
+  promote)
+    printf 'Promoted %s\n' "$2"
+    exit 0 ;;
+  remember) printf 'Remembered %s\n' "$2"; exit 0 ;;
+  recall) printf '{"k":"v"}\n'; exit 0 ;;
+  memories) printf '{"alpha":"one","beta":"two","schema_version":1}\n'; exit 0 ;;
+  forget) printf 'Forgot %s\n' "$2"; exit 0 ;;
+  stale) printf '[{"id":"proj-old","status":"in_progress","title":"Old work","priority":2}]\n'; exit 0 ;;
+  lint) printf '{"total":1,"issues":1,"results":[{"id":"proj-1a2","title":"x","type":"task","missing":["## Acceptance Criteria"],"warnings":1}]}\n'; exit 0 ;;
   *) echo "ok"; exit 0 ;;
 esac
 `;
@@ -410,6 +433,23 @@ function invocations() {
   return invs;
 }
 
+// like invocations(), but keeps each call's cwd so a test can assert that a
+// routed write actually ran in the owning repo's directory.
+function invocationsWithCwd() {
+  const invs = [];
+  let cur = null;
+  for (const ln of readFileSync(logFile, "utf8").split("\n")) {
+    if (ln.startsWith("INV ")) {
+      const m = ln.match(/cwd=(\S+)/);
+      cur = { cwd: m ? m[1] : null, args: [] };
+      invs.push(cur);
+    } else if (ln.startsWith("ARG ") && cur) {
+      cur.args.push(ln.slice(4));
+    }
+  }
+  return invs;
+}
+
 // bulk dep wiring: parse the `DEPS <json>` lines the fixture echoes for a
 // `bd dep add --file <path>` call. Each line is one {"from","to","type"} edge.
 function depEdges() {
@@ -439,26 +479,31 @@ const okResult = (r) => r && Array.isArray(r.content) && r.content[0]?.type === 
 // ---------------------------------------------------------------------------
 // 0. module surface: the new tools are registered and the type allowlists export
 // ---------------------------------------------------------------------------
-test("registers all 18 tools, including beads_create_list", async () => {
+test("registers every expected tool", async () => {
   const { tools } = makePi();
   const names = tools.map((t) => t.name).sort();
   assert.deepEqual(names, [
     "beads_close",
     "beads_comment",
+    "beads_comments",
     "beads_create",
     "beads_create_list",
     "beads_dep",
     "beads_deps",
     "beads_gate_create",
     "beads_gate_resolve",
+    "beads_lint",
     "beads_list",
+    "beads_memories",
     "beads_mol_current",
     "beads_mol_pour",
     "beads_mol_ready",
     "beads_mol_show",
+    "beads_promote",
     "beads_ready",
     "beads_reopen",
     "beads_show",
+    "beads_stale",
     "beads_undep",
     "beads_update",
   ]);
@@ -528,7 +573,7 @@ test("samplePrefixOf fallback still derives a dashless prefix when bd where fail
 test("single-repo: session_start resolves, registers tools, emits nothing", async () => {
   const s = await openSession("single", repoDir);
   assert.equal(s.emitted.length, 0, "session_start must not emit beads:changed");
-  assert.equal(s.tools.length, 18);
+  assert.equal(s.tools.length, 23);
 });
 
 test("single-repo: beads_create builds argv and emits beads:changed", async () => {
@@ -556,6 +601,34 @@ test("single-repo: beads_create still defaults when repo is omitted", async () =
   const r = await s.byName.get("beads_create").execute("c", { title: "Do the thing" });
   assert.ok(okResult(r), JSON.stringify(r));
   findInvocation(["create", "Do the thing"]);
+});
+
+test("single-repo: beads_create passes --acceptance when supplied", async () => {
+  const s = await openSession("single", repoDir);
+  resetLog();
+  const r = await s.byName.get("beads_create").execute("c", { title: "Do the thing", acceptance: "it works" });
+  assert.ok(okResult(r), JSON.stringify(r));
+  findInvocation(["create", "Do the thing", "--acceptance", "it works"]);
+});
+
+test("single-repo: beads_create omits --acceptance when not supplied", async () => {
+  const s = await openSession("single", repoDir);
+  resetLog();
+  const r = await s.byName.get("beads_create").execute("c", { title: "Do the thing" });
+  assert.ok(okResult(r), JSON.stringify(r));
+  findInvocation(["create", "Do the thing"]);
+});
+
+test("single-repo: beads_create_list passes per-task --acceptance", async () => {
+  const s = await openSession("single", repoDir);
+  resetLog();
+  const r = await s.byName.get("beads_create_list").execute("c", {
+    parent: "proj-m1-imp",
+    gate: { description: "c", reason: "Plan approval" },
+    tasks: [{ title: "Task 1: setup", acceptance: "test passes" }],
+  });
+  assert.ok(okResult(r), JSON.stringify(r));
+  findInvocation(["create", "Task 1: setup", "--parent", "proj-m1-imp", "--acceptance", "test passes", "--silent"]);
 });
 
 test("single-repo: beads_mol_pour rejects an unknown repo", async () => {
@@ -817,6 +890,111 @@ test("single-repo: beads_show --full changes only the digest, not argv; no emit"
   assert.equal(s.emitted.length, before, "beads_show must not emit");
 });
 
+test("single-repo: beads_stale builds argv and never emits", async () => {
+  const s = await openSession("single", repoDir);
+  resetLog();
+  const r = await s.byName.get("beads_stale").execute("c", { days: 14, status: "in_progress", limit: 10 });
+  assert.ok(okResult(r), JSON.stringify(r));
+  findInvocation(["stale", "--json", "-n", "10", "-d", "14", "-s", "in_progress"]);
+  assert.equal(s.emitted.length, 0);
+  assert.match(r.content[0].text, /proj-old/);
+});
+
+test("single-repo: beads_lint formats missing sections and never emits", async () => {
+  const s = await openSession("single", repoDir);
+  resetLog();
+  const r = await s.byName.get("beads_lint").execute("c", { ids: "proj-1a2 proj-2b3", type: "task" });
+  assert.ok(okResult(r), JSON.stringify(r));
+  findInvocation(["lint", "proj-1a2", "proj-2b3", "--json", "--type", "task"]);
+  assert.match(r.content[0].text, /proj-1a2: missing ## Acceptance Criteria/);
+  assert.equal(s.emitted.length, 0);
+});
+
+test("single-repo: beads_lint rejects invalid status/type before any bd call", async () => {
+  const s = await openSession("single", repoDir);
+  resetLog();
+  const rs = await s.byName.get("beads_lint").execute("c", { status: "nonsense" });
+  assert.match(
+    rs.content[0].text,
+    /invalid status 'nonsense' \(allowed: open\|in_progress\|blocked\|deferred\|closed\|all\)/,
+    rs.content[0].text,
+  );
+  assert.equal(invocations().length, 0, "validation must not call bd");
+  const rt = await s.byName.get("beads_lint").execute("c", { type: "nonsense" });
+  assert.match(rt.content[0].text, /invalid type 'nonsense' \(allowed: bug\|task\|feature\|epic\|chore\)/, rt.content[0].text);
+  assert.equal(invocations().length, 0, "validation must not call bd");
+});
+
+test("single-repo: beads_stale rejects an invalid status before bd", async () => {
+  const s = await openSession("single", repoDir);
+  resetLog();
+  const r = await s.byName.get("beads_stale").execute("c", { status: "nonsense" });
+  assert.match(r.content[0].text, /invalid status 'nonsense'/);
+  assert.equal(invocations().length, 0);
+});
+
+test("single-repo: beads_comments reads comments and never emits", async () => {
+  const s = await openSession("single", repoDir);
+  resetLog();
+  const r = await s.byName.get("beads_comments").execute("c", { id: "proj-1a2" });
+  assert.ok(okResult(r), JSON.stringify(r));
+  findInvocation(["comments", "proj-1a2", "--json"]);
+  assert.equal(s.emitted.length, 0, "read must not emit");
+  assert.match(r.content[0].text, /alice/);
+  assert.match(r.content[0].text, /second/);
+});
+
+test("single-repo: beads_promote routes by prefix and emits", async () => {
+  const s = await openSession("single", repoDir);
+  resetLog();
+  const r = await s.byName.get("beads_promote").execute("c", { id: "proj-1a2", reason: "keep" });
+  assert.ok(okResult(r), JSON.stringify(r));
+  findInvocation(["promote", "proj-1a2", "--reason", "keep"]);
+  assert.equal(s.emitted.at(-1), "beads:changed");
+});
+
+test("single-repo: beads_promote rejects an unknown prefix before bd", async () => {
+  const s = await openSession("single", repoDir);
+  resetLog();
+  const r = await s.byName.get("beads_promote").execute("c", { id: "nosuch-1" });
+  assert.match(r.content[0].text, /unknown repo for id 'nosuch-1'/);
+  assert.equal(invocations().length, 0);
+});
+
+test("single-repo: beads_memories remember routes to bd and emits", async () => {
+  const s = await openSession("single", repoDir);
+  resetLog();
+  const r = await s.byName.get("beads_memories").execute("c", { action: "remember", content: "always test", key: "test-rule" });
+  assert.ok(okResult(r), JSON.stringify(r));
+  findInvocation(["remember", "always test", "--key", "test-rule"]);
+  assert.equal(s.emitted.at(-1), "beads:changed");
+});
+
+test("single-repo: beads_memories list and recall are reads that do not emit", async () => {
+  const s = await openSession("single", repoDir);
+  resetLog();
+  const r1 = await s.byName.get("beads_memories").execute("c", { action: "list" });
+  assert.match(r1.content[0].text, /alpha: one/);
+  findInvocation(["memories", "--json"]);
+  resetLog();
+  const r2 = await s.byName.get("beads_memories").execute("c", { action: "recall", key: "k" });
+  assert.ok(okResult(r2), JSON.stringify(r2));
+  findInvocation(["recall", "k", "--json"]);
+  assert.equal(s.emitted.length, 0);
+});
+
+test("single-repo: beads_memories forget emits; invalid action rejected before bd", async () => {
+  const s = await openSession("single", repoDir);
+  resetLog();
+  const rf = await s.byName.get("beads_memories").execute("c", { action: "forget", key: "k" });
+  findInvocation(["forget", "k"]);
+  assert.equal(s.emitted.at(-1), "beads:changed");
+  resetLog();
+  const rb = await s.byName.get("beads_memories").execute("c", { action: "nope" });
+  assert.match(rb.content[0].text, /invalid action 'nope'/);
+  assert.equal(invocations().length, 0);
+});
+
 test("single-repo: beads_gate_resolve resolves gate then closes its gated step (no double-close)", async () => {
   const s = await openSession("single", repoDir);
   resetLog();
@@ -905,6 +1083,29 @@ test("single-repo: close cascade treats an already-closed parent as success", as
   assert.doesNotMatch(text, /warning:/, text);
   assert.doesNotMatch(text, /not closed/, text);
   findInvocation(["show", "proj-closed-parent", "--json"]);
+});
+
+test("single-repo: beads_ready claim re-asserts in the owning repo and emits", async () => {
+  const s = await openSession("single", repoDir);
+  resetLog();
+  const r = await s.byName.get("beads_ready").execute("c", { limit: 5, claim: true });
+  assert.ok(okResult(r), JSON.stringify(r));
+  findInvocation(["ready", "--json", "--include-ephemeral", "-n", "5", "--claim"]);
+  // the claim is a write: it is re-asserted in the owning repo and emits once
+  findInvocation(["update", "proj-1a2", "--claim"]);
+  assert.equal(s.emitted.length, 1);
+  assert.equal(s.emitted.at(-1), "beads:changed");
+});
+
+test("single-repo: beads_close maps continue/next flags and still cascades", async () => {
+  const s = await openSession("single", repoDir);
+  resetLog();
+  const r = await s.byName.get("beads_close").execute("c", {
+    ids: "proj-t9", reason: "done", continue: true, suggestNext: true, claimNext: true, noAuto: true,
+  });
+  assert.ok(okResult(r), JSON.stringify(r));
+  findInvocation(["close", "proj-t9", "-r", "done", "--continue", "--suggest-next", "--claim-next", "--no-auto"]);
+  findInvocation(["close", "proj-imp2"]); // parent cascade still runs
 });
 
 test("umbrella: close cascade failure is not overwritten by a later repo failure", async () => {
@@ -1138,6 +1339,20 @@ test("umbrella: session_start hydrates the umbrella + backend repo", async () =>
   findInvocation(["list", "--json", "-n", "3"]);
 });
 
+test("umbrella: beads_lint ensureFresh runs repo sync before lint", async () => {
+  const s = await openSession("umbrella", projDir);
+  resetLog();
+  const r = await s.byName.get("beads_lint").execute("c", { ids: "crmback-1a2", type: "task" });
+  assert.ok(okResult(r), JSON.stringify(r));
+  const invs = invocations();
+  const syncIdx = invs.findIndex((inv) => inv[0] === "repo" && inv[1] === "sync");
+  const lintIdx = invs.findIndex((inv) => inv[0] === "lint");
+  assert.ok(syncIdx !== -1, `expected repo sync; got ${JSON.stringify(invs)}`);
+  assert.ok(lintIdx !== -1, `expected lint; got ${JSON.stringify(invs)}`);
+  assert.ok(syncIdx < lintIdx, `repo sync must precede lint; got ${JSON.stringify(invs)}`);
+  findInvocation(["lint", "crmback-1a2", "--json", "--type", "task"]);
+});
+
 test("umbrella: beads_create routes to the owning repo, re-exports JSONL, emits", async () => {
   const s = await openSession("umbrella", projDir);
   const before = s.emitted.length;
@@ -1208,6 +1423,27 @@ test("umbrella: update/close/reopen/gate create/mol pour route to owning repo an
   findInvocation(["mol", "pour", "f"]);
   assert.equal(s.emitted.length, 4);
   assert.ok(s.emitted.every((e) => e === "beads:changed"), `all emits are beads:changed: ${s.emitted}`);
+});
+
+test("umbrella: beads_ready claim routes the re-assert to the owning repo and emits", async () => {
+  const s = await openSession("umbrella", projDir);
+  resetLog();
+  const r = await s.byName.get("beads_ready").execute("c", { limit: 5, claim: true });
+  assert.ok(okResult(r), JSON.stringify(r));
+  // atomic selection still runs against the umbrella aggregate
+  findInvocation(["ready", "--json", "--include-ephemeral", "-n", "5", "--claim"]);
+  // the durable re-assert is routed to the claimed id's owning repo (backend)
+  const upd = invocationsWithCwd().find(
+    (iv) =>
+      iv.args.length === 3 &&
+      iv.args[0] === "update" &&
+      iv.args[1] === "crmback-1a2" &&
+      iv.args[2] === "--claim",
+  );
+  assert.ok(upd, `expected routed update; got ${JSON.stringify(invocationsWithCwd())}`);
+  assert.equal(upd.cwd, backendDir, "claim re-assert must run in the owning repo");
+  assert.equal(s.emitted.length, 1);
+  assert.equal(s.emitted.at(-1), "beads:changed");
 });
 
 test("umbrella: gate_resolve resolves, lists dependents, closes none when dep list empty, one emit", async () => {

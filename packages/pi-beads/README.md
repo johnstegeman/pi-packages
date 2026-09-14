@@ -50,13 +50,14 @@ If an umbrella workspace is nearby — a directory whose `bd` aggregates several
 repositories — the extension finds it on its own. It can also be named explicitly with
 `PI_BEADS_ROOT`.
 
-Reads (`beads_ready`, `beads_list`, `beads_show`, `beads_deps` and the prime) run
+Reads (`beads_ready`, `beads_list`, `beads_show`, `beads_deps`,
+`beads_comments`, `beads_stale`, `beads_lint` and the prime) run
 against the aggregate, so the agent sees the issues of every repository at once, and an
 issue's owner is read off its id prefix: `crmback-1a2` belongs to `crm-backend`.
 
 Writes (`beads_create`, `beads_create_list`, `beads_update`, `beads_close`,
 `beads_reopen`, `beads_dep`, `beads_undep`, `beads_comment`, `beads_gate_create`,
-`beads_gate_resolve`, `beads_mol_pour`) are routed to the owning repository by
+`beads_gate_resolve`, `beads_mol_pour`, `beads_promote`) are routed to the owning repository by
 that same prefix; afterwards the repository's JSONL is re-exported, the aggregate
 re-synced, and the `beads:changed` event published (see Events). Writing straight
 into the aggregate is not allowed: what lives there are throw-away copies.
@@ -118,28 +119,33 @@ Commands are run by a person and their output never reaches the model's context.
 | `/beads-init` | Quiet initialization of beads in the current project (see below) |
 | `/beads-mode` | Current mode, umbrella, default repository, prefix table, context economics |
 
-The agent gets eighteen tools. All of them are direct in-process `bd` calls with no
+The agent gets twenty-three tools. All of them are direct in-process `bd` calls with no
 MCP transport, and what comes back is a digest rather than raw JSON.
 
 | Tool | What it does |
 |---|---|
-| `beads_ready` | Issues ready to work (open and unblocked) across all repositories |
+| `beads_ready` | Issues ready to work (open and unblocked) across all repositories; `claim: true` atomically claims the first match (`bd ready --claim`), read-only when omitted |
 | `beads_list` | A list filtered by status (`open,in_progress,blocked,deferred,closed`) |
 | `beads_show` | The essential fields of one issue: status, priority, type, dependencies; `full: true` includes the whole description body |
 | `beads_deps` | Blockers or dependents: a tree for one id, compact lines for several |
-| `beads_create` | Create an issue in the right repository (`repo` is a folder name or a prefix), return its id |
-| `beads_create_list` | Create an optional gate bead + its human gate, then the task beads sequentially under one parent in declared (plan) order, then wire the blocks-chain; returns `gate:`/`human-gate:` ids and `t1:..tN:` in plan order |
+| `beads_stale` | Stale issues (not updated recently); surfaces abandoned work; optional `days`, `status` (`open\|in_progress\|blocked\|deferred`), `limit` |
+| `beads_lint` | Check issues for missing template sections (e.g. Acceptance Criteria); optional `ids`, `status`, `type` filters |
+| `beads_create` | Create an issue in the right repository (`repo` is a folder name or a prefix), return its id; optional `acceptance` maps to `bd create --acceptance` |
+| `beads_create_list` | Create an optional gate bead + its human gate, then the task beads sequentially under one parent in declared (plan) order, then wire the blocks-chain; each task may carry `acceptance` (`--acceptance`); returns `gate:`/`human-gate:` ids and `t1:..tN:` in plan order |
 | `beads_update` | Status, priority, title, parent, notes, labels; plus `claim`, `setMetadata` (`key=value,...`), `description` (replaces the body); routed by id prefix |
-| `beads_close` | Close one or more ids, with a reason |
+| `beads_close` | Close one or more ids, with a reason; optional `continue`, `suggestNext`, `claimNext`, `noAuto` map to the matching `bd close` flags |
 | `beads_reopen` | Reopen one or more closed ids, with an optional reason |
 | `beads_dep` | Add a dependency (blocker blocks issue) within one repository; `type` is `blocks\|tracks\|related\|parent-child\|discovered-from` |
 | `beads_undep` | Remove a dependency |
 | `beads_comment` | Add a progress comment to an issue |
+| `beads_comments` | Read the comments on one issue (`bd comments <id> --json`) — read-back for `beads_comment` |
 | `beads_gate_create` | Open an async gate (`human\|timer\|gh:run\|gh:pr`) blocking an issue until resolved |
 | `beads_gate_resolve` | Resolve a gate and close the gated step(s) it was blocking in one call (see below) |
 | `beads_mol_pour` | Instantiate a proto formula as a persistent molecule (`bd mol pour`) |
 | `beads_mol_show` | Show a molecule/proto structure (`bd mol show ... --json`), read-only |
 | `beads_mol_current` | Show the current position in a molecule's workflow (`bd mol current ... --json`), read-only |
+| `beads_promote` | Promote a wisp (ephemeral issue) to a permanent bead |
+| `beads_memories` | Persistent memories (remember/recall/list/forget); injected at prime time |
 
 On current bd (1.2.2) `bd gate resolve` already closes the gate bead — it is
 `bd close <gate>` under a more explicit name. `beads_gate_resolve` then looks up
@@ -157,9 +163,9 @@ with `pi.events.on("beads:changed", handler)`:
 - **`beads:changed`** — emitted with no payload after every successful mutating
 tool call: `beads_create`, `beads_create_list`, `beads_update`, `beads_close`,
 `beads_reopen`, `beads_dep`, `beads_undep`, `beads_comment`, `beads_gate_create`,
-`beads_gate_resolve` (once for the resolve, plus once per gated step it closes), and
-`beads_mol_pour`. Read tools (`beads_ready`, `beads_list`, `beads_show`,
-`beads_deps`, `beads_mol_show`, `beads_mol_current`) never emit.
+`beads_gate_resolve` (once for the resolve, plus once per gated step it closes),
+`beads_mol_pour`, `beads_promote`, and `beads_memories` (remember/forget). Read tools (`beads_ready`, `beads_list`, `beads_show`,
+`beads_deps`, `beads_stale`, `beads_lint`, `beads_comments`, `beads_memories` recall/list, `beads_mol_show`, `beads_mol_current`) never emit.
 
 It is a generic change signal: consumers should re-fetch whatever they display.
 Extensions keeping steady state across a burst of mutations (e.g. the

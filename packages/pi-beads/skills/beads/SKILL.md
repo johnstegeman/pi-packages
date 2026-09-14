@@ -32,22 +32,28 @@ live umbrella path, prefix routes, and current default-create repo for this sess
 ### Read — always span ALL repos (from the aggregate by default)
 | tool | use |
 |---|---|
-| `beads_ready({ limit?, repo?, label?, labelAny? })` | ready issues (open + unblocked, **wisps/ephemeral included** so a brainstorming batch stays visible). Optional `repo` narrows to one project; `label` / `labelAny` filter by labels |
+| `beads_ready({ limit?, repo?, label?, labelAny?, claim? })` | ready issues (open + unblocked, **wisps/ephemeral included** so a brainstorming batch stays visible). Optional `repo` narrows to one project; `label` / `labelAny` filter by labels; `claim: true` atomically claims the first match (`bd ready --claim`) |
 | `beads_list({ status?, limit?, repo?, label?, labelAny? })` | list issues across every repo; `status` = `open,in_progress,blocked,deferred,closed`; optional project/label filters |
 | `beads_show({ id })` | full details of one issue: status, **blocker ids** (`blocked_by:` + `BLOCKED` marker), and for epics **children + progress** (`children: done/total`) |
 | `beads_deps({ ids, direction? })` | dependency view: ONE id → the blocker/dependent **tree**; SEVERAL ids → one compact line each. `direction` = `blockers` (default) or `dependents` |
+| `beads_comments({ id })` | read the comments on one issue in time order — read-back after `beads_comment` |
+| `beads_stale({ days?, status?, limit? })` | list stale (not-updated-recently) issues across every repo — surfaces abandoned in-progress work; `status` = `open\|in_progress\|blocked\|deferred` |
+| `beads_lint({ ids?, status?, type? })` | check issues for missing template sections (e.g. Acceptance Criteria); pass `ids` to lint specific issues, or `status`/`type` filters to lint a set |
 
 Reads are already cross-repo — **do not** shell out to raw `bd list`, `bd dep tree`, `bd show | grep blocked_by`, or inspect `.beads/issues.jsonl` / umbrella JSON files directly for task state. `beads_show` already carries blocker ids and epic progress; `beads_deps` gives the tree and batch blocker triage. Use the id prefix to know which project a result belongs to.
 
 ### Write — routed to the OWNING repo, then the aggregate refreshes itself
 | tool | use |
 |---|---|
-| `beads_create({ title, repo?, type?, priority?, description?, parent?, labels?, notes?, design?, ephemeral? })` | create in the owning repo; `parent` must be in the same repo; `ephemeral: true` (or `"true"`) passes `--ephemeral`, creating a wisp |
+| `beads_create({ title, repo?, type?, priority?, description?, acceptance?, parent?, labels?, notes?, design?, ephemeral? })` | create in the owning repo; `parent` must be in the same repo; `acceptance` passes `--acceptance` (the task's acceptance criteria, so `bd lint` is clean); `ephemeral: true` (or `"true"`) passes `--ephemeral`, creating a wisp |
+| `beads_create_list({ parent, gate?, tasks })` | create an optional gate bead + human gate, then each task bead in plan order under `parent`, then wire the blocks-chain; each `tasks[]` item may carry `acceptance` (`--acceptance`) so every task bead passes `bd lint` |
 | `beads_update({ id, status?, priority?, title?, parent?, notes?, appendNotes?, addLabels?, removeLabels? })` | update one issue; auto-routed by id prefix |
-| `beads_close({ ids, reason? })` | close one or many (ids space/comma separated) |
+| `beads_close({ ids, reason?, continue?, suggestNext?, claimNext?, noAuto? })` | close one or many (ids space/comma separated); `continue` auto-advances to the next molecule step, `suggestNext` shows newly unblocked issues, `claimNext` claims the next highest-priority issue, `noAuto` shows the next step without claiming it |
 | `beads_dep({ issue, blocker })` | `blocker` must be done before `issue` |
 | `beads_undep({ issue, blocker })` | remove a dependency |
 | `beads_comment({ id, text })` | add a progress note / comment |
+| `beads_memories({ action: "remember", content: "...", key: "..." })` | store a persistent memory (`forget` with `key` removes one; remember/forget are writes) |
+| `beads_memories({ action: "list" })` | list memories (`recall` with `key` reads one back) — reads run against the umbrella aggregate |
 
 ## Rules that matter
 
@@ -106,19 +112,26 @@ beads_create({
 ```
 `ephemeral: true` passes `--ephemeral`, creating a **wisp** — a real bead that
 stays out of federation sync and is purged wholesale once closed (`bd mol wisp gc`
-or `bd purge --force`). Promote one to permanent with `bd mol squash <id>`.
+or `bd purge --force`). Promote one to permanent with `bd promote <id>` (or the `beads_promote` tool).
 
 **Link / unlink / annotate**
 ```
 beads_dep({ issue: "orch-9ll", blocker: "orch-gct" })
 beads_undep({ issue: "orch-9ll", blocker: "orch-gct" })
 beads_comment({ id: "orch-9ll", text: "Blocked pending vault-writer contract review" })
+beads_comments({ id: "orch-9ll" })
 beads_update({ id: "orch-9ll", appendNotes: "Need retry semantics agreed before coding" })
 ```
 
 **Finish**
 ```
 beads_close({ ids: "apps-xyz lguard-09d818c2", reason: "done" })
+beads_close({ ids: "proj-m1-imp.2", reason: "done", continue: true })
+```
+
+Claim the next ready issue in one call (instead of `beads_ready` + `beads_update`):
+```
+beads_ready({ claim: true })
 ```
 
 ## Slash commands (operator, no context cost)

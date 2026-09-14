@@ -25,7 +25,9 @@ only in a beads-initialized project: if the working directory has no
    keep it by refreshing its timestamp — `bd update <id> --notes "resuming
    <phase>"` — so the sweep below skips it, or use a longer `--age`.
    (`bd mol squash <id>` does NOT promote a directly-created phase wisp; it
-   only condenses molecule hierarchies and leaves the wisp open.)
+   only condenses molecule hierarchies and leaves the wisp open. Use
+   `bd promote <id>` / the `beads_promote` tool to promote a wisp to a
+   permanent bead.)
 3. Delete the rest: `bd mol wisp gc --age 24h --force` (a wisp untouched for
    a full day and not closed is abandoned; the default 1h threshold is too
    aggressive for resumed phases).
