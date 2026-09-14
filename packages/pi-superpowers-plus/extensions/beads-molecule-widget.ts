@@ -11,16 +11,36 @@ type SessionContext = { ui?: UiApi; cwd?: string };
 export default function (pi: ExtensionAPI) {
   const controller = createMoleculeWidgetController({
     exec: (cmd, args, opts) => pi.exec(cmd, args, opts),
-    subscribeChanges: (onChange) => pi.events.on("beads:changed", () => onChange()),
+    // The widget is event-driven: it queries `bd` only when superpowers or beads
+    // actually does something, never on pi startup. `superpowers:phase` fires
+    // from set_phase when a superpowers workflow begins (an empty phase is the
+    // session-boundary clear and must not trigger a query).
+    subscribeChanges: (onChange) => {
+      const offBeads = pi.events.on("beads:changed", () => onChange());
+      const offPhase = pi.events.on("superpowers:phase", (data) => {
+        const phase = (data as { phase?: unknown } | null)?.phase;
+        if (typeof phase === "string" && phase !== "") onChange();
+      });
+      return () => {
+        offBeads();
+        offPhase();
+      };
+    },
     warn: (...args) => console.warn(...args),
   });
 
   pi.on("session_start", (_event: unknown, ctx: SessionContext) => {
-    controller.bindSession({ ui: ctx?.ui ?? null, cwd: ctx?.cwd ?? process.cwd() });
+    // Bind without a startup query: beads may not be initialized here, and the
+    // widget has nothing to show until superpowers/beads emits an event.
+    controller.bindSession({
+      ui: ctx?.ui ?? null,
+      cwd: ctx?.cwd ?? process.cwd(),
+      initialRefresh: false,
+    });
   });
 
   pi.on("agent_start", (_event: unknown, ctx: SessionContext) => {
-    controller.setCwd(ctx?.cwd ?? process.cwd());
+    controller.setCwd(ctx?.cwd ?? process.cwd(), { refresh: false });
   });
 
   pi.on("session_shutdown", () => {

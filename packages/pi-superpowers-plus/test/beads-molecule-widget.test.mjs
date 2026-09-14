@@ -1255,6 +1255,17 @@ assert.deepEqual(nextRefreshArgs("bd-mol-abc"), ["mol", "current", "bd-mol-abc",
   assert.equal(isCleanNotFound({ code: 1, stdout: "molecule not found", stderr: "" }), true);
   assert.equal(isCleanNotFound({ code: 1, stdout: "", stderr: "no active molecule" }), true);
   assert.equal(isCleanNotFound({ code: 1, stdout: "connection refused", stderr: "" }), false);
+  // beads not initialized in this directory: nothing to show, not a failure
+  assert.equal(
+    isCleanNotFound({ code: 1, stdout: "Error: no beads database found", stderr: "" }),
+    true,
+    "no beads database found is clean",
+  );
+  assert.deepEqual(
+    applyErrorFrame(prev, null, { code: 1, stdout: "Error: no beads database found", stderr: "" }),
+    { activeMolecule: null, lockedMoleculeId: null },
+    "no beads database found clears with no frame to keep",
+  );
   assert.equal(isCleanNotFound(null), false);
   // captured real bd output: exit 1, single-line JSON error on stdout
   assert.equal(

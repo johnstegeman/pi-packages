@@ -315,4 +315,39 @@ const tick = () => new Promise((resolve) => setTimeout(resolve, 0));
   assert.equal(subscribeCount, 1, "trigger after unbind is a no-op");
 }
 
+// ---------- startup: bindSession/setCwd without a query; first event paints ----------
+{
+  const ui = makeFakeUi();
+  const calls = [];
+  const { state, subscribeChanges } = makeFakeSubscribe();
+  const controller = createMoleculeWidgetController({
+    exec: async (cmd, args, opts) => {
+      calls.push({ cmd, args, cwd: opts?.cwd });
+      return { code: 0, stdout: RAW_A, stderr: "" };
+    },
+    subscribeChanges,
+  });
+
+  controller.bindSession({ ui, cwd: "/repo", initialRefresh: false });
+  await tick();
+  assert.equal(calls.length, 0, "bindSession without initialRefresh issues no bd query");
+  assert.equal(ui.lastLines(), null, "nothing painted before an event");
+  assert.equal(typeof state.onChange, "function", "still subscribes to changes");
+
+  controller.setCwd("/repo-2", { refresh: false });
+  await tick();
+  assert.equal(calls.length, 0, "setCwd without refresh issues no bd query");
+
+  state.onChange();
+  await tick();
+  assert.equal(calls.length, 1, "the first change issues exactly one bd query");
+  assert.equal(calls.at(-1)?.cwd, "/repo-2", "refresh uses the latest cwd");
+  assert.ok(
+    ui.lastLines()?.some((l) => l.includes("Ask clarifying questions")),
+    "the first change paints the frame",
+  );
+
+  controller.unbindSession();
+}
+
 console.log("beads-molecule-widget-controller: all assertions passed");
