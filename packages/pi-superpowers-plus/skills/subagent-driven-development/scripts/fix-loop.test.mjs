@@ -32,10 +32,10 @@ test("meta: pure literal with name/description/phases", () => {
   assert.match(src, /phases: \[\{ title: 'Fix' \}, \{ title: 'Re-review' \}\]/);
 });
 
-test("args normalization + bad-args envelope guard", () => {
+test("args normalization + structured bad-args envelope guard", () => {
   assert.match(src, /typeof args === 'string'/);
   assert.match(src, /reason: 'bad-args'/);
-  assert.match(src, /!ARGS\.taskBeadId \|\| !ARGS\.gate/);
+  assert.match(src, /missing required args: /);
 });
 
 test("stage 1: first fix agent is gated + labelled", () => {
@@ -155,6 +155,27 @@ test("behavior: bad-args returns passed:false reason bad-args", async () => {
   assert.equal(result.passed, false);
   assert.equal(result.reason, 'bad-args');
   assert.equal(calls, 0, 'no agent dispatch on bad args');
+})
+
+test("behavior: malformed args string throws", async () => {
+  await assert.rejects(
+    runWorkflow(src, { args: '{not json', agent: async () => 'nope' }),
+    /fix-loop\.js: args was a JSON string but did not parse/,
+  )
+})
+
+test("behavior: missing required field returns bad-args envelope", async () => {
+  for (const field of ['taskBeadId', 'reportFilePath', 'findings', 'gate', 'fixBase', 'head', 'gateBeadId', 'reviewPackage']) {
+    let calls = 0
+    const result = await runWorkflow(src, {
+      args: { ...passedArgs, [field]: '' },
+      agent: async () => { calls++; throw new Error('must not be called') },
+    })
+    assert.equal(result.passed, false, field + ' must yield passed:false');
+    assert.equal(result.reason, 'bad-args', field + ' must yield reason bad-args');
+    assert.match(result.gateOutput, new RegExp(field), field + ' must be named in gateOutput');
+    assert.equal(calls, 0, field + ' must not dispatch any agent');
+  }
 })
 
 run();

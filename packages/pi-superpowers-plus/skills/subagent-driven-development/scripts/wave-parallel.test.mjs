@@ -35,9 +35,10 @@ test("meta: pure literal with name/description/phases", () => {
   assert.match(src, /phases: \[\{ title: 'Implement' \}, \{ title: 'Review' \}\]/);
 });
 
-test("args normalization + empty-wave degradation", () => {
+test("args normalization + required-field and non-empty-wave guards", () => {
   assert.match(src, /typeof args === 'string'/);
-  assert.match(src, /const WAVE = Array\.isArray\(ARGS\.wave\) \? ARGS\.wave : \[\]/);
+  assert.match(src, /missing required args: /);
+  assert.match(src, /args\.wave must be a non-empty array/);
 });
 
 test("IMPLEMENT_RESULT_SCHEMA: status enum + required reportFile", () => {
@@ -205,6 +206,16 @@ test("behavior: invalid-args reason survives", async () => {
   assert.equal(entry.status, 'invalid-args');
   assert.match(entry.reason, /bad item shape/);
   assert.equal(entry.skipped, true);
+})
+
+test("behavior: malformed and incomplete args fail loud", async () => {
+  const agent = async () => null
+  await assert.rejects(runWorkflow(src, { args: '{not json', agent }),
+    /wave-parallel\.js: args was a JSON string but did not parse/)
+  await assert.rejects(runWorkflow(src, { args: {}, agent }),
+    /wave-parallel\.js: missing required args: base, reportDir, gateBeadId, reviewPackage/)
+  await assert.rejects(runWorkflow(src, { args: { ...waveArgs, wave: [] }, agent }),
+    /wave-parallel\.js: args\.wave must be a non-empty array/)
 })
 
 run();

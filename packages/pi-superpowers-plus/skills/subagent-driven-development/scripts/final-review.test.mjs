@@ -51,9 +51,29 @@ test("stages: two parallel( calls + filter(Boolean) + dedupe", () => {
   assert.match(src, /function dedupe\(/);
 });
 
-test("defensive args normalization present", () => {
-  assert.match(src, /typeof args === 'string'/);
-});
+test("args: malformed, non-object, and missing required fields fail loud", async () => {
+  const { agent } = liveAgent({ empty: true })
+  await assert.rejects(
+    runWorkflow(src, { args: '{not json', agent }),
+    /final-review\.js: args was a JSON string but did not parse/,
+  )
+  await assert.rejects(
+    runWorkflow(src, { args: 42, agent }),
+    /final-review\.js: args must be an object; got number/,
+  )
+  await assert.rejects(
+    runWorkflow(src, { args: {}, agent }),
+    /final-review\.js: missing required args: base, head, packagePath, gateBeadId/,
+  )
+  // one blank-value case per required field (spec: each required field fails loud)
+  const validArgs = { base: 'a', head: 'b', packagePath: '/x', gateBeadId: 'g' }
+  for (const field of ['base', 'head', 'packagePath', 'gateBeadId']) {
+    await assert.rejects(
+      runWorkflow(src, { args: { ...validArgs, [field]: '' }, agent }),
+      new RegExp('final-review\\.js: missing required args: ' + field),
+    )
+  }
+})
 
 test("dimensions: DEFAULT_DIMENSIONS + membership guard + fallback", () => {
   assert.match(src, /const DEFAULT_DIMENSIONS = \['correctness', 'security', 'performance', 'plan', 'maintainability'\]/);
@@ -274,5 +294,13 @@ test("behavior: file-mode envelope is compact + writer prompt carries machine-bu
   assert.equal(finds, 5, 'one find line per dimension');
   assert.equal(verifies, 2, 'one verify line per deduped finding');
 })
+
+test("verify: refuters dispatch the read-only verifier type", () => {
+  assert.match(src, /agentType: 'verifier'/);
+  assert.ok(
+    !src.includes("agentType: 'general-purpose', label: 'verify:'"),
+    "the refuter must not be the write-capable general-purpose agent",
+  );
+});
 
 run();

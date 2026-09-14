@@ -276,7 +276,7 @@ Based on [Superpowers](https://github.com/obra/superpowers) by Jesse Vincent, po
 
 ```
 pi-superpowers-plus/
-├── agent-templates/                  # Copy-in agent definitions (4 templates, not auto-loaded)
+├── agent-templates/                  # Copy-in agent definitions (5 templates, not auto-loaded)
 │   ├── implementer.md                # Strict TDD implementation agent
 │   ├── worker.md                     # General-purpose task agent
 │   ├── code-reviewer.md              # Production readiness reviewer
