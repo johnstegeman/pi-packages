@@ -115,7 +115,7 @@ pi  ──►  set-phase.ts  ──►  set-phase.mjs (createPhaseLifecycle)
 `createMoleculeWidgetController({ exec, setWidget, getTheme, subscribeChanges, warn, windowMs = 10000, timers })`.
 Owns all session-scoped mutable state (`ui`, `cwd`, `activeMolecule`,
 `lockedMoleculeId`, `refreshGen`, `coalescer`, `unsubscribe`). Knows nothing about
-`pi`. Exposes `bindSession`, `unbindSession`, `refresh`, `render`,
+`pi`. Exposes `bindSession`, `unbindSession`, `setCwd`, `refresh`, `render`,
 `triggerChange`.
 
 **New core — `extensions/set-phase.mjs`:**
@@ -165,13 +165,14 @@ imports `pi`, `typebox`, or `@earendil-works`.
 
 The `gen` check is re-evaluated after every `await` before mutating state.
 
-**`render()`:** call `setWidget(lines | undefined)`; a throw is caught, `warn`ed,
+**`render()`:** call `setWidget(lines | undefined)`; a throw is caught, warned,
 and non-fatal (non-interactive runs must not break).
 
 **`triggerChange()`:** no-op when unbound; otherwise `coalescer.trigger()`.
 
-**`agent_start` adapter path:** update `cwd` (via `bindSession`-style setter or a
-dedicated `setCwd`) then `refresh()`. The cwd is read from `ctx.cwd` when present.
+**`setCwd(cwd)`** (called from the `agent_start` adapter path): store the new
+`cwd`, then `refresh()`. The cwd comes from `ctx.cwd` when present, falling back
+to `process.cwd()`.
 
 **Data flow:** `session_start → bindSession → refresh → render`;
 `agent_start → update cwd → refresh`; any `beads:changed` → coalesced `refresh`;
@@ -203,7 +204,7 @@ existing non-fatal behavior.
 
 **Coalescer changes:** `cancel()` clears the pending timer and the dirty flag,
 leaving the next `trigger()` a fresh leading edge. `onFire` is invoked inside a
-`try/catch`; a throw is `warn`ed and the trailing-timer chain reschedules
+`try/catch`; a throw is warned and the trailing-timer chain reschedules
 normally, so one bad render cannot wedge future refreshes.
 
 **Lock-release guard:** `parseMoleculeCurrent` computes `total` after the
