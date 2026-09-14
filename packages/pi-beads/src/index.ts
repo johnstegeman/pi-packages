@@ -56,6 +56,7 @@ const TOOL = {
   dep: "beads_dep",
   undep: "beads_undep",
   comment: "beads_comment",
+  comments: "beads_comments",
   reopen: "beads_reopen",
   gateCreate: "beads_gate_create",
   gateResolve: "beads_gate_resolve",
@@ -473,6 +474,20 @@ export default function piBeadsLean(pi: any) {
     }
     if (o.assignee) lines.push(`assignee: ${o.assignee}`);
     return lines.join("\n");
+  }
+
+  function fmtComments(json: string): string {
+    const o = jparse(json);
+    if (!Array.isArray(o)) return (json ?? "").trim() || "(no comments)";
+    if (o.length === 0) return "(no comments)";
+    return o
+      .map((c: any) => {
+        const who = c.author ?? c.actor ?? c.user ?? "?";
+        const when = c.created_at ?? c.timestamp ?? c.time ?? "";
+        const body = String(c.text ?? c.body ?? c.content ?? "");
+        return `${who}${when ? " " + when : ""}: ${body}`;
+      })
+      .join("\n");
   }
 
   // strip bd's promotional / hint lines to keep tool output lean
@@ -1514,6 +1529,25 @@ export default function piBeadsLean(pi: any) {
       if (!r.ok) return textResult(`bd comment failed: ${r.err}`);
       await afterWrite(dir);
       return textResult(r.out.trim() || "comment added");
+    },
+  });
+
+  pi.registerTool({
+    name: TOOL.comments,
+    label: "Beads comments",
+    description:
+      "Read the comments on one beads issue in time order. Works for any repo by id; use after beads_comment to read back SDD blocker/revision context.",
+    parameters: {
+      type: "object",
+      properties: { id: { type: "string", description: "Issue id" } },
+      required: ["id"],
+    },
+    async execute(_id: string, params: any) {
+      if (!params?.id) return textResult("id is required");
+      await ensureFresh();
+      const r = await bd(["comments", String(params.id), "--json"], umbrella);
+      if (!r.ok) return textResult(`bd comments failed: ${r.err}`);
+      return textResult(fmtComments(r.out));
     },
   });
 

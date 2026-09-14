@@ -50,7 +50,8 @@ If an umbrella workspace is nearby — a directory whose `bd` aggregates several
 repositories — the extension finds it on its own. It can also be named explicitly with
 `PI_BEADS_ROOT`.
 
-Reads (`beads_ready`, `beads_list`, `beads_show`, `beads_deps` and the prime) run
+Reads (`beads_ready`, `beads_list`, `beads_show`, `beads_deps`,
+`beads_comments` and the prime) run
 against the aggregate, so the agent sees the issues of every repository at once, and an
 issue's owner is read off its id prefix: `crmback-1a2` belongs to `crm-backend`.
 
@@ -118,7 +119,7 @@ Commands are run by a person and their output never reaches the model's context.
 | `/beads-init` | Quiet initialization of beads in the current project (see below) |
 | `/beads-mode` | Current mode, umbrella, default repository, prefix table, context economics |
 
-The agent gets eighteen tools. All of them are direct in-process `bd` calls with no
+The agent gets nineteen tools. All of them are direct in-process `bd` calls with no
 MCP transport, and what comes back is a digest rather than raw JSON.
 
 | Tool | What it does |
@@ -135,6 +136,7 @@ MCP transport, and what comes back is a digest rather than raw JSON.
 | `beads_dep` | Add a dependency (blocker blocks issue) within one repository; `type` is `blocks\|tracks\|related\|parent-child\|discovered-from` |
 | `beads_undep` | Remove a dependency |
 | `beads_comment` | Add a progress comment to an issue |
+| `beads_comments` | Read the comments on one issue (`bd comments <id> --json`) — read-back for `beads_comment` |
 | `beads_gate_create` | Open an async gate (`human\|timer\|gh:run\|gh:pr`) blocking an issue until resolved |
 | `beads_gate_resolve` | Resolve a gate and close the gated step(s) it was blocking in one call (see below) |
 | `beads_mol_pour` | Instantiate a proto formula as a persistent molecule (`bd mol pour`) |
@@ -159,7 +161,7 @@ tool call: `beads_create`, `beads_create_list`, `beads_update`, `beads_close`,
 `beads_reopen`, `beads_dep`, `beads_undep`, `beads_comment`, `beads_gate_create`,
 `beads_gate_resolve` (once for the resolve, plus once per gated step it closes), and
 `beads_mol_pour`. Read tools (`beads_ready`, `beads_list`, `beads_show`,
-`beads_deps`, `beads_mol_show`, `beads_mol_current`) never emit.
+`beads_deps`, `beads_comments`, `beads_mol_show`, `beads_mol_current`) never emit.
 
 It is a generic change signal: consumers should re-fetch whatever they display.
 Extensions keeping steady state across a burst of mutations (e.g. the

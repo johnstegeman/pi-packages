@@ -330,6 +330,10 @@ case "$1" in
     esac
     echo "ok"; exit 0
     ;;
+  comments)
+    printf '%s\n' '[{"author":"alice","created_at":"2026-09-14T10:00:00Z","text":"first"},{"author":"bob","created_at":"2026-09-14T11:00:00Z","text":"second"}]'
+    exit 0
+    ;;
   *) echo "ok"; exit 0 ;;
 esac
 `;
@@ -439,12 +443,13 @@ const okResult = (r) => r && Array.isArray(r.content) && r.content[0]?.type === 
 // ---------------------------------------------------------------------------
 // 0. module surface: the new tools are registered and the type allowlists export
 // ---------------------------------------------------------------------------
-test("registers all 18 tools, including beads_create_list", async () => {
+test("registers every expected tool", async () => {
   const { tools } = makePi();
   const names = tools.map((t) => t.name).sort();
   assert.deepEqual(names, [
     "beads_close",
     "beads_comment",
+    "beads_comments",
     "beads_create",
     "beads_create_list",
     "beads_dep",
@@ -528,7 +533,7 @@ test("samplePrefixOf fallback still derives a dashless prefix when bd where fail
 test("single-repo: session_start resolves, registers tools, emits nothing", async () => {
   const s = await openSession("single", repoDir);
   assert.equal(s.emitted.length, 0, "session_start must not emit beads:changed");
-  assert.equal(s.tools.length, 18);
+  assert.equal(s.tools.length, 19);
 });
 
 test("single-repo: beads_create builds argv and emits beads:changed", async () => {
@@ -815,6 +820,17 @@ test("single-repo: beads_show --full changes only the digest, not argv; no emit"
   assert.ok(okResult(r), JSON.stringify(r));
   findInvocation(["show", "proj-1a2", "--json"]);
   assert.equal(s.emitted.length, before, "beads_show must not emit");
+});
+
+test("single-repo: beads_comments reads comments and never emits", async () => {
+  const s = await openSession("single", repoDir);
+  resetLog();
+  const r = await s.byName.get("beads_comments").execute("c", { id: "proj-1a2" });
+  assert.ok(okResult(r), JSON.stringify(r));
+  findInvocation(["comments", "proj-1a2", "--json"]);
+  assert.equal(s.emitted.length, 0, "read must not emit");
+  assert.match(r.content[0].text, /alice/);
+  assert.match(r.content[0].text, /second/);
 });
 
 test("single-repo: beads_gate_resolve resolves gate then closes its gated step (no double-close)", async () => {

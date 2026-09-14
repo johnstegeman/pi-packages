@@ -36,6 +36,7 @@ live umbrella path, prefix routes, and current default-create repo for this sess
 | `beads_list({ status?, limit?, repo?, label?, labelAny? })` | list issues across every repo; `status` = `open,in_progress,blocked,deferred,closed`; optional project/label filters |
 | `beads_show({ id })` | full details of one issue: status, **blocker ids** (`blocked_by:` + `BLOCKED` marker), and for epics **children + progress** (`children: done/total`) |
 | `beads_deps({ ids, direction? })` | dependency view: ONE id → the blocker/dependent **tree**; SEVERAL ids → one compact line each. `direction` = `blockers` (default) or `dependents` |
+| `beads_comments({ id })` | read the comments on one issue in time order — read-back after `beads_comment` |
 
 Reads are already cross-repo — **do not** shell out to raw `bd list`, `bd dep tree`, `bd show | grep blocked_by`, or inspect `.beads/issues.jsonl` / umbrella JSON files directly for task state. `beads_show` already carries blocker ids and epic progress; `beads_deps` gives the tree and batch blocker triage. Use the id prefix to know which project a result belongs to.
 
@@ -113,6 +114,7 @@ or `bd purge --force`). Promote one to permanent with `bd mol squash <id>`.
 beads_dep({ issue: "orch-9ll", blocker: "orch-gct" })
 beads_undep({ issue: "orch-9ll", blocker: "orch-gct" })
 beads_comment({ id: "orch-9ll", text: "Blocked pending vault-writer contract review" })
+beads_comments({ id: "orch-9ll" })
 beads_update({ id: "orch-9ll", appendNotes: "Need retry semantics agreed before coding" })
 ```
 
