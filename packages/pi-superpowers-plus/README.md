@@ -247,8 +247,7 @@ Both use the same shape — a `models` map whose keys are the six supported agen
     "task-reviewer": "claude-sonnet-4-5",
     "code-reviewer": "claude-sonnet-4-5",
     "verifier": "claude-sonnet-4-5",
-    "worker": "claude-haiku-4-5",
-    "explore": "claude-sonnet-4-5"
+    "worker": "claude-haiku-4-5"
   }
 }
 ```

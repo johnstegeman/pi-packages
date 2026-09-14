@@ -4,7 +4,6 @@
     "task-reviewer": "claude-sonnet-4-5",
     "code-reviewer": "claude-sonnet-4-5",
     "verifier": "claude-sonnet-4-5",
-    "worker": "claude-haiku-4-5",
-    "explore": "claude-sonnet-4-5"
+    "worker": "claude-haiku-4-5"
   }
 }
