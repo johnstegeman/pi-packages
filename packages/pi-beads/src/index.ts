@@ -64,6 +64,7 @@ const TOOL = {
   molShow: "beads_mol_show",
   promote: "beads_promote",
   memories: "beads_memories",
+  stale: "beads_stale",
   molCurrent: "beads_mol_current",
   molReady: "beads_mol_ready",
 };
@@ -1317,6 +1318,35 @@ export default function piBeadsLean(pi: any) {
       const r = await bd(args, umbrella);
       if (!r.ok) return textResult(`bd memories failed: ${r.err}`);
       return textResult(fmtMemories(r.out));
+    },
+  });
+
+  pi.registerTool({
+    name: TOOL.stale,
+    label: "Beads stale",
+    description:
+      "List stale issues (not updated recently) across ALL repos — abandoned in_progress work is visible at session start.",
+    parameters: {
+      type: "object",
+      properties: {
+        days: { type: "number", description: "Issues not updated in this many days (default 30)" },
+        status: { type: "string", description: "Filter by status: open|in_progress|blocked|deferred" },
+        limit: { type: "number", description: "Max issues (default 50)" },
+      },
+    },
+    async execute(_id: string, params: any) {
+      if (params?.status) {
+        const st = String(params.status);
+        if (!["open", "in_progress", "blocked", "deferred"].includes(st))
+          return textResult(`invalid status '${st}' (allowed: open|in_progress|blocked|deferred)`);
+      }
+      await ensureFresh();
+      const args = ["stale", "--json", "-n", String(params?.limit ?? 50)];
+      if (params?.days !== undefined && params?.days !== null) args.push("-d", String(params.days));
+      if (params?.status) args.push("-s", String(params.status));
+      const r = await bd(args, umbrella);
+      if (!r.ok) return textResult(`bd stale failed: ${r.err}`);
+      return textResult(fmtRows(r.out));
     },
   });
 

@@ -341,6 +341,7 @@ case "$1" in
   recall) printf '{"k":"v"}\n'; exit 0 ;;
   memories) printf '{"alpha":"one","beta":"two","schema_version":1}\n'; exit 0 ;;
   forget) printf 'Forgot %s\n' "$2"; exit 0 ;;
+  stale) printf '[{"id":"proj-old","status":"in_progress","title":"Old work","priority":2}]\n'; exit 0 ;;
   *) echo "ok"; exit 0 ;;
 esac
 `;
@@ -473,6 +474,7 @@ test("registers every expected tool", async () => {
     "beads_ready",
     "beads_reopen",
     "beads_show",
+    "beads_stale",
     "beads_undep",
     "beads_update",
   ]);
@@ -542,7 +544,7 @@ test("samplePrefixOf fallback still derives a dashless prefix when bd where fail
 test("single-repo: session_start resolves, registers tools, emits nothing", async () => {
   const s = await openSession("single", repoDir);
   assert.equal(s.emitted.length, 0, "session_start must not emit beads:changed");
-  assert.equal(s.tools.length, 21);
+  assert.equal(s.tools.length, 22);
 });
 
 test("single-repo: beads_create builds argv and emits beads:changed", async () => {
@@ -829,6 +831,24 @@ test("single-repo: beads_show --full changes only the digest, not argv; no emit"
   assert.ok(okResult(r), JSON.stringify(r));
   findInvocation(["show", "proj-1a2", "--json"]);
   assert.equal(s.emitted.length, before, "beads_show must not emit");
+});
+
+test("single-repo: beads_stale builds argv and never emits", async () => {
+  const s = await openSession("single", repoDir);
+  resetLog();
+  const r = await s.byName.get("beads_stale").execute("c", { days: 14, status: "in_progress", limit: 10 });
+  assert.ok(okResult(r), JSON.stringify(r));
+  findInvocation(["stale", "--json", "-n", "10", "-d", "14", "-s", "in_progress"]);
+  assert.equal(s.emitted.length, 0);
+  assert.match(r.content[0].text, /proj-old/);
+});
+
+test("single-repo: beads_stale rejects an invalid status before bd", async () => {
+  const s = await openSession("single", repoDir);
+  resetLog();
+  const r = await s.byName.get("beads_stale").execute("c", { status: "nonsense" });
+  assert.match(r.content[0].text, /invalid status 'nonsense'/);
+  assert.equal(invocations().length, 0);
 });
 
 test("single-repo: beads_comments reads comments and never emits", async () => {

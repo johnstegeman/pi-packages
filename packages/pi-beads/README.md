@@ -51,7 +51,7 @@ repositories — the extension finds it on its own. It can also be named explici
 `PI_BEADS_ROOT`.
 
 Reads (`beads_ready`, `beads_list`, `beads_show`, `beads_deps`,
-`beads_comments` and the prime) run
+`beads_comments`, `beads_stale` and the prime) run
 against the aggregate, so the agent sees the issues of every repository at once, and an
 issue's owner is read off its id prefix: `crmback-1a2` belongs to `crm-backend`.
 
@@ -119,7 +119,7 @@ Commands are run by a person and their output never reaches the model's context.
 | `/beads-init` | Quiet initialization of beads in the current project (see below) |
 | `/beads-mode` | Current mode, umbrella, default repository, prefix table, context economics |
 
-The agent gets twenty-one tools. All of them are direct in-process `bd` calls with no
+The agent gets twenty-two tools. All of them are direct in-process `bd` calls with no
 MCP transport, and what comes back is a digest rather than raw JSON.
 
 | Tool | What it does |
@@ -128,6 +128,7 @@ MCP transport, and what comes back is a digest rather than raw JSON.
 | `beads_list` | A list filtered by status (`open,in_progress,blocked,deferred,closed`) |
 | `beads_show` | The essential fields of one issue: status, priority, type, dependencies; `full: true` includes the whole description body |
 | `beads_deps` | Blockers or dependents: a tree for one id, compact lines for several |
+| `beads_stale` | Stale issues (not updated recently); surfaces abandoned work; optional `days`, `status` (`open\|in_progress\|blocked\|deferred`), `limit` |
 | `beads_create` | Create an issue in the right repository (`repo` is a folder name or a prefix), return its id |
 | `beads_create_list` | Create an optional gate bead + its human gate, then the task beads sequentially under one parent in declared (plan) order, then wire the blocks-chain; returns `gate:`/`human-gate:` ids and `t1:..tN:` in plan order |
 | `beads_update` | Status, priority, title, parent, notes, labels; plus `claim`, `setMetadata` (`key=value,...`), `description` (replaces the body); routed by id prefix |
@@ -163,7 +164,7 @@ tool call: `beads_create`, `beads_create_list`, `beads_update`, `beads_close`,
 `beads_reopen`, `beads_dep`, `beads_undep`, `beads_comment`, `beads_gate_create`,
 `beads_gate_resolve` (once for the resolve, plus once per gated step it closes),
 `beads_mol_pour`, `beads_promote`, and `beads_memories` (remember/forget). Read tools (`beads_ready`, `beads_list`, `beads_show`,
-`beads_deps`, `beads_comments`, `beads_memories` recall/list, `beads_mol_show`, `beads_mol_current`) never emit.
+`beads_deps`, `beads_stale`, `beads_comments`, `beads_memories` recall/list, `beads_mol_show`, `beads_mol_current`) never emit.
 
 It is a generic change signal: consumers should re-fetch whatever they display.
 Extensions keeping steady state across a burst of mutations (e.g. the
