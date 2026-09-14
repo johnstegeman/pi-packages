@@ -65,6 +65,7 @@ const TOOL = {
   promote: "beads_promote",
   memories: "beads_memories",
   stale: "beads_stale",
+  lint: "beads_lint",
   molCurrent: "beads_mol_current",
   molReady: "beads_mol_ready",
 };
@@ -501,6 +502,16 @@ export default function piBeadsLean(pi: any) {
       return entries.map(([k, v]) => `${k}: ${v}`).join("\n");
     }
     return (json ?? "").trim() || "(no memories)";
+  }
+
+  function fmtLint(json: string): string {
+    const o = jparse(json);
+    const results = o?.results;
+    if (!Array.isArray(results)) return (json ?? "").trim() || "no template warnings";
+    if (results.length === 0) return "no template warnings";
+    return results
+      .map((x: any) => `${x.id}: missing ${Array.isArray(x.missing) ? x.missing.join(", ") : "?"}`)
+      .join("\n");
   }
 
   // strip bd's promotional / hint lines to keep tool output lean
@@ -1347,6 +1358,31 @@ export default function piBeadsLean(pi: any) {
       const r = await bd(args, umbrella);
       if (!r.ok) return textResult(`bd stale failed: ${r.err}`);
       return textResult(fmtRows(r.out));
+    },
+  });
+
+  pi.registerTool({
+    name: TOOL.lint,
+    label: "Beads lint",
+    description:
+      "Check issues for missing recommended sections (e.g. Acceptance Criteria). Pass ids to lint specific issues, or status/type filters to lint a set.",
+    parameters: {
+      type: "object",
+      properties: {
+        ids: { type: "string", description: "One or more issue ids, space or comma separated" },
+        status: { type: "string", description: "Filter by status (default open, 'all' for all)" },
+        type: { type: "string", description: "Filter by type: bug|task|feature|epic" },
+      },
+    },
+    async execute(_id: string, params: any) {
+      const ids = params?.ids ? String(params.ids).split(/[\s,]+/).filter(Boolean) : [];
+      await ensureFresh();
+      const args = ["lint", ...ids, "--json"];
+      if (params?.status) args.push("--status", String(params.status));
+      if (params?.type) args.push("--type", String(params.type));
+      const r = await bd(args, umbrella);
+      if (!r.ok) return textResult(`bd lint failed: ${r.err}`);
+      return textResult(fmtLint(r.out));
     },
   });
 

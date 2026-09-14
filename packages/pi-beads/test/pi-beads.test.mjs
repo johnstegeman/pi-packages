@@ -342,6 +342,7 @@ case "$1" in
   memories) printf '{"alpha":"one","beta":"two","schema_version":1}\n'; exit 0 ;;
   forget) printf 'Forgot %s\n' "$2"; exit 0 ;;
   stale) printf '[{"id":"proj-old","status":"in_progress","title":"Old work","priority":2}]\n'; exit 0 ;;
+  lint) printf '{"total":1,"issues":1,"results":[{"id":"proj-1a2","title":"x","type":"task","missing":["## Acceptance Criteria"],"warnings":1}]}\n'; exit 0 ;;
   *) echo "ok"; exit 0 ;;
 esac
 `;
@@ -464,6 +465,7 @@ test("registers every expected tool", async () => {
     "beads_deps",
     "beads_gate_create",
     "beads_gate_resolve",
+    "beads_lint",
     "beads_list",
     "beads_memories",
     "beads_mol_current",
@@ -544,7 +546,7 @@ test("samplePrefixOf fallback still derives a dashless prefix when bd where fail
 test("single-repo: session_start resolves, registers tools, emits nothing", async () => {
   const s = await openSession("single", repoDir);
   assert.equal(s.emitted.length, 0, "session_start must not emit beads:changed");
-  assert.equal(s.tools.length, 22);
+  assert.equal(s.tools.length, 23);
 });
 
 test("single-repo: beads_create builds argv and emits beads:changed", async () => {
@@ -841,6 +843,16 @@ test("single-repo: beads_stale builds argv and never emits", async () => {
   findInvocation(["stale", "--json", "-n", "10", "-d", "14", "-s", "in_progress"]);
   assert.equal(s.emitted.length, 0);
   assert.match(r.content[0].text, /proj-old/);
+});
+
+test("single-repo: beads_lint formats missing sections and never emits", async () => {
+  const s = await openSession("single", repoDir);
+  resetLog();
+  const r = await s.byName.get("beads_lint").execute("c", { ids: "proj-1a2 proj-2b3", type: "task" });
+  assert.ok(okResult(r), JSON.stringify(r));
+  findInvocation(["lint", "proj-1a2", "proj-2b3", "--json", "--type", "task"]);
+  assert.match(r.content[0].text, /proj-1a2: missing ## Acceptance Criteria/);
+  assert.equal(s.emitted.length, 0);
 });
 
 test("single-repo: beads_stale rejects an invalid status before bd", async () => {
