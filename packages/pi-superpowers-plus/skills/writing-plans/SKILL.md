@@ -154,7 +154,6 @@ RESULT = beads_create_list({
   tasks: [
     { title: "Task 1: <name>", description: "<the Task 1 breakdown above, verbatim>", acceptance: "<the Task 1 Acceptance Criteria above>" },
     { title: "Task 2: <name>", description: "<the Task 2 breakdown above, verbatim>", acceptance: "<the Task 2 Acceptance Criteria above>" },
-    { title: "Task 2: <name>", description: "<the Task 2 breakdown above, verbatim>" },
     # ... one entry per task, IN PLAN ORDER (Task 1 → Task N)
   ],
 })

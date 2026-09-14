@@ -910,7 +910,7 @@ export default function piBeadsLean(pi: any) {
         },
         tasks: {
           type: "array",
-          description: "Task beads in PLAN ORDER (index order). Each: { title, type?, description?, labels?, priority? }",
+          description: "Task beads in PLAN ORDER (index order). Each: { title, type?, description?, acceptance?, labels?, priority? }",
           items: {
             type: "object",
             properties: {
