@@ -869,6 +869,61 @@ assert.ok(plain[0].includes("Superpowers:"), "absent theme renders plain label")
   assert.equal(fires.length, 3, "trigger after idle is a fresh leading edge");
 }
 
+// ---------- coalescer: cancel() ----------
+{
+  let scheduled = null;
+  const fakeTimers = {
+    setTimeout: (cb, ms) => {
+      scheduled = { cb, ms };
+      return scheduled;
+    },
+    clearTimeout: (t) => {
+      if (t === scheduled) scheduled = null;
+    },
+  };
+  const fires = [];
+  const c = createChangeCoalescer(() => fires.push(1), 10000, fakeTimers);
+  c.trigger();
+  c.trigger(); // dirty, timer open
+  assert.ok(scheduled, "timer pending before cancel");
+  c.cancel();
+  assert.equal(scheduled, null, "cancel clears the pending timer");
+  c.trigger();
+  assert.equal(fires.length, 2, "trigger after cancel is a fresh leading edge");
+}
+
+// ---------- coalescer: a throwing onFire must not wedge the chain ----------
+{
+  let scheduled = null;
+  const fakeTimers = {
+    setTimeout: (cb, ms) => {
+      scheduled = { cb, ms };
+      return scheduled;
+    },
+    clearTimeout: (t) => {
+      if (t === scheduled) scheduled = null;
+    },
+  };
+  const warns = [];
+  let calls = 0;
+  const c = createChangeCoalescer(
+    () => {
+      calls += 1;
+      if (calls === 1) throw new Error("boom");
+    },
+    10000,
+    fakeTimers,
+    (...a) => warns.push(a),
+  );
+  c.trigger();
+  assert.equal(calls, 1, "first trigger called onFire");
+  assert.equal(warns.length, 1, "throwing onFire is warned");
+  assert.ok(scheduled, "timer chain survives the throw");
+  c.trigger(); // dirty
+  scheduled.cb(); // trailing fire
+  assert.equal(calls, 2, "trailing fire still happens after a throw");
+}
+
 // ---------- stale-frame fix: args selection ----------
 assert.deepEqual(nextRefreshArgs(null), ["mol", "current", "--json"]); // no lock yet -> no-id inference
 assert.deepEqual(nextRefreshArgs("bd-mol-abc"), ["mol", "current", "bd-mol-abc", "--json"]); // locked -> by id

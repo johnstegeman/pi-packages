@@ -207,15 +207,33 @@ export function phaseFor(state) {
  * happens if dirty, and a new window starts — otherwise the timer clears and
  * the next trigger() is a fresh leading edge. Caps fires to at most one per
  * windowMs during a sustained burst without ever delaying the first one.
+ * cancel() clears the pending window and dirty flag; a later trigger() is
+ * again a fresh leading edge. A throwing onFire is routed to warn instead of
+ * wedging the timer chain. The warn parameter defaults to console.warn so the
+ * 3-arg form keeps working; callers may inject their own.
  */
-export function createChangeCoalescer(onFire, windowMs = 10000, timers = { setTimeout, clearTimeout }) {
+export function createChangeCoalescer(
+  onFire,
+  windowMs = 10000,
+  timers = { setTimeout, clearTimeout },
+  warn = console.warn,
+) {
   let timer = null;
   let dirty = false;
+
+  function fire() {
+    try {
+      onFire();
+    } catch (err) {
+      warn("[pi-superpowers-plus] coalescer onFire threw:", err);
+    }
+  }
+
   function scheduleTick() {
     timer = timers.setTimeout(() => {
       if (dirty) {
         dirty = false;
-        onFire();
+        fire();
         scheduleTick();
       } else {
         timers.clearTimeout(timer);
@@ -223,14 +241,22 @@ export function createChangeCoalescer(onFire, windowMs = 10000, timers = { setTi
       }
     }, windowMs);
   }
+
   return {
     trigger() {
       if (timer === null) {
-        onFire();
+        fire();
         scheduleTick();
       } else {
         dirty = true;
       }
+    },
+    cancel() {
+      if (timer !== null) {
+        timers.clearTimeout(timer);
+        timer = null;
+      }
+      dirty = false;
     },
   };
 }
