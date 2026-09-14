@@ -285,6 +285,16 @@ test("behavior: file-mode envelope is compact + writer prompt carries machine-bu
   }
   assert.equal(finds, 5, 'one find line per dimension');
   assert.equal(verifies, 2, 'one verify line per deduped finding');
+  assert.equal(verifies, 2, 'one verify line per deduped finding');
 })
+
+test("verify: refuters dispatch the read-only verifier type", () => {
+  assert.match(src, /agentType: 'verifier'/);
+  assert.ok(
+    !src.includes("agentType: 'general-purpose', label: 'verify:'"),
+    "the refuter must not be the write-capable general-purpose agent",
+  );
+});
+
 
 run();

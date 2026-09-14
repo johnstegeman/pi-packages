@@ -210,7 +210,7 @@ const verdicts = []
 for (let i = 0; i < deduped.length; i += WAVE) {
   const slice = deduped.slice(i, i + WAVE)
   const waveVerdicts = await parallel(slice.map((f, j) => () =>
-    agent(refutation(f, i + j), { agentType: 'general-purpose', label: 'verify:' + (f.line ? f.file + ':' + f.line : f.file), phase: 'Verify', schema: VERDICT_SCHEMA })
+    agent(refutation(f, i + j), { agentType: 'verifier', label: 'verify:' + (f.line ? f.file + ':' + f.line : f.file), phase: 'Verify', schema: VERDICT_SCHEMA })
   ))
   verdicts.push(...waveVerdicts)
 }

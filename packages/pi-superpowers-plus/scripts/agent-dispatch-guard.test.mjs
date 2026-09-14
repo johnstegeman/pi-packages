@@ -65,7 +65,7 @@ test("every skill dispatch name resolves to a shipped template or built-in", () 
 });
 
 test("the SDD and dispatch agent names are covered by templates", () => {
-  for (const name of ["implementer", "task-reviewer", "code-reviewer", "worker"]) {
+  for (const name of ["implementer", "task-reviewer", "code-reviewer", "worker", "verifier"]) {
     assert.ok(statSync(join(root, "agent-templates", `${name}.md`)).isFile(), `missing ${name}.md`);
   }
 });
@@ -118,12 +118,21 @@ test("the SDD re-review prompt documents the nested-lookup path", () => {
 
 test("reviewer templates pin thinking: medium + a finite max_turns", () => {
   const fm = (name) => readFileSync(join(root, "agent-templates", name), "utf8").split("---")[1] ?? "";
-  for (const name of ["task-reviewer.md", "code-reviewer.md"]) {
+  for (const name of ["task-reviewer.md", "code-reviewer.md", "verifier.md"]) {
     assert.match(fm(name), /^thinking: medium$/m, `${name} must pin thinking: medium`);
     const m = fm(name).match(/^max_turns: (\d+)$/m);
     assert.ok(m, `${name} must pin a numeric max_turns`);
     assert.ok(Number(m[1]) > 0, `${name} max_turns must be positive`);
   }
+});
+
+test("final-review refuters dispatch the read-only verifier type", () => {
+  const src = readFileSync(join(root, "skills", "subagent-driven-development", "scripts", "final-review.js"), "utf8");
+  assert.match(src, /agentType: 'verifier'/);
+  assert.ok(
+    !src.includes("agentType: 'general-purpose', label: 'verify:'"),
+    "the refuter must not be the write-capable general-purpose agent",
+  );
 });
 
 run();
