@@ -99,8 +99,10 @@ maps 1:1 to a finding and prevents the same drift class from returning.
   `beads_gate_resolve` call use **`<plan-approval-human-gate-id>`** — the human gate is what
   the human resolves and what blocks the task beads.
 - Rename the gate-**task**-bead sites from `<plan-approved-gate-id>` to
-  **`<plan-approval-gate-bead-id>`**: `subagent-driven-development/SKILL.md:196,197,198,307,473`
-  and `writing-plans/SKILL.md:261`.
+  **`<plan-approval-gate-bead-id>`**: `subagent-driven-development/SKILL.md:196,197,198,307,473`.
+  `writing-plans/SKILL.md:261` (the "plan complete" message) is a **human-gate** site — the task
+  beads are blocked by the human gate and the sentence resolves it — so it uses
+  `<plan-approval-human-gate-id>` (corrected in final review).
 - `writing-plans`' `RESULT.gate` / `RESULT.human-gate` symbol block stays; add a one-line note
   that `RESULT.gate` ≡ `<plan-approval-gate-bead-id>` and `RESULT.human-gate` ≡
   `<plan-approval-human-gate-id>`.
@@ -145,6 +147,9 @@ skill, call …`) and set its phase to `development`.
 - `task-reviewer` pair: add a one-line pointer in `task-reviewer-prompt.md` to
   `agent-templates/task-reviewer.md` as the identity/output-contract source; no rewrite (the two
   already agree on the Spec Compliance / Strengths / Issues / Assessment format).
+- `subagent-driven-development/scripts/final-review.js` was a third identity site (its workflow
+  prompt led with "You are a Senior Code Reviewer"); the lead is neutralized so the identity lives
+  only in `agent-templates/code-reviewer.md` (found in final review).
 
 ### M15 — background default
 
@@ -163,17 +168,20 @@ skill, call …`) and set its phase to `development`.
 
 **New file `scripts/skills-contract.test.mjs`** (plain-node, same harness style as
 `scripts/agent-dispatch-guard.test.mjs`; no dependencies). It walks `skills/**/*.md` and
-asserts:
+`skills/**/*.js` and asserts:
 
 1. **`set_phase` vocabulary** — every `set_phase({ phase: "X" })` literal under `skills/**`
-   has `X ∈ {brainstorming, development, ""}`.
+   (single- or double-quoted) has `X ∈ {brainstorming, development, ""}`.
 2. **SDD prompt-set alignment (H7)** — `implementer-prompt.md`, `re-review-prompt.md`, and
    `task-reviewer-prompt.md` each emit a `set_phase` call and all three agree
    (expected `"development"`).
 3. **No `HEAD~1` review base** — no shipped skill *computes* a review base with `HEAD~1`: any line containing `HEAD~1` without a `never` warning is a failure. The explicit "never `HEAD~1`" warnings in SDD (`SKILL.md:265,300`) and the `review-package` comment are allowed prose (M12).
 4. **Gate-placeholder discipline (H8)** — the old conflated name `<plan-approved-gate-id>` is
    gone, and no `beads_gate_resolve({ id: "…gate-bead-id" })` call exists (the gate *task* bead
-   is never handed to the resolver).
+   is never handed to the resolver; single- or double-quoted).
+5. **Single canonical code-reviewer identity (M14)** — no file under `skills/**` restates the
+   identity (`You are a Senior Code Reviewer`); it lives only in
+   `agent-templates/code-reviewer.md`.
 
 Wire it in by appending `&& node scripts/skills-contract.test.mjs` to the `test` script in
 `package.json`.
