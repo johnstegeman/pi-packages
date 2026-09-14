@@ -334,6 +334,9 @@ case "$1" in
     printf '%s\n' '[{"author":"alice","created_at":"2026-09-14T10:00:00Z","text":"first"},{"author":"bob","created_at":"2026-09-14T11:00:00Z","text":"second"}]'
     exit 0
     ;;
+  promote)
+    printf 'Promoted %s\n' "$2"
+    exit 0 ;;
   *) echo "ok"; exit 0 ;;
 esac
 `;
@@ -461,6 +464,7 @@ test("registers every expected tool", async () => {
     "beads_mol_pour",
     "beads_mol_ready",
     "beads_mol_show",
+    "beads_promote",
     "beads_ready",
     "beads_reopen",
     "beads_show",
@@ -533,7 +537,7 @@ test("samplePrefixOf fallback still derives a dashless prefix when bd where fail
 test("single-repo: session_start resolves, registers tools, emits nothing", async () => {
   const s = await openSession("single", repoDir);
   assert.equal(s.emitted.length, 0, "session_start must not emit beads:changed");
-  assert.equal(s.tools.length, 19);
+  assert.equal(s.tools.length, 20);
 });
 
 test("single-repo: beads_create builds argv and emits beads:changed", async () => {
@@ -831,6 +835,23 @@ test("single-repo: beads_comments reads comments and never emits", async () => {
   assert.equal(s.emitted.length, 0, "read must not emit");
   assert.match(r.content[0].text, /alice/);
   assert.match(r.content[0].text, /second/);
+});
+
+test("single-repo: beads_promote routes by prefix and emits", async () => {
+  const s = await openSession("single", repoDir);
+  resetLog();
+  const r = await s.byName.get("beads_promote").execute("c", { id: "proj-1a2", reason: "keep" });
+  assert.ok(okResult(r), JSON.stringify(r));
+  findInvocation(["promote", "proj-1a2", "--reason", "keep"]);
+  assert.equal(s.emitted.at(-1), "beads:changed");
+});
+
+test("single-repo: beads_promote rejects an unknown prefix before bd", async () => {
+  const s = await openSession("single", repoDir);
+  resetLog();
+  const r = await s.byName.get("beads_promote").execute("c", { id: "nosuch-1" });
+  assert.match(r.content[0].text, /unknown repo for id 'nosuch-1'/);
+  assert.equal(invocations().length, 0);
 });
 
 test("single-repo: beads_gate_resolve resolves gate then closes its gated step (no double-close)", async () => {

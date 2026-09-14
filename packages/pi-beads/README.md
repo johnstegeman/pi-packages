@@ -57,7 +57,7 @@ issue's owner is read off its id prefix: `crmback-1a2` belongs to `crm-backend`.
 
 Writes (`beads_create`, `beads_create_list`, `beads_update`, `beads_close`,
 `beads_reopen`, `beads_dep`, `beads_undep`, `beads_comment`, `beads_gate_create`,
-`beads_gate_resolve`, `beads_mol_pour`) are routed to the owning repository by
+`beads_gate_resolve`, `beads_mol_pour`, `beads_promote`) are routed to the owning repository by
 that same prefix; afterwards the repository's JSONL is re-exported, the aggregate
 re-synced, and the `beads:changed` event published (see Events). Writing straight
 into the aggregate is not allowed: what lives there are throw-away copies.
@@ -119,7 +119,7 @@ Commands are run by a person and their output never reaches the model's context.
 | `/beads-init` | Quiet initialization of beads in the current project (see below) |
 | `/beads-mode` | Current mode, umbrella, default repository, prefix table, context economics |
 
-The agent gets nineteen tools. All of them are direct in-process `bd` calls with no
+The agent gets twenty tools. All of them are direct in-process `bd` calls with no
 MCP transport, and what comes back is a digest rather than raw JSON.
 
 | Tool | What it does |
@@ -142,6 +142,7 @@ MCP transport, and what comes back is a digest rather than raw JSON.
 | `beads_mol_pour` | Instantiate a proto formula as a persistent molecule (`bd mol pour`) |
 | `beads_mol_show` | Show a molecule/proto structure (`bd mol show ... --json`), read-only |
 | `beads_mol_current` | Show the current position in a molecule's workflow (`bd mol current ... --json`), read-only |
+| `beads_promote` | Promote a wisp (ephemeral issue) to a permanent bead |
 
 On current bd (1.2.2) `bd gate resolve` already closes the gate bead — it is
 `bd close <gate>` under a more explicit name. `beads_gate_resolve` then looks up
@@ -159,8 +160,8 @@ with `pi.events.on("beads:changed", handler)`:
 - **`beads:changed`** — emitted with no payload after every successful mutating
 tool call: `beads_create`, `beads_create_list`, `beads_update`, `beads_close`,
 `beads_reopen`, `beads_dep`, `beads_undep`, `beads_comment`, `beads_gate_create`,
-`beads_gate_resolve` (once for the resolve, plus once per gated step it closes), and
-`beads_mol_pour`. Read tools (`beads_ready`, `beads_list`, `beads_show`,
+`beads_gate_resolve` (once for the resolve, plus once per gated step it closes),
+`beads_mol_pour`, and `beads_promote`. Read tools (`beads_ready`, `beads_list`, `beads_show`,
 `beads_deps`, `beads_comments`, `beads_mol_show`, `beads_mol_current`) never emit.
 
 It is a generic change signal: consumers should re-fetch whatever they display.

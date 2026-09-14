@@ -62,6 +62,7 @@ const TOOL = {
   gateResolve: "beads_gate_resolve",
   molPour: "beads_mol_pour",
   molShow: "beads_mol_show",
+  promote: "beads_promote",
   molCurrent: "beads_mol_current",
   molReady: "beads_mol_ready",
 };
@@ -1214,6 +1215,32 @@ export default function piBeadsLean(pi: any) {
       }
       if (failure) return textResult(failure);
       return textResult(`reopened ${reopenedIds.join(", ")}`);
+    },
+  });
+
+  pi.registerTool({
+    name: TOOL.promote,
+    label: "Beads promote",
+    description:
+      "Promote a wisp (ephemeral issue) to a permanent bead, preserving its id and links. Routed to the owning repo by id prefix.",
+    parameters: {
+      type: "object",
+      properties: {
+        id: { type: "string", description: "Wisp id" },
+        reason: { type: "string", description: "Optional reason for promotion" },
+      },
+      required: ["id"],
+    },
+    async execute(_id: string, params: any) {
+      if (!params?.id) return textResult("id is required");
+      const dir = dirForPrefix(String(params.id));
+      if (!dir) return textResult(`unknown repo for id '${params.id}'`);
+      const args = ["promote", String(params.id)];
+      if (params.reason) args.push("--reason", String(params.reason));
+      const r = await bd(args, dir);
+      if (!r.ok) return textResult(`bd promote failed: ${r.err}`);
+      await afterWrite(dir);
+      return textResult(r.out.trim() || "promoted");
     },
   });
 

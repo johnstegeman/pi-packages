@@ -107,7 +107,7 @@ beads_create({
 ```
 `ephemeral: true` passes `--ephemeral`, creating a **wisp** — a real bead that
 stays out of federation sync and is purged wholesale once closed (`bd mol wisp gc`
-or `bd purge --force`). Promote one to permanent with `bd mol squash <id>`.
+or `bd purge --force`). Promote one to permanent with `bd promote <id>` (or the `beads_promote` tool).
 
 **Link / unlink / annotate**
 ```
