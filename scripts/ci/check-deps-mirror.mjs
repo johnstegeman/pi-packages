@@ -10,7 +10,11 @@ let semver;
 try {
   semver = require('semver');
 } catch {
-  console.error('ERROR: `semver` not resolvable. Run `npm install --no-save semver@^7 --prefix <tmp>` and set NODE_PATH=<tmp>/node_modules.');
+  const nodePath = process.env.NODE_PATH || '(unset)';
+  console.error(
+    `ERROR: \`semver\` not resolvable (NODE_PATH=${nodePath}). ` +
+      'Run `npm install --no-save semver@^7 --prefix /tmp/depsmirror` and set NODE_PATH=/tmp/depsmirror/node_modules.',
+  );
   process.exit(2);
 }
 
@@ -29,7 +33,17 @@ for (const [name, subRange] of Object.entries(subDeps)) {
     failed = true;
     continue;
   }
-  if (!semver.intersects(rootRange, subRange)) {
+  let compatible;
+  try {
+    compatible = semver.intersects(rootRange, subRange);
+  } catch {
+    console.error(
+      `INVALID RANGE ${name}: root declares "${rootRange}", subtree declares "${subRange}" — not valid semver ranges.`,
+    );
+    failed = true;
+    continue;
+  }
+  if (!compatible) {
     console.error(`INCOMPATIBLE ${name}: root declares "${rootRange}", subtree declares "${subRange}" — ranges do not intersect.`);
     failed = true;
   }

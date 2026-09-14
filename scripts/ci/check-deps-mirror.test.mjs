@@ -10,7 +10,7 @@ import { tmpdir } from 'node:os';
 // real script into a scratch repo skeleton and runs it with cwd = scratch.
 const SCRIPT_SRC = new URL('./check-deps-mirror.mjs', import.meta.url);
 
-function runInScratch({ rootDeps, subDeps }) {
+function runInScratch({ rootDeps, subDeps, env }) {
   const dir = mkdtempSync(join(tmpdir(), 'depmirror-'));
   mkdirSync(join(dir, 'packages/pi-subagents'), { recursive: true });
   mkdirSync(join(dir, 'scripts/ci'), { recursive: true });
@@ -19,7 +19,7 @@ function runInScratch({ rootDeps, subDeps }) {
   cpSync(SCRIPT_SRC, join(dir, 'scripts/ci/check-deps-mirror.mjs'));
   let out = '', code = 0;
   try {
-    out = execFileSync('node', ['scripts/ci/check-deps-mirror.mjs'], { cwd: dir, encoding: 'utf8' });
+    out = execFileSync('node', ['scripts/ci/check-deps-mirror.mjs'], { cwd: dir, encoding: 'utf8', env: { ...process.env, ...(env ?? {}) } });
   } catch (e) {
     code = e.status ?? 1;
     out = e.stdout ? `${e.stdout}\n${e.stderr ?? ''}` : String(e.stderr ?? e);
@@ -61,4 +61,24 @@ test('extra root deps are ignored', () => {
 test('empty subtree deps pass', () => {
   const { code } = runInScratch({ rootDeps: MIRRORED, subDeps: {} });
   assert.equal(code, 0);
+});
+
+
+// Malformed ranges are a gate failure, not a crash: assert INVALID RANGE + exit 1.
+test('malformed range fails with INVALID RANGE message', () => {
+  const { code, out } = runInScratch({
+    rootDeps: { ...MIRRORED, croner: 'not-a-range' },
+    subDeps: { ...MIRRORED, croner: '^10.0.1' },
+  });
+  assert.equal(code, 1);
+  assert.match(out, /INVALID RANGE croner/);
+});
+
+// With no semver resolvable, the script exits 2 and reports NODE_PATH.
+test('semver-unresolvable exits 2', () => {
+  const { code, out } = runInScratch({ rootDeps: MIRRORED, subDeps: MIRRORED, env: { NODE_PATH: '/nonexistent-path' } });
+  assert.equal(code, 2);
+  assert.match(out, /NODE_PATH=\/nonexistent-path/);
+  assert.equal(code, 2);
+  assert.match(out, /NODE_PATH/);
 });

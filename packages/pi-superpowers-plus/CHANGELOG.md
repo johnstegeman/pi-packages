@@ -11,6 +11,8 @@ Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Added
 
+- **Per-agent-type subagent model config (M28)** — an optional `subagent-models.json` (`{ "models": { "<type>": "<model>" } }`) sets the model for an `Agent` dispatch by subagent type. Read from global `~/.pi/agent/subagent-models.json` then project `.pi/subagent-models.json`, merged per key with the project winning. Only the supported types (`implementer`, `task-reviewer`, `code-reviewer`, `verifier`, `worker`, `explore`) are honored; malformed JSON is ignored, and a caller-supplied `model` always wins over the config.
+- **Explore override template** — `agent-templates/explore.md` overrides the built-in `Explore` (`name: Explore`) with the same read-only toolset and fast-recon prompt but no `model:` pin, so it inherits the session model instead of the built-in `anthropic/claude-haiku-4-5` default. Copy-in like the other five templates.
 - **Context-cost recommendation (`toolDescriptionMode: "compact"`)** — measured tool-spec context with workflows enabled (SubagentWorkflow ≈ 4.9k tokens of prose, fixed; `Agent` full ≈ 1.1–1.4k → compact ≈ 250 tokens, ~0.9k saved per turn) and documented the recommendation in README § Subagent Dispatch: prefer `compact` over `custom` because pi-subagents' CI contract test keeps its load-bearing guardrails in lockstep (no drift to maintain); `custom` remains the documented escape hatch for your own prose. Recommended config shipped in `config-examples/subagents.global.json` / `subagents.project.json` (l8x9.10).
 - **Gated fix loop** — when a task's implementer report names a re-runnable covering-test command, SDD fix rounds run as a `SubagentWorkflow` (`scripts/fix-loop.js`) that gates the fix agent on that command (one `gate` call, one `resume: 'fix'`, one re-gated verify), then runs the round's scoped re-review as the pipeline's second stage. `{ passed: false }` triggers the existing breaker adjudication immediately. The prose-path fix loop is unchanged for tasks without a covering-test command. `implementer-prompt.md` now requires a `Covering-test command` line in the report contract.
 - **Final whole-branch review as a SubagentWorkflow** — `scripts/final-review.js` fans parallel dimension reviewers over the whole-branch diff, adversarially verifies each finding in bounded waves, and persists the schema-validated findings to a JSONL (`findingsFile`) so large reviews return a compact envelope; degraded/dimStatus coverage reporting and a single-reviewer fallback.
@@ -80,7 +82,7 @@ Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ### Removed
 
 - **Removed the bundled `subagent` and `plan_tracker` extensions entirely** (`extensions/` directory, `agents/` bundled definitions, and `tests/`). These are replaced by two companion packages the user installs separately: [`@tintinweb/pi-subagents`](https://github.com/tintinweb/pi-subagents) (in-process subagent dispatch via `createAgentSession` — no subprocess, no stdout parsing, no hand-rolled inactivity watchdog) and [`@tintinweb/pi-tasks`](https://github.com/tintinweb/pi-tasks) (dependency-graph task tracking with `TaskCreate`/`TaskUpdate`/`TaskList`). This eliminates the inactivity-timeout bug class by construction (no subprocess lifecycle left in this repo) and brings UX upgrades the bundled tools lacked: a persistent widget, FleetView, mid-run steering, session resume, background/scheduled dispatch, and bidirectional task dependencies. **Breaking change:** skills now reference `Agent(...)` / `TaskCreate(...)` / `TaskUpdate(...)` directly with no fallback path — both prerequisite packages must be installed. See the README Prerequisites section for install commands.
-- **Removed `lsp` from agent template `tools:` frontmatter** — it was a silent no-op (not a real pi built-in tool in either the old system or `pi-subagents`). A real LSP extension is a fast-follow.
+- **Removed `lsp` from agent template `tools:` frontmatter** — it was a silent no-op (not a real pi built-in tool in either the old system or `pi-subagents`). A real LSP extension is a fast-follow, tracked as `pi-packages-egut`.
 
 ### Added
 
@@ -150,7 +152,6 @@ Unified `/superpowers` user command for inspecting and controlling workflow stat
   - `/superpowers tasks [list|add|remove|complete|reset|rewind]` — manipulate plan-tracker tasks directly (mutations persist via `plan_tracker_state` appendEntry).
   - `/superpowers stage [show|<phase>|reset]` — view or advance the workflow stage in place (non-session-spawning counterpart to `/workflow-next`).
   - `/superpowers reset` — reset all workflow state (workflow + TDD + debug + verification + tasks).
-  - (`/superpowers query` is not implemented; tracked as future work.)
 - **`plan_tracker` tool: `add`/`remove`/`rewind` actions** — the tool can now append a task, remove a task by index, and rewind a task + all later tasks to `pending` (in addition to the existing init/update/status/clear).
 - **`plan-tracker-state.ts` shared module** — the single source of truth for the task list, imported by both the `plan_tracker` tool and the `/superpowers tasks` command. Exports mutators + `persistTasks` (appendEntry) + `reconstructTasksFromBranch` (with legacy tool-result-details fallback).
 - **`plan-tracker-render.ts`** — shared TUI widget renderer used by both the tool and the command.
@@ -219,7 +220,7 @@ Synced skill content with the original [`obra/superpowers`](https://github.com/o
 
 - **executing-plans keeps batch-with-checkpoints** — the fork frames executing-plans as the checkpointed alternative to SDD's continuous execution; removing batching would contradict the fork's own writing-plans/SDD framing.
 - **Brainstorming visual companion not ported** (Tier 3) — the fork lacks `visual-companion.md`.
-- **Per-role model selection deferred** — the SDD rework keeps one model across all 5 fix rounds; a separate "pick the best model for each phase" change can come later.
+- **Per-role model selection deferred** — the SDD rework keeps one model across all 5 fix rounds — **shipped**: see per-agent-type models (`subagent-models.json`).
 - **`writing-skills` meta-skill not ported** — it's a skill-authoring guide, low priority for end-users.
 
 ---

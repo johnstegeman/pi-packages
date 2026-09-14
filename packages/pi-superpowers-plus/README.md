@@ -193,7 +193,7 @@ Subagent dispatch is provided by [`@tintinweb/pi-subagents`](https://github.com/
 
 ### Agent Templates
 
-This package ships 5 agent templates (copy-in only — see Install):
+This package ships 6 agent templates (copy-in only — see Install):
 
 | Agent | Purpose | Tools |
 |-------|---------|-------|
@@ -202,8 +202,11 @@ This package ships 5 agent templates (copy-in only — see Install):
 | `code-reviewer` | Production readiness review (read-only); may spawn one nested `Explore` lookup per named question | read, bash, find, grep, ls |
 | `task-reviewer` | Task review: spec compliance + code quality (read-only); may spawn one nested `Explore` lookup per named question | read, bash, find, grep, ls |
 | `verifier` | Adversarial refutation of a single review finding (read-only) | read, bash, find, grep, ls |
+| `explore` | Read-only code location/search (overrides the built-in Explore; inherits the session model) | read, bash, find, grep, ls |
 
 Templates live in `agent-templates/*.md` and use YAML frontmatter (per the `pi-subagents` schema) to declare tools and a system prompt body. Copy them into `.pi/agents/` (project) or `~/.pi/agent/agents/` (global) so `pi-subagents` discovers them.
+
+`explore.md` overrides the built-in `Explore` agent (pi-subagents overlays custom agents onto its defaults by exact name, so the frontmatter declares `name: Explore`). Having no `model:` pin, it inherits the session model instead of the built-in's `anthropic/claude-haiku-4-5` default, while keeping the same read-only toolset and fast-recon prompt.
 
 **Nested lookups (`task-reviewer` and `code-reviewer`).** The `task-reviewer`
 and `code-reviewer` templates set `allowed_subagents: Explore`, so a reviewer
@@ -227,6 +230,54 @@ dispatches receive nested tools (verified by code trace, l8x9.11).
 **Fail-loud vs lenient dispatch.** With `fallbackSubagent: "none"`, the SDD agents dispatch by exact name only: `implementer`, `task-reviewer`, and `code-reviewer` resolve to the shipped templates, so a typo or an un-copied template fails loudly with the available-type list instead of silently substituting an all-tools agent. That's the point for the read-only reviewers (`code-reviewer`/`task-reviewer` carry only `read, bash, find, grep, ls`). The cost: any custom agent you add must be copied before dispatch works, and a missing template is a hard error rather than a fallback. Skip the strict setting if you prefer lenient dispatch (the pi-subagents default).
 
 **Context costs.** With workflows enabled, tool-spec context per turn is dominated by pi-subagents' `SubagentWorkflow` description (≈ 4.9k tokens of prose — the fixed cost of having workflows, not reducible here) plus the `Agent` tool description. `toolDescriptionMode: "compact"` cuts the Agent description ~75% (≈ 1.1–1.4k → ≈ 250 tokens, roughly 0.9k saved per turn): worthwhile on small/local/flash models where tool-spec tokens are expensive relative to context, harmless on large ones. Compact is the recommended mode — pi-subagents' CI contract test keeps its load-bearing guardrails in lockstep with the full description, so nothing to maintain. Want your own prose? Set `custom` and ship `<cwd>/.pi/agent-tool-description.md` (project; `{{placeholders}}` keep the agent list live, a missing file falls back to `full`). Configure via `/agents → Settings → Tool description` or `subagents.json` (global `~/.pi/agent/subagents.json`, project `<cwd>/.pi/subagents.json`); takes effect on the next pi session.
+
+### Per-agent-type models
+
+This package can inject a chosen model into each `Agent` call by subagent type, instead of running every subagent on the session model. Configure it in either location:
+
+- Global: `~/.pi/agent/subagent-models.json`
+- Project: `<cwd>/.pi/subagent-models.json`
+
+The file is optional. With an empty (or absent) `models` map, every subagent type
+simply **inherits the session model** — nothing is injected:
+
+```json
+{
+  "models": {}
+}
+```
+
+Set only the types you want to override. For example, to run the builders and
+reviewers on a stronger model than the session default:
+
+```json
+{
+  "models": {
+    "implementer": "claude-sonnet-4-5",
+    "task-reviewer": "claude-sonnet-4-5",
+    "code-reviewer": "claude-sonnet-4-5",
+    "verifier": "claude-sonnet-4-5"
+  }
+}
+```
+
+Supported keys: `implementer`, `task-reviewer`, `code-reviewer`, `verifier`, `worker`, and `explore`. The project file wins per key over the global file (a key set only globally still applies; a key set in both takes the project value). Any type you leave unset (or unlisted) is injected nothing and simply **inherits the session model** — so a partial config is fine.
+
+Two things beat the injection: a per-call `model` on the `Agent()` call, and a `model:` pin in the agent file's frontmatter. Both are honored as-is — if you (or a template) already chose a model, the config leaves it alone.
+
+**`scopeModels` caveat.** With pi-subagents' `scopeModels: true` (shipped in [`config-examples/subagents.global.json`](config-examples/subagents.global.json)), an injected model is treated as caller-supplied and is validated against the model-scope allowlist; if it is out of scope the dispatch may **hard-error** rather than fall back. Use in-scope model ids in this config, or turn scoping off.
+
+**Explore.** The shipped `explore` template is deliberately unpinned (it overrides the built-in `Explore` and inherits the session model). Setting the `explore` key here is how you give that override an explicit model.
+
+To start from the (empty) example, copy it in — copy-in only, like the templates:
+
+```bash
+# Global (available everywhere) — pick this or the project-local option:
+cp config-examples/subagent-models.json ~/.pi/agent/subagent-models.json
+
+# Or project-local (this project only):
+mkdir -p .pi && cp config-examples/subagent-models.json .pi/subagent-models.json
+```
 
 ### Single Agent
 
@@ -271,7 +322,7 @@ Based on [Superpowers](https://github.com/obra/superpowers) by Jesse Vincent, po
 | **Skills** | 13 workflow skills | Same 13 skills (pi port) | Same 13 skills (three-scenario TDD, restored inline guidance) |
 | **TDD discipline** | Skill tells agent the rules | Skill tells agent the rules | Skill tells agent the rules (three-scenario model) |
 | **Debug discipline** | Manual discipline | Manual discipline | Manual discipline |
-| **Subagent dispatch** | — | — | `@tintinweb/pi-subagents` (`Agent` tool) + 5 agent templates |
+| **Subagent dispatch** | — | — | `@tintinweb/pi-subagents` (`Agent` tool) + 6 agent templates |
 | **TDD in subagents** | — | — | Three-scenario TDD instructions in agent templates + prompt templates |
 | **Task tracking** | — | — | beads via forked `pi-beads` (`beads_create`/`beads_update`/`beads_close`) — persistent issues + wisps |
 | **Reference content** | Everything in SKILL.md | Everything in SKILL.md | Inline guidance + separate reference files loaded on demand |
@@ -280,12 +331,13 @@ Based on [Superpowers](https://github.com/obra/superpowers) by Jesse Vincent, po
 
 ```
 pi-superpowers-plus/
-├── agent-templates/                  # Copy-in agent definitions (5 templates, not auto-loaded)
+├── agent-templates/                  # Copy-in agent definitions (6 templates, not auto-loaded)
 │   ├── implementer.md                # Strict TDD implementation agent
 │   ├── worker.md                     # General-purpose task agent
 │   ├── code-reviewer.md              # Production readiness reviewer
 │   ├── task-reviewer.md              # Task reviewer (spec + code quality)
-│   └── verifier.md                   # Adversarial single-finding verifier (read-only)
+│   ├── verifier.md                   # Adversarial single-finding verifier (read-only)
+│   └── explore.md                    # Built-in Explore override (read-only, inherits session model)
 ├── config-examples/                   # Recommended fail-closed dispatch configs
 │   ├── subagents.global.json          # → ~/.pi/agent/subagents.json (global)
 │   └── subagents.project.json         # → .pi/subagents.json (project-local)

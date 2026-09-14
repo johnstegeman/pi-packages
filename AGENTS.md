@@ -28,6 +28,17 @@ script exists.
 - Langfuse tests: `cd packages/langfuse && npm install` once for runtime dependencies, then `npm test`; the root workspace does not install those dependencies.
 - pi-beads: `cd packages/pi-beads && npm test` runs the tool suite, the cost-tracking suite, and the tool-surface doc-drift guard.
 
+### Sync-loop + dep-mirror checks (root)
+
+The sync simulation and dep-mirror gate are root-level scripts, not package tests. There is no root npm script; run them directly:
+
+```bash
+npm install --no-save semver@^7 --prefix /tmp/depsmirror --silent
+bash scripts/sim/simulate-sync.sh
+NODE_PATH=/tmp/depsmirror/node_modules node scripts/ci/check-deps-mirror.mjs
+NODE_PATH=/tmp/depsmirror/node_modules node --test scripts/ci/check-deps-mirror.test.mjs
+```
+
 ### Statusline settings file isolation
 
 The statusline extension persists its segment-visibility / icon settings to

@@ -41,12 +41,23 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+      - name: Cache semver helper
+        id: depsmirror-cache
+        uses: actions/cache@v4
+        with:
+          path: /tmp/depsmirror
+          key: depsmirror-semver7-${{ runner.os }}-v1
       - name: Install semver helper
+        if: steps.depsmirror-cache.outputs.cache-hit != 'true'
         run: npm install --no-save semver@^7 --prefix /tmp/depsmirror --silent
       - name: Run dep-mirror gate
         env:
           NODE_PATH: /tmp/depsmirror/node_modules
         run: node scripts/ci/check-deps-mirror.mjs
+      - name: Run dep-mirror tests
+        env:
+          NODE_PATH: /tmp/depsmirror/node_modules
+        run: node --test scripts/ci/check-deps-mirror.test.mjs
 
   subtree-smoke:
     name: Subtree install + typecheck
