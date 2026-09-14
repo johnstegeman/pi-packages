@@ -31,7 +31,8 @@ export default function (pi: ExtensionAPI) {
 
   pi.on("session_start", (_event: unknown, ctx: SessionContext) => {
     // Bind without a startup query: beads may not be initialized here, and the
-    // widget has nothing to show until superpowers/beads emits an event.
+    // widget has nothing to show until superpowers/beads emits an event. (The
+    // per-turn `agent_start` refresh below is deliberately left in place.)
     controller.bindSession({
       ui: ctx?.ui ?? null,
       cwd: ctx?.cwd ?? process.cwd(),
@@ -40,7 +41,10 @@ export default function (pi: ExtensionAPI) {
   });
 
   pi.on("agent_start", (_event: unknown, ctx: SessionContext) => {
-    controller.setCwd(ctx?.cwd ?? process.cwd(), { refresh: false });
+    // Per-turn resync: this is NOT startup, so it must keep refreshing. It is the
+    // backstop that surfaces out-of-band mutations (raw `bd`, another session) that
+    // never emit `beads:changed`.
+    controller.setCwd(ctx?.cwd ?? process.cwd());
   });
 
   pi.on("session_shutdown", () => {

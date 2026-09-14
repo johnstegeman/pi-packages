@@ -45,8 +45,11 @@ config/metadata but no database) has the same effect.
 
 `packages/pi-superpowers-plus/extensions/beads-molecule-widget.ts`:
 
-- `session_start` binds `ui`/`cwd` with `initialRefresh: false`; `agent_start`
-  updates `cwd` with `{ refresh: false }`. Neither issues a `bd` query.
+- `session_start` binds `ui`/`cwd` with `initialRefresh: false`, so it issues no `bd`
+  query; beads is optional at startup. `agent_start` updates `cwd` and keeps its
+  default per-turn refresh (`setCwd` without a suppression flag). That refresh is
+  the backstop that surfaces out-of-band mutations (raw `bd`, another session)
+  which never emit `beads:changed`.
 - The widget refreshes only in response to events: `beads:changed` (already wired)
   and non-empty `superpowers:phase` (every superpowers skill calls `set_phase` at
   its start, so the widget appears exactly when superpowers runs). The empty phase
@@ -107,7 +110,8 @@ shared cost-tracking runtime stays populated.
 - **pi-superpowers-plus**: add `no beads database found` to the `isCleanNotFound`
   table; add a controller test that `bindSession({ initialRefresh:false })` and
   `setCwd(cwd, { refresh:false })` issue no `bd` call, and that the first change
-  event paints via the latest `cwd`. (Applied.)
+  event paints via the latest `cwd`. (Applied.) The adapter keeps `agent_start`'s
+  per-turn `setCwd(cwd)` refresh; only `session_start` suppresses the startup query.
 - **pi-beads**: add a fake-bd `none` mode where `info` exits 1; assert session start
   emits nothing, sets no status segment (spy on the fake `ctx.ui.setStatus`), and runs
   only the single `info` invocation — no `where`/`repo`/`list`. Existing success-mode
@@ -122,8 +126,8 @@ shared cost-tracking runtime stays populated.
 - Starting pi where beads is not set up spawns no more than one `bd` process and
   produces no output and no status segment.
 - Starting pi in a beads repo behaves as before (`bd✓`, topology resolved, prime).
-- The molecule widget appears/updates during a superpowers run and never queries
-  `bd` at startup.
+- The molecule widget appears/updates during a superpowers run, is resynced on each
+  `agent_start` turn, and never queries `bd` on `session_start`.
 - Both package test suites pass.
 
 ## Out of scope
