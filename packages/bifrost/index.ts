@@ -47,6 +47,15 @@ export function loadConfig(configPath: string = CONFIG_PATH): BifrostConfig {
     // File not yet created – fine.
   }
 
+  // Best-effort self-heal: a pre-existing world-readable config (0644) is
+  // tightened to 0600 on next load. A missing file or a chmod failure must
+  // never affect loading.
+  try {
+    fs.chmodSync(configPath, 0o600);
+  } catch {
+    // File absent or not chmod-able; best-effort only.
+  }
+
   return {
     // Env vars win; fall back to whatever was saved by /login.
     gatewayUrl: envUrl || file.gatewayUrl,
