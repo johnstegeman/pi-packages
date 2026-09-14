@@ -5,6 +5,7 @@ import {
   createChangeCoalescer,
   displayWidth,
   hasLockedMolecule,
+  isCleanNotFound,
   moleculeWidgetLines,
   nextRefreshArgs,
   parseMoleculeCurrent,
@@ -1180,6 +1181,28 @@ assert.deepEqual(nextRefreshArgs("bd-mol-abc"), ["mol", "current", "bd-mol-abc",
   const keptNull = applyErrorFrame(prev, "bd-mol-g0z", null);
   assert.equal(keptNull.activeMolecule, prev);
   assert.equal(keptNull.lockedMoleculeId, "bd-mol-g0z");
+}
+
+// ---------- M10: transient errors (bd missing) must NOT clear the widget ----------
+{
+  const prev = parseMoleculeCurrent(RAW);
+  const bdMissing = applyErrorFrame(prev, "bd-mol-g0z", {
+    code: 127,
+    stdout: "",
+    stderr: "bd: command not found",
+  });
+  assert.equal(bdMissing.activeMolecule, prev, "bd: command not found keeps the frame");
+  assert.equal(bdMissing.lockedMoleculeId, "bd-mol-g0z", "bd: command not found keeps the lock");
+
+  // predicate: clean signals true, transient/generic "not found" false
+  assert.equal(isCleanNotFound({ code: 127, stdout: "", stderr: "bd: command not found" }), false);
+  assert.equal(isCleanNotFound({ code: 1, stdout: "molecule bd-mol-g0z not found", stderr: "" }), true);
+  assert.equal(isCleanNotFound({ code: 1, stdout: "molecule not found", stderr: "" }), true);
+  assert.equal(isCleanNotFound({ code: 1, stdout: "", stderr: "no active molecule" }), true);
+  assert.equal(isCleanNotFound({ code: 1, stdout: "connection refused", stderr: "" }), false);
+  assert.equal(isCleanNotFound(null), false);
+  // "molecule" in stdout must not pair with "not found" in stderr across the newline
+  assert.equal(isCleanNotFound({ code: 1, stdout: "molecule x", stderr: "not found" }), false);
 }
 
 // ---------- Finding 2: current-row staleness fallback (close-as-you-go gap) ----------

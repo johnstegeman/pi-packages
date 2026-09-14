@@ -149,17 +149,28 @@ export function applyMoleculeFrame(prevActiveMolecule, prevLockedId, parsed, que
 }
 
 /**
- * Pure transition for a non-zero `bd mol current` result. bd emits some errors
- * ("no active molecule", "not found") on **stdout**, so match both output
- * streams. Only a clean not-found / no-active signal clears the widget AND the
- * lock (which lets the next refresh re-infer a fresh molecule); arbitrary or
- * transient failures keep both — an unreachable bd binary must not blank a
- * widget that was showing real progress a moment ago.
+ * True only for bd's clean "this molecule is gone" signals. Considers both
+ * output streams (bd writes some errors on stdout). Requires "molecule" and
+ * "not found" on the same line, so "molecule" in stdout cannot pair with
+ * "not found" in stderr. A bare "not found" — e.g. `bd: command not found` —
+ * is NOT a clean signal.
+ */
+export function isCleanNotFound(r) {
+  if (!r) return false;
+  const msg = `${r.stdout ?? ""}\n${r.stderr ?? ""}`;
+  return /no active molecule/i.test(msg) || /\bmolecule\b[^\n]*\bnot found\b/i.test(msg);
+}
+
+/**
+ * Pure transition for a non-zero `bd mol current` result. Only a clean
+ * not-found / no-active signal clears the widget AND the lock (which lets the
+ * next refresh re-infer a fresh molecule); arbitrary or transient failures keep
+ * both — an unreachable bd binary must not blank a widget that was showing real
+ * progress a moment ago.
  */
 export function applyErrorFrame(prevActiveMolecule, prevLockedId, r) {
   if (!r) return { activeMolecule: prevActiveMolecule, lockedMoleculeId: prevLockedId };
-  const msg = `${r.stdout ?? ""}\n${r.stderr ?? ""}`;
-  if (/no active molecule|not found/i.test(msg)) {
+  if (isCleanNotFound(r)) {
     return { activeMolecule: null, lockedMoleculeId: null };
   }
   return { activeMolecule: prevActiveMolecule, lockedMoleculeId: prevLockedId };
