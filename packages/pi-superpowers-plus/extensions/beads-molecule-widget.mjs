@@ -98,15 +98,15 @@ export function parseMoleculeCurrent(json) {
     next_step: obj.next_step ?? null,
     steps,
     doneCount,
-    total: obj.steps.length,
+    total: steps.length,
   };
 }
 
 /**
  * True when a molecule lock is actually usable: null, undefined, or an empty
  * string all mean "no lock" (a blank id is never a valid query target). Both
- * nextRefreshArgs and the .ts refreshMolecule use this single predicate so the
- * should-query-by-id decision can never drift between the two call sites.
+ * nextRefreshArgs and the controller's refresh() use this single predicate so
+ * the should-query-by-id decision can never drift between the two call sites.
  */
 export function hasLockedMolecule(lockedMoleculeId) {
   return lockedMoleculeId != null && lockedMoleculeId !== "";
@@ -149,17 +149,28 @@ export function applyMoleculeFrame(prevActiveMolecule, prevLockedId, parsed, que
 }
 
 /**
- * Pure transition for a non-zero `bd mol current` result. bd emits some errors
- * ("no active molecule", "not found") on **stdout**, so match both output
- * streams. Only a clean not-found / no-active signal clears the widget AND the
- * lock (which lets the next refresh re-infer a fresh molecule); arbitrary or
- * transient failures keep both — an unreachable bd binary must not blank a
- * widget that was showing real progress a moment ago.
+ * True only for bd's clean "this molecule is gone" signals. Considers both
+ * output streams (bd writes some errors on stdout). Requires "molecule" and
+ * "not found" on the same line, so "molecule" in stdout cannot pair with
+ * "not found" in stderr. A bare "not found" — e.g. `bd: command not found` —
+ * is NOT a clean signal.
+ */
+export function isCleanNotFound(r) {
+  if (!r) return false;
+  const msg = `${r.stdout ?? ""}\n${r.stderr ?? ""}`;
+  return /no active molecule/i.test(msg) || /\bmolecule\b[^\n]*\bnot found\b/i.test(msg);
+}
+
+/**
+ * Pure transition for a non-zero `bd mol current` result. Only a clean
+ * not-found / no-active signal clears the widget AND the lock (which lets the
+ * next refresh re-infer a fresh molecule); arbitrary or transient failures keep
+ * both — an unreachable bd binary must not blank a widget that was showing real
+ * progress a moment ago.
  */
 export function applyErrorFrame(prevActiveMolecule, prevLockedId, r) {
   if (!r) return { activeMolecule: prevActiveMolecule, lockedMoleculeId: prevLockedId };
-  const msg = `${r.stdout ?? ""}\n${r.stderr ?? ""}`;
-  if (/no active molecule|not found/i.test(msg)) {
+  if (isCleanNotFound(r)) {
     return { activeMolecule: null, lockedMoleculeId: null };
   }
   return { activeMolecule: prevActiveMolecule, lockedMoleculeId: prevLockedId };
@@ -196,15 +207,33 @@ export function phaseFor(state) {
  * happens if dirty, and a new window starts — otherwise the timer clears and
  * the next trigger() is a fresh leading edge. Caps fires to at most one per
  * windowMs during a sustained burst without ever delaying the first one.
+ * cancel() clears the pending window and dirty flag; a later trigger() is
+ * again a fresh leading edge. A throwing onFire is routed to warn instead of
+ * wedging the timer chain. The warn parameter defaults to console.warn so the
+ * 3-arg form keeps working; callers may inject their own.
  */
-export function createChangeCoalescer(onFire, windowMs = 10000, timers = { setTimeout, clearTimeout }) {
+export function createChangeCoalescer(
+  onFire,
+  windowMs = 10000,
+  timers = { setTimeout, clearTimeout },
+  warn = console.warn,
+) {
   let timer = null;
   let dirty = false;
+
+  function fire() {
+    try {
+      onFire();
+    } catch (err) {
+      warn("[pi-superpowers-plus] coalescer onFire threw:", err);
+    }
+  }
+
   function scheduleTick() {
     timer = timers.setTimeout(() => {
       if (dirty) {
         dirty = false;
-        onFire();
+        fire();
         scheduleTick();
       } else {
         timers.clearTimeout(timer);
@@ -212,14 +241,22 @@ export function createChangeCoalescer(onFire, windowMs = 10000, timers = { setTi
       }
     }, windowMs);
   }
+
   return {
     trigger() {
       if (timer === null) {
-        onFire();
+        fire();
         scheduleTick();
       } else {
         dirty = true;
       }
+    },
+    cancel() {
+      if (timer !== null) {
+        timers.clearTimeout(timer);
+        timer = null;
+      }
+      dirty = false;
     },
   };
 }

@@ -1,7 +1,13 @@
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
+import { createPhaseLifecycle } from "./set-phase.mjs";
 
 export default function (pi: ExtensionAPI) {
+  createPhaseLifecycle({
+    emit: (channel, data) => pi.events.emit(channel, data),
+    on: (event, handler) => pi.on(event, handler),
+  });
+
   pi.registerTool({
     name: "set_phase",
     label: "Set Phase",

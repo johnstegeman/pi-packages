@@ -5,6 +5,7 @@ import {
   createChangeCoalescer,
   displayWidth,
   hasLockedMolecule,
+  isCleanNotFound,
   moleculeWidgetLines,
   nextRefreshArgs,
   parseMoleculeCurrent,
@@ -868,6 +869,61 @@ assert.ok(plain[0].includes("Superpowers:"), "absent theme renders plain label")
   assert.equal(fires.length, 3, "trigger after idle is a fresh leading edge");
 }
 
+// ---------- coalescer: cancel() ----------
+{
+  let scheduled = null;
+  const fakeTimers = {
+    setTimeout: (cb, ms) => {
+      scheduled = { cb, ms };
+      return scheduled;
+    },
+    clearTimeout: (t) => {
+      if (t === scheduled) scheduled = null;
+    },
+  };
+  const fires = [];
+  const c = createChangeCoalescer(() => fires.push(1), 10000, fakeTimers);
+  c.trigger();
+  c.trigger(); // dirty, timer open
+  assert.ok(scheduled, "timer pending before cancel");
+  c.cancel();
+  assert.equal(scheduled, null, "cancel clears the pending timer");
+  c.trigger();
+  assert.equal(fires.length, 2, "trigger after cancel is a fresh leading edge");
+}
+
+// ---------- coalescer: a throwing onFire must not wedge the chain ----------
+{
+  let scheduled = null;
+  const fakeTimers = {
+    setTimeout: (cb, ms) => {
+      scheduled = { cb, ms };
+      return scheduled;
+    },
+    clearTimeout: (t) => {
+      if (t === scheduled) scheduled = null;
+    },
+  };
+  const warns = [];
+  let calls = 0;
+  const c = createChangeCoalescer(
+    () => {
+      calls += 1;
+      if (calls === 1) throw new Error("boom");
+    },
+    10000,
+    fakeTimers,
+    (...a) => warns.push(a),
+  );
+  c.trigger();
+  assert.equal(calls, 1, "first trigger called onFire");
+  assert.equal(warns.length, 1, "throwing onFire is warned");
+  assert.ok(scheduled, "timer chain survives the throw");
+  c.trigger(); // dirty
+  scheduled.cb(); // trailing fire
+  assert.equal(calls, 2, "trailing fire still happens after a throw");
+}
+
 // ---------- stale-frame fix: args selection ----------
 assert.deepEqual(nextRefreshArgs(null), ["mol", "current", "--json"]); // no lock yet -> no-id inference
 assert.deepEqual(nextRefreshArgs("bd-mol-abc"), ["mol", "current", "bd-mol-abc", "--json"]); // locked -> by id
@@ -1180,6 +1236,91 @@ assert.deepEqual(nextRefreshArgs("bd-mol-abc"), ["mol", "current", "bd-mol-abc",
   const keptNull = applyErrorFrame(prev, "bd-mol-g0z", null);
   assert.equal(keptNull.activeMolecule, prev);
   assert.equal(keptNull.lockedMoleculeId, "bd-mol-g0z");
+}
+
+// ---------- M10: transient errors (bd missing) must NOT clear the widget ----------
+{
+  const prev = parseMoleculeCurrent(RAW);
+  const bdMissing = applyErrorFrame(prev, "bd-mol-g0z", {
+    code: 127,
+    stdout: "",
+    stderr: "bd: command not found",
+  });
+  assert.equal(bdMissing.activeMolecule, prev, "bd: command not found keeps the frame");
+  assert.equal(bdMissing.lockedMoleculeId, "bd-mol-g0z", "bd: command not found keeps the lock");
+
+  // predicate: clean signals true, transient/generic "not found" false
+  assert.equal(isCleanNotFound({ code: 127, stdout: "", stderr: "bd: command not found" }), false);
+  assert.equal(isCleanNotFound({ code: 1, stdout: "molecule bd-mol-g0z not found", stderr: "" }), true);
+  assert.equal(isCleanNotFound({ code: 1, stdout: "molecule not found", stderr: "" }), true);
+  assert.equal(isCleanNotFound({ code: 1, stdout: "", stderr: "no active molecule" }), true);
+  assert.equal(isCleanNotFound({ code: 1, stdout: "connection refused", stderr: "" }), false);
+  assert.equal(isCleanNotFound(null), false);
+  // captured real bd output: exit 1, single-line JSON error on stdout
+  assert.equal(
+    isCleanNotFound({
+      code: 1,
+      stdout: `{"error": "molecule 'bd-mol-g0z' not found", "status": "error"}`,
+      stderr: "",
+    }),
+    true,
+    "captured real-bd JSON not-found on stdout is clean",
+  );
+  // "molecule" in stdout must not pair with "not found" in stderr across the newline
+  assert.equal(isCleanNotFound({ code: 1, stdout: "molecule x", stderr: "not found" }), false);
+}
+
+// ---------- lock-release guard: total counts only parsed steps ----------
+{
+  const RAW_WITH_MALFORMED = JSON.stringify([
+    {
+      molecule_id: "bd-mol-mal",
+      molecule_title: "superpowers-workflow",
+      current_step: null,
+      next_step: null,
+      steps: [
+        {
+          issue: { id: "mal.1", title: "Explore project context: x", issue_type: "task", status: "closed" },
+          status: "done",
+          is_current: false,
+        },
+        {
+          issue: { id: "mal.2", title: "Implement x", issue_type: "task", status: "closed" },
+          status: "done",
+          is_current: false,
+        },
+        { status: "done", is_current: false }, // malformed raw step: no `issue`
+      ],
+    },
+  ]);
+  const malformed = parseMoleculeCurrent(RAW_WITH_MALFORMED);
+  assert.equal(malformed.total, 2, "total counts only parsed steps");
+  assert.equal(malformed.doneCount, 2, "both parsed steps are done");
+  const released = applyMoleculeFrame(null, "bd-mol-mal", malformed, true);
+  assert.equal(released.lockedMoleculeId, null, "fully-done molecule with a malformed raw step releases the lock");
+}
+
+// ---------- lock-release guard boundary: all-malformed steps => total 0, lock released ----------
+{
+  // CONTROLLER RULING: a molecule whose `steps` are ALL malformed parses to an
+  // empty frame (total 0, doneCount 0); applyMoleculeFrame treats it as finished
+  // and releases the lock. Boundary pinned deliberately — no parsed steps to
+  // display, so the finished frame is shown once and the next refresh re-infers.
+  const RAW_ALL_MALFORMED = JSON.stringify([
+    {
+      molecule_id: "bd-mol-nosteps",
+      molecule_title: "superpowers-workflow",
+      current_step: null,
+      next_step: null,
+      steps: [{ status: "done" }, { foo: "bar" }],
+    },
+  ]);
+  const parsed = parseMoleculeCurrent(RAW_ALL_MALFORMED);
+  assert.equal(parsed.total, 0, "all-malformed steps yield total 0");
+  assert.equal(parsed.doneCount, 0, "all-malformed steps yield doneCount 0");
+  const applied = applyMoleculeFrame(null, "bd-mol-nosteps", parsed, true);
+  assert.equal(applied.activeMolecule, parsed, "the empty frame is still displayed once");
+  assert.equal(applied.lockedMoleculeId, null, "all-malformed steps release the lock");
 }
 
 // ---------- Finding 2: current-row staleness fallback (close-as-you-go gap) ----------
