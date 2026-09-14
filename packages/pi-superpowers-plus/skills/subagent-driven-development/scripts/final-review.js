@@ -119,7 +119,7 @@ const requirement = (dimension) => {
     'It contains the commit list, stat summary, and the full diff with context — it is your view of the change. Do not re-run git commands. Your review is READ-ONLY.',
     '',
     'What was implemented:',
-    ARGS.description,
+    (ARGS.description ?? ''),
     '',
     'Read the plan Global Constraints (they are the attention lens): beads_show({ id: "' + ARGS.gateBeadId + '", full: true }).',
     '',

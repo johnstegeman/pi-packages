@@ -1,5 +1,5 @@
 ---
-description: "Adversarial verifier: read-only refutation of a single finding (read-only)"
+description: "Adversarial verifier: refutation of a single finding (read-only)"
 tools: read, bash, find, grep, ls
 thinking: medium
 max_turns: 25

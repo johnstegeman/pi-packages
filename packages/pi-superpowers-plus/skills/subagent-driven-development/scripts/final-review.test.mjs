@@ -65,6 +65,14 @@ test("args: malformed, non-object, and missing required fields fail loud", async
     runWorkflow(src, { args: {}, agent }),
     /final-review\.js: missing required args: base, head, packagePath, gateBeadId/,
   )
+  // one blank-value case per required field (spec: each required field fails loud)
+  const validArgs = { base: 'a', head: 'b', packagePath: '/x', gateBeadId: 'g' }
+  for (const field of ['base', 'head', 'packagePath', 'gateBeadId']) {
+    await assert.rejects(
+      runWorkflow(src, { args: { ...validArgs, [field]: '' }, agent }),
+      new RegExp('final-review\\.js: missing required args: ' + field),
+    )
+  }
 })
 
 test("dimensions: DEFAULT_DIMENSIONS + membership guard + fallback", () => {

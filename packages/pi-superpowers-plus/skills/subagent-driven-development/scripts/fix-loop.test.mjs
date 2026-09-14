@@ -165,13 +165,17 @@ test("behavior: malformed args string throws", async () => {
 })
 
 test("behavior: missing required field returns bad-args envelope", async () => {
-  const result = await runWorkflow(src, {
-    args: { ...passedArgs, head: '' },
-    agent: async () => { throw new Error('must not be called') },
-  })
-  assert.equal(result.passed, false);
-  assert.equal(result.reason, 'bad-args');
-  assert.match(result.gateOutput, /head/);
+  for (const field of ['taskBeadId', 'reportFilePath', 'findings', 'gate', 'fixBase', 'head', 'gateBeadId', 'reviewPackage']) {
+    let calls = 0
+    const result = await runWorkflow(src, {
+      args: { ...passedArgs, [field]: '' },
+      agent: async () => { calls++; throw new Error('must not be called') },
+    })
+    assert.equal(result.passed, false, field + ' must yield passed:false');
+    assert.equal(result.reason, 'bad-args', field + ' must yield reason bad-args');
+    assert.match(result.gateOutput, new RegExp(field), field + ' must be named in gateOutput');
+    assert.equal(calls, 0, field + ' must not dispatch any agent');
+  }
 })
 
 run();
