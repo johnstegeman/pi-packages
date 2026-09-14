@@ -28,6 +28,13 @@ assert.deepEqual(
   "ignores extra top-level keys",
 );
 
+// parseModelsConfig: stored model values are trimmed
+assert.deepEqual(
+  parseModelsConfig(JSON.stringify({ models: { explore: " s " } })),
+  { explore: "s" },
+  "trims stored model value",
+);
+
 // mergeModelsConfig: project wins per key
 assert.deepEqual(mergeModelsConfig({ implementer: "a", worker: "b" }, { implementer: "c" }), {
   implementer: "c",

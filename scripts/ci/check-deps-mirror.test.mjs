@@ -76,7 +76,9 @@ test('malformed range fails with INVALID RANGE message', () => {
 
 // With no semver resolvable, the script exits 2 and reports NODE_PATH.
 test('semver-unresolvable exits 2', () => {
-  const { code, out } = runInScratch({ rootDeps: MIRRORED, subDeps: MIRRORED, env: { NODE_PATH: '' } });
+  const { code, out } = runInScratch({ rootDeps: MIRRORED, subDeps: MIRRORED, env: { NODE_PATH: '/nonexistent-path' } });
+  assert.equal(code, 2);
+  assert.match(out, /NODE_PATH=\/nonexistent-path/);
   assert.equal(code, 2);
   assert.match(out, /NODE_PATH/);
 });

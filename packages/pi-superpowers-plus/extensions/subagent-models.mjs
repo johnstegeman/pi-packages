@@ -22,7 +22,7 @@ export function parseModelsConfig(rawText) {
   const out = {};
   for (const [type, model] of Object.entries(models)) {
     if (SUPPORTED_TYPES.includes(type) && typeof model === "string" && model.trim() !== "") {
-      out[type] = model;
+      out[type] = model.trim();
     }
   }
   return out;
