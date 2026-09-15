@@ -112,6 +112,10 @@ export default function piBeadsLean(pi: any) {
   let beadsReady = false; // umbrella .beads reachable
   let needPrime = true; // inject lean prime on next turn (reset at start + after compaction)
   let needSync = true; // umbrella aggregate may be stale -> resync before next read
+  let topologyReady = false; // resolveTopology completed against a reachable DB
+  let topologyInFlight: Promise<void> | null = null;
+  let lastResolveFailedAt = 0; // Date.now() of the last failed pass
+  const RESOLVE_RETRY_MS = 5000; // failure throttle
 
   // ---- bd runner (execFile = no shell injection); cwd selects which DB bd resolves ----
   async function bd(
@@ -221,6 +225,7 @@ export default function piBeadsLean(pi: any) {
   }
 
   async function resolveTopology(): Promise<void> {
+    topologyReady = false;
     prefixToDir.clear();
     basenameToDir.clear();
     defaultRepoDir = null;
@@ -271,8 +276,27 @@ export default function piBeadsLean(pi: any) {
     }
 
     beadsReady = (await bd(["info"], umbrella)).ok;
+    topologyReady = beadsReady;
     needSync = true;
     needPrime = true;
+  }
+
+  // Lazy, single-flight, throttled topology resolution. Routed tools await this so a
+  // transient failure at session_start does not poison the session. A healthy topology
+  // is a no-op; after a failed pass, retry at most once per RESOLVE_RETRY_MS.
+  async function ensureTopology(): Promise<void> {
+    if (topologyReady) return;
+    if (topologyInFlight) return topologyInFlight;
+    if (Date.now() - lastResolveFailedAt < RESOLVE_RETRY_MS) return;
+    topologyInFlight = resolveTopology()
+      .catch(() => {
+        /* bd() never throws; guard only */
+      })
+      .finally(() => {
+        topologyInFlight = null;
+        if (!beadsReady) lastResolveFailedAt = Date.now();
+      });
+    return topologyInFlight;
   }
 
   // refresh the aggregate before a read, at most once per "dirty" window
@@ -650,6 +674,7 @@ export default function piBeadsLean(pi: any) {
       },
     },
     async execute(_id: string, params: any) {
+      await ensureTopology();
       const scope = resolveRepoTarget(params?.repo) ?? umbrella;
       if (params?.repo && !resolveRepoTarget(params.repo))
         return textResult(
@@ -715,6 +740,7 @@ export default function piBeadsLean(pi: any) {
       },
     },
     async execute(_id: string, params: any) {
+      await ensureTopology();
       const scoped = params?.repo ? resolveRepoTarget(params.repo) : null;
       if (params?.repo && !scoped)
         return textResult(
@@ -747,6 +773,7 @@ export default function piBeadsLean(pi: any) {
       required: ["id"],
     },
     async execute(_id: string, params: any) {
+      await ensureTopology();
       if (!params?.id) return textResult("id is required");
       const full = params.full === true || params.full === "true";
       await ensureFresh();
@@ -795,6 +822,7 @@ export default function piBeadsLean(pi: any) {
       required: ["ids"],
     },
     async execute(_id: string, params: any) {
+      await ensureTopology();
       if (!params?.ids) return textResult("ids is required");
       const ids = String(params.ids)
         .split(/[\s,]+/)
@@ -887,6 +915,7 @@ export default function piBeadsLean(pi: any) {
       required: ["title"],
     },
     async execute(_id: string, params: any) {
+      await ensureTopology();
       if (!params?.title) return textResult("title is required");
       const target = resolveCreateTarget(params?.repo);
       if ("error" in target) return textResult(target.error);
@@ -955,6 +984,7 @@ export default function piBeadsLean(pi: any) {
       required: ["parent", "tasks"],
     },
     async execute(_id: string, params: any) {
+      await ensureTopology();
       if (!params?.parent || !Array.isArray(params?.tasks) || params.tasks.length === 0)
         return textResult("parent and tasks[] are required (tasks must be non-empty)");
       const repoDir = dirForPrefix(String(params.parent));
@@ -1090,6 +1120,7 @@ export default function piBeadsLean(pi: any) {
       required: ["id"],
     },
     async execute(_id: string, params: any) {
+      await ensureTopology();
       if (!params?.id) return textResult("id is required");
       const repoDir = dirForPrefix(String(params.id));
       if (!repoDir)
@@ -1175,6 +1206,7 @@ export default function piBeadsLean(pi: any) {
       required: ["ids"],
     },
     async execute(_id: string, params: any) {
+      await ensureTopology();
       if (!params?.ids) return textResult("ids is required");
       const ids = String(params.ids)
         .split(/[\s,]+/)
@@ -1256,6 +1288,7 @@ export default function piBeadsLean(pi: any) {
       required: ["ids"],
     },
     async execute(_id: string, params: any) {
+      await ensureTopology();
       if (!params?.ids) return textResult("ids is required");
       const ids = String(params.ids).split(/[\s,]+/).filter(Boolean);
       if (ids.length === 0) return textResult("no valid ids");
@@ -1300,6 +1333,7 @@ export default function piBeadsLean(pi: any) {
       required: ["id"],
     },
     async execute(_id: string, params: any) {
+      await ensureTopology();
       if (!params?.id) return textResult("id is required");
       const dir = dirForPrefix(String(params.id));
       if (!dir)
@@ -1331,6 +1365,7 @@ export default function piBeadsLean(pi: any) {
       required: ["action"],
     },
     async execute(_id: string, params: any) {
+      await ensureTopology();
       const action = String(params?.action ?? "").toLowerCase();
       if (!["remember", "recall", "list", "forget"].includes(action))
         return textResult(`invalid action '${params?.action}' (allowed: remember|recall|list|forget)`);
@@ -1380,6 +1415,7 @@ export default function piBeadsLean(pi: any) {
       },
     },
     async execute(_id: string, params: any) {
+      await ensureTopology();
       if (params?.status) {
         const st = String(params.status);
         if (!["open", "in_progress", "blocked", "deferred"].includes(st))
@@ -1409,6 +1445,7 @@ export default function piBeadsLean(pi: any) {
       },
     },
     async execute(_id: string, params: any) {
+      await ensureTopology();
       const ids = params?.ids ? String(params.ids).split(/[\s,]+/).filter(Boolean) : [];
       if (params?.status) {
         const st = String(params.status);
@@ -1449,6 +1486,7 @@ export default function piBeadsLean(pi: any) {
       required: ["blocks"],
     },
     async execute(_id: string, params: any) {
+      await ensureTopology();
       if (!params?.blocks) return textResult("blocks is required");
       const dir = dirForPrefix(String(params.blocks));
       if (!dir) return textResult(`unknown repo for id '${params.blocks}'`);
@@ -1480,6 +1518,7 @@ export default function piBeadsLean(pi: any) {
       required: ["id"],
     },
     async execute(_id: string, params: any) {
+      await ensureTopology();
       if (!params?.id) return textResult("id is required");
       const id = String(params.id);
       const dir = dirForPrefix(id);
@@ -1541,6 +1580,7 @@ export default function piBeadsLean(pi: any) {
       required: ["proto"],
     },
     async execute(_id: string, params: any) {
+      await ensureTopology();
       if (!params?.proto) return textResult("proto is required");
       const target = resolveCreateTarget(params?.repo);
       if ("error" in target) return textResult(target.error);
@@ -1583,6 +1623,7 @@ export default function piBeadsLean(pi: any) {
       required: ["id"],
     },
     async execute(_id: string, params: any) {
+      await ensureTopology();
       if (!params?.id) return textResult("id is required");
       await ensureFresh();
       const r = await bd(["mol", "show", String(params.id), "--json"], umbrella);
@@ -1601,6 +1642,7 @@ export default function piBeadsLean(pi: any) {
       required: ["id"],
     },
     async execute(_id: string, params: any) {
+      await ensureTopology();
       if (!params?.id) return textResult("id is required");
       await ensureFresh();
       const r = await bd(["mol", "current", String(params.id), "--json"], umbrella);
@@ -1623,6 +1665,7 @@ export default function piBeadsLean(pi: any) {
       required: ["id"],
     },
     async execute(_id: string, params: any) {
+      await ensureTopology();
       if (!params?.id) return textResult("id is required");
       await ensureFresh();
       // Unlike beads_ready, beads_mol_ready intentionally omits --include-ephemeral (durable molecule steps; matches molShow/molCurrent).
@@ -1653,6 +1696,7 @@ export default function piBeadsLean(pi: any) {
       required: ["issue", "blocker"],
     },
     async execute(_id: string, params: any) {
+      await ensureTopology();
       if (!params?.issue || !params?.blocker)
         return textResult("issue and blocker are required");
       const dir = dirForPrefix(String(params.issue));
@@ -1697,6 +1741,7 @@ export default function piBeadsLean(pi: any) {
       required: ["issue", "blocker"],
     },
     async execute(_id: string, params: any) {
+      await ensureTopology();
       if (!params?.issue || !params?.blocker)
         return textResult("issue and blocker are required");
       const dir = dirForPrefix(String(params.issue));
@@ -1733,6 +1778,7 @@ export default function piBeadsLean(pi: any) {
       required: ["id", "text"],
     },
     async execute(_id: string, params: any) {
+      await ensureTopology();
       if (!params?.id || !params?.text)
         return textResult("id and text are required");
       const dir = dirForPrefix(String(params.id));
@@ -1758,6 +1804,7 @@ export default function piBeadsLean(pi: any) {
       required: ["id"],
     },
     async execute(_id: string, params: any) {
+      await ensureTopology();
       if (!params?.id) return textResult("id is required");
       await ensureFresh();
       const r = await bd(["comments", String(params.id), "--json"], umbrella);

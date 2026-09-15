@@ -13,7 +13,7 @@
 // The fixture answers are mode-dependent (read from FAKE_BD_MODE) so one suite
 // drives both single-repo and umbrella topology.
 import assert from "node:assert/strict";
-import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, realpathSync, existsSync } from "node:fs";
+import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, realpathSync, existsSync, rmSync } from "node:fs";
 import { join, delimiter } from "node:path";
 import { tmpdir } from "node:os";
 
@@ -91,6 +91,13 @@ case "$1" in
     if [ "$MODE" = "none" ]; then
       echo "Error: no beads database found" >&2
       exit 1
+    fi
+    if [ "$MODE" = "transient" ]; then
+      if [ ! -f "$FAKE_BD_TRANSIENT_MARKER" ]; then
+        : > "$FAKE_BD_TRANSIENT_MARKER"
+        echo "Error: no beads database found" >&2
+        exit 1
+      fi
     fi
     echo "bd 1.2.2 (fixture)"; exit 0 ;;
   ready)
@@ -591,6 +598,46 @@ test("no workspace: startup probes info once, sets no status, emits nothing", as
   const invs = invocations();
   assert.equal(invs.length, 1, `expected exactly one bd call; got ${JSON.stringify(invs)}`);
   assert.deepEqual(invs[0], ["info"], "the single startup probe is bd info");
+});
+
+test("transient startup failure: first routed write re-resolves and succeeds", async () => {
+  const marker = join(root, "transient.marker");
+  rmSync(marker, { force: true });
+  process.env.FAKE_BD_TRANSIENT_MARKER = marker;
+  process.env.FAKE_BD_MODE = "transient";
+  resetLog();
+  const s = makePi();
+  const ui = { setStatus: (...args) => s.status.push(args) };
+  await s.handlers.session_start[0]({}, { cwd: repoDir, ui });
+  assert.deepEqual(s.status, [], "failed startup probe must be silent");
+  assert.equal(s.emitted.length, 0, "startup must not emit");
+  resetLog();
+
+  const r = await s.byName.get("beads_create").execute("c", { title: "After recovery" });
+  assert.ok(okResult(r), JSON.stringify(r));
+  const invs = invocations();
+  assert.ok(
+    invs.some((iv) => iv[0] === "where"),
+    `expected a re-resolve (bd where); got ${JSON.stringify(invs)}`,
+  );
+  findInvocation(["create", "After recovery"]);
+  delete process.env.FAKE_BD_TRANSIENT_MARKER;
+});
+
+test("repeated resolution failures are throttled to one walk per window", async () => {
+  process.env.FAKE_BD_MODE = "none";
+  resetLog();
+  const s = makePi();
+  const ui = { setStatus: (...args) => s.status.push(args) };
+  await s.handlers.session_start[0]({}, { cwd: repoDir, ui });
+  resetLog();
+
+  await s.byName.get("beads_show").execute("c", { id: "proj-1a2" });
+  const afterFirst = invocations().filter((iv) => iv[0] === "where").length;
+  assert.ok(afterFirst >= 1, `first call should resolve at least once; got ${JSON.stringify(invocations())}`);
+  await s.byName.get("beads_show").execute("c", { id: "proj-1a2" });
+  const afterSecond = invocations().filter((iv) => iv[0] === "where").length;
+  assert.equal(afterSecond, afterFirst, "second call within the throttle window must not re-resolve");
 });
 
 test("single-repo: beads_create builds argv and emits beads:changed", async () => {
