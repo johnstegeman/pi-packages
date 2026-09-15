@@ -28,6 +28,7 @@
 
 import { execFile } from "node:child_process";
 import { writeFileSync, mkdtempSync, rmSync } from "node:fs";
+import { createHash } from "node:crypto";
 import { tmpdir } from "node:os";
 import { promisify } from "node:util";
 import * as path from "node:path";
@@ -81,6 +82,13 @@ export const DEP_LINK_TYPES = [
   "discovered-from",
 ];
 export const GATE_TYPES = ["human", "timer", "gh:run", "gh:pr"];
+
+export function workspaceKey(canonicalPath: string): string {
+  const canonical = String(canonicalPath ?? "")
+    .trim()
+    .replace(/\/+$/, "");
+  return createHash("sha256").update(canonical).digest("hex").slice(0, 12);
+}
 
 export interface BeadsRuntime {
   bd: (

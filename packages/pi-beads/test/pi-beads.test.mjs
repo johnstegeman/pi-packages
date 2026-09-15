@@ -377,7 +377,7 @@ writeFileSync(join(binDir, "bd"), stub, { mode: 0o755 });
 process.env.PATH = `${binDir}${delimiter}${process.env.PATH}`;
 process.env.FAKE_BD_LOG = logFile;
 
-const { default: piBeadsLean, getBeadsRuntime } = await import("../src/index.ts");
+const { default: piBeadsLean, getBeadsRuntime, workspaceKey } = await import("../src/index.ts");
 const { DEP_LINK_TYPES, GATE_TYPES } = await import("../src/index.ts");
 
 // ---------------------------------------------------------------------------
@@ -1652,6 +1652,15 @@ test("single-repo: a temp-dir failure during dep wiring still runs afterWrite", 
   } finally {
     process.env.TMPDIR = prevTmp;
   }
+});
+
+test("workspaceKey matches the shared golden fixture (pi-beads)", () => {
+  const fx = JSON.parse(
+    readFileSync(new URL("../../../scripts/fixtures/workspace-key-vectors.json", import.meta.url), "utf8"),
+  );
+  for (const { path: p, key } of fx) assert.equal(workspaceKey(p), key, `key for ${p}`);
+  // trailing slash + surrounding whitespace normalise to the same key
+  assert.equal(workspaceKey("  /Users/me/repo/  "), "35696fd2bb77");
 });
 
 // ---------------------------------------------------------------------------
