@@ -1,7 +1,9 @@
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import {
   applyErrorFrame,
   applyMoleculeFrame,
+  canonicalizeWorkspacePath,
   createChangeCoalescer,
   displayWidth,
   hasLockedMolecule,
@@ -9,10 +11,88 @@ import {
   moleculeWidgetLines,
   nextRefreshArgs,
   parseMoleculeCurrent,
+  parseMoleculeCurrents,
+  parseMoleculeRoots,
   phaseFor,
+  pickWorkspaceMolecule,
   topicFor,
   waitingReviewStep,
+  workspaceKey,
 } from "../extensions/beads-molecule-widget.mjs";
+
+// ---------- workspace key: shared golden fixture ----------
+const WORKSPACE_FIXTURE = JSON.parse(
+  readFileSync(new URL("../../../scripts/fixtures/workspace-key-vectors.json", import.meta.url), "utf8"),
+);
+for (const { path: p, key } of WORKSPACE_FIXTURE) {
+  assert.equal(workspaceKey(p), key, `workspaceKey(${p}) matches the fixture`);
+}
+assert.equal(canonicalizeWorkspacePath("  /Users/me/repo/  "), "/Users/me/repo");
+assert.equal(workspaceKey("  /Users/me/repo/  "), "35696fd2bb77");
+
+// ---------- parseMoleculeRoots ----------
+assert.deepEqual(
+  parseMoleculeRoots(
+    JSON.stringify([
+      { id: "proj-m1", issue_type: "molecule", updated_at: "2026-01-01" },
+      { id: "proj-1a2", issue_type: "task", updated_at: "x" },
+      { issue_type: "molecule" },
+    ]),
+  ),
+  [{ id: "proj-m1", updated_at: "2026-01-01" }],
+);
+assert.deepEqual(parseMoleculeRoots("not json"), []);
+assert.deepEqual(parseMoleculeRoots("[]"), []);
+
+// ---------- parseMoleculeCurrents / parseMoleculeCurrent ----------
+const ONE_MOL = JSON.stringify([
+  {
+    molecule_id: "m1",
+    molecule_title: "t",
+    current_step: null,
+    next_step: null,
+    steps: [
+      { issue: { id: "m1.1", title: "s", issue_type: "task", status: "open" }, status: "ready", is_current: false },
+    ],
+  },
+]);
+assert.equal(parseMoleculeCurrents("[]").length, 0);
+assert.equal(parseMoleculeCurrents("not json").length, 0);
+assert.equal(parseMoleculeCurrents(ONE_MOL).length, 1);
+assert.equal(parseMoleculeCurrents(ONE_MOL)[0].molecule_id, "m1");
+assert.equal(parseMoleculeCurrent(ONE_MOL).molecule_id, "m1");
+
+// ---------- pickWorkspaceMolecule ----------
+const frame = (id, current, done, total) => ({ molecule_id: id, current_step: current, doneCount: done, total });
+assert.equal(
+  pickWorkspaceMolecule([{ frame: frame("m1", { id: "m1.1" }, 0, 3), updatedAt: "2026-01-01" }]).molecule_id,
+  "m1",
+);
+assert.equal(
+  pickWorkspaceMolecule([
+    { frame: frame("fin", null, 3, 3), updatedAt: "2026-02-01" },
+    { frame: frame("act", { id: "a.1" }, 1, 3), updatedAt: "2026-01-01" },
+  ]).molecule_id,
+  "act",
+  "active beats finished",
+);
+assert.equal(
+  pickWorkspaceMolecule([
+    { frame: frame("old", { id: "o.1" }, 0, 3), updatedAt: "2026-01-01" },
+    { frame: frame("new", { id: "n.1" }, 0, 3), updatedAt: "2026-02-01" },
+  ]).molecule_id,
+  "new",
+  "ties break to the newest updatedAt",
+);
+assert.equal(
+  pickWorkspaceMolecule([
+    { frame: frame("f1", null, 2, 2), updatedAt: "2026-01-01" },
+    { frame: frame("f2", null, 2, 2), updatedAt: "2026-03-01" },
+  ]).molecule_id,
+  "f2",
+  "finished-only workspace shows the newest finished",
+);
+assert.equal(pickWorkspaceMolecule([]), null);
 
 // ---------- parser: malformed input never throws ----------
 

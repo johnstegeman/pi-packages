@@ -1,3 +1,5 @@
+import { createHash } from "node:crypto";
+
 /**
  * Pure parsing + rendering for the superpowers molecule widget.
  * Plain JS (no TS) so it's directly runnable/testable by node.
@@ -66,16 +68,32 @@ function markerFor(status) {
   return STATUS_MARKER[status] ?? "\u25cb";
 }
 
-/** Parse `bd mol current --json` output. Returns null on any malformed input. */
-export function parseMoleculeCurrent(json) {
+export function canonicalizeWorkspacePath(p) {
+  return String(p ?? "")
+    .trim()
+    .replace(/\/+$/, "");
+}
+
+export function workspaceKey(path) {
+  return createHash("sha256").update(canonicalizeWorkspacePath(path)).digest("hex").slice(0, 12);
+}
+
+export function parseMoleculeRoots(json) {
   let arr;
   try {
     const text = typeof json === "string" ? json.trim() : json;
     arr = typeof text === "string" ? JSON.parse(text) : text;
   } catch {
-    return null;
+    return [];
   }
-  const obj = Array.isArray(arr) ? arr[0] : arr;
+  if (!Array.isArray(arr)) return [];
+  return arr
+    .filter((o) => o && typeof o.id === "string" && (o.issue_type === undefined || o.issue_type === "molecule"))
+    .map((o) => ({ id: o.id, updated_at: typeof o.updated_at === "string" ? o.updated_at : "" }));
+}
+
+/** Parse one `bd mol current --json` molecule object. Returns null if malformed. */
+function parseMoleculeObject(obj) {
   if (!obj?.molecule_id || !Array.isArray(obj.steps)) return null;
   const steps = obj.steps
     .filter((s) => s && s.issue && s.issue.id != null)
@@ -100,6 +118,24 @@ export function parseMoleculeCurrent(json) {
     doneCount,
     total: steps.length,
   };
+}
+
+/** Parse `bd mol current --json` output into every molecule frame it contains. */
+export function parseMoleculeCurrents(json) {
+  let arr;
+  try {
+    const text = typeof json === "string" ? json.trim() : json;
+    arr = typeof text === "string" ? JSON.parse(text) : text;
+  } catch {
+    return [];
+  }
+  const list = Array.isArray(arr) ? arr : arr ? [arr] : [];
+  return list.map(parseMoleculeObject).filter(Boolean);
+}
+
+/** Parse `bd mol current --json` output. Returns the first frame or null. */
+export function parseMoleculeCurrent(json) {
+  return parseMoleculeCurrents(json)[0] ?? null;
 }
 
 /**
@@ -179,6 +215,37 @@ export function applyErrorFrame(prevActiveMolecule, prevLockedId, r) {
     return { activeMolecule: null, lockedMoleculeId: null };
   }
   return { activeMolecule: prevActiveMolecule, lockedMoleculeId: prevLockedId };
+}
+
+function isNewerCandidate(a, b) {
+  const au = a.updatedAt ?? "";
+  const bu = b.updatedAt ?? "";
+  if (au !== bu) return au > bu;
+  return (a.frame?.molecule_id ?? "") < (b.frame?.molecule_id ?? "");
+}
+
+/**
+ * Choose the molecule to display for a workspace: active (2) > started (1) >
+ * finished (0), ties broken by newest updatedAt then smallest molecule_id.
+ */
+export function pickWorkspaceMolecule(candidates) {
+  if (!Array.isArray(candidates) || candidates.length === 0) return null;
+  const score = (frame) => {
+    const finished = frame.doneCount === frame.total && !frame.current_step;
+    if (finished) return 0;
+    return frame.current_step ? 2 : 1;
+  };
+  let best = null;
+  let bestScore = -1;
+  for (const c of candidates) {
+    if (!c?.frame) continue;
+    const s = score(c.frame);
+    if (best === null || s > bestScore || (s === bestScore && isNewerCandidate(c, best))) {
+      best = c;
+      bestScore = s;
+    }
+  }
+  return best?.frame ?? null;
 }
 
 const EXPLORE_PREFIX = "Explore project context: ";
