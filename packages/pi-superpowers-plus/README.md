@@ -121,22 +121,28 @@ Notes:
 - Tools like **`beads_create`/`beads_update`/`beads_close`** and **`Agent`** store execution state and run subagents outside the prompt.
 - Reference material that used to bloat a skill's `SKILL.md` was split into separate reference files in the skill's own directory (e.g. `reference/rationalizations.md`), which the agent reads on demand instead of loading everything up front.
 
-To make this concrete, here's the size of each skill's `SKILL.md` compared to the original [`coctostan/pi-superpowers`](https://github.com/coctostan/pi-superpowers) (approximate KB, at time of writing). Across the shared skills, total `SKILL.md` content went from **67.5KB → 66.5KB**. Skills that shrank moved content into separate reference files loaded on demand; skills that grew restored inline red flags, rationalizations, and verification checklists for self-contained guidance.
+The package ships **13 skills**, of which **11 are hidden** (`disable-model-invocation: true`) and load only when invoked via `/skill:`. The system prompt is the only always-on context, so it carries just the two visible skills — `using-superpowers` and `systematic-debugging`: **~52 tokens** of descriptions, versus the upstream [`coctostan/pi-superpowers`](https://github.com/coctostan/pi-superpowers) package's **~450 tokens** across all 13 visible skills. That bounded default context is what lets each `SKILL.md` be fuller and self-contained without taxing every turn — the trade is a larger on-invoke load.
+
+The per-skill `SKILL.md` sizes below (approximate KB, at time of writing) compare each skill against the upstream package. `pi-superpowers-plus` has grown to roughly **2x the upstream baseline**; that growth is tracked for review in `pi-packages-axam` (splitting stable reference material out of the large skills into on-demand `reference/*.md`).
 
 | Skill | pi-superpowers (KB) | pi-superpowers-plus (KB) | Change |
 |---|---:|---:|---:|
-| `brainstorming` | 2.5 | 2.9 | +16% |
-| `dispatching-parallel-agents` | 6.2 | 6.1 | -2% |
-| `executing-plans` | 2.7 | 3.5 | +30% |
-| `finishing-a-development-branch` | 4.3 | 4.4 | +2% |
+| `brainstorming` | 2.5 | 17.4 | +596% |
+| `dispatching-parallel-agents` | 6.2 | 6.5 | +5% |
+| `executing-plans` | 2.7 | 5.3 | +96% |
+| `finishing-a-development-branch` | 4.3 | 7.8 | +81% |
 | `receiving-code-review` | 6.2 | 5.8 | -6% |
-| `requesting-code-review` | 2.9 | 3.0 | +3% |
-| `subagent-driven-development` | 10.2 | 11.3 | +11% |
-| `systematic-debugging` | 9.8 | 7.2 | -27% |
-| `test-driven-development` | 9.8 | 8.1 | -17% |
-| `using-git-worktrees` | 5.5 | 6.1 | +11% |
-| `verification-before-completion` | 4.1 | 4.3 | +5% |
-| `writing-plans` | 3.3 | 3.8 | +15% |
+| `requesting-code-review` | 2.9 | 3.5 | +21% |
+| `subagent-driven-development` | 10.2 | 44.8 | +339% |
+| `systematic-debugging` | 9.8 | 6.9 | -30% |
+| `test-driven-development` | 9.8 | 9.0 | -8% |
+| `using-git-worktrees` | 5.5 | 7.2 | +31% |
+| `using-superpowers` | — | 5.0 | — |
+| `verification-before-completion` | 4.1 | 5.0 | +22% |
+| `writing-plans` | 3.3 | 14.6 | +342% |
+| `writing-skills` | 21.5 | — | — |
+
+Across the 12 shared skills, total `SKILL.md` content is **67.5KB -> ~133.8KB**; across all 13, upstream is ~89.0KB and `pi-superpowers-plus` is ~138.8KB. (Upstream's 13th skill is `writing-skills`; this package's is `using-superpowers`.)
 
 ## The Workflow
 

@@ -685,7 +685,7 @@ test("single-repo: session_start resolves, registers tools, emits nothing", asyn
   assert.equal(s.tools.length, 23);
 });
 
-test("no workspace: startup probes info once, sets no status, emits nothing", async () => {
+test("unusable DB: startup probes info once, sets no status, emits nothing", async () => {
   resetLog();
   const s = await openSession("none", repoDir);
   assert.equal(s.emitted.length, 0, "must not emit beads:changed");
@@ -738,23 +738,27 @@ test("transient startup failure: first routed write re-resolves and succeeds", a
   rmSync(marker, { force: true });
   process.env.FAKE_BD_TRANSIENT_MARKER = marker;
   process.env.FAKE_BD_MODE = "transient";
-  resetLog();
-  const s = makePi();
-  const ui = { setStatus: (...args) => s.status.push(args) };
-  await s.handlers.session_start[0]({}, { cwd: repoDir, ui });
-  assert.deepEqual(s.status, [], "failed startup probe must be silent");
-  assert.equal(s.emitted.length, 0, "startup must not emit");
-  resetLog();
+  try {
+    resetLog();
+    const s = makePi();
+    const ui = { setStatus: (...args) => s.status.push(args) };
+    await s.handlers.session_start[0]({}, { cwd: repoDir, ui });
+    assert.deepEqual(s.status, [], "failed startup probe must be silent");
+    assert.equal(s.emitted.length, 0, "startup must not emit");
+    resetLog();
 
-  const r = await s.byName.get("beads_create").execute("c", { title: "After recovery" });
-  assert.ok(okResult(r), JSON.stringify(r));
-  const invs = invocations();
-  assert.ok(
-    invs.some((iv) => iv[0] === "where"),
-    `expected a re-resolve (bd where); got ${JSON.stringify(invs)}`,
-  );
-  findInvocation(["create", "After recovery"]);
-  delete process.env.FAKE_BD_TRANSIENT_MARKER;
+    const r = await s.byName.get("beads_create").execute("c", { title: "After recovery" });
+    assert.ok(okResult(r), JSON.stringify(r));
+    const invs = invocations();
+    assert.ok(
+      invs.some((iv) => iv[0] === "where"),
+      `expected a re-resolve (bd where); got ${JSON.stringify(invs)}`,
+    );
+    findInvocation(["create", "After recovery"]);
+  } finally {
+    delete process.env.FAKE_BD_TRANSIENT_MARKER;
+    delete process.env.FAKE_BD_MODE;
+  }
 });
 
 test("repeated resolution failures are throttled to one probe per window", async () => {

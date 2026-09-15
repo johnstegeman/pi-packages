@@ -34,7 +34,7 @@ BASE_SHA=$(git merge-base origin/main HEAD)   # branch point; adopt the repo's b
 HEAD_SHA=$(git rev-parse HEAD)
 ```
 
-Inside `/skill:subagent-driven-development`, pass the per-task BASE recorded before the implementer was dispatched — never the parent-commit base (the `~1` shorthand), which drops all but the last commit of a multi-commit task.
+Inside `/skill:subagent-driven-development`, pass the per-task BASE recorded before the implementer was dispatched — never `HEAD~1`, which drops all but the last commit of a multi-commit task.
 
 **2. Dispatch code reviewer subagent:**
 

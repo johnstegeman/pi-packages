@@ -132,7 +132,8 @@ export function createMoleculeWidgetController({
       // adopt an unscoped global candidate in that case.
       const anyWs = await safeExec(["list", "--type", "molecule", "--label-pattern", "ws:*", "--json"], gen);
       if (gen !== refreshGen) return;
-      if (anyWs && anyWs.code === 0 && parseMoleculeRoots(anyWs.stdout).length > 0) {
+      if (!anyWs || anyWs.code !== 0) return; // can't confirm; keep prior frame, never adopt unscoped global
+      if (parseMoleculeRoots(anyWs.stdout).length > 0) {
         clearFrame();
         return;
       }
@@ -163,14 +164,15 @@ export function createMoleculeWidgetController({
         continue;
       }
       if (r.code !== 0) {
-        if (!isCleanNotFound(r))
+        if (!isCleanNotFound(r)) {
           warn(
             "[pi-superpowers-plus] molecule workspace root query error:",
             root.id,
             r.code,
             sanitizeLogText(`${r.stdout ?? ""}\n${r.stderr ?? ""}`),
           );
-        sawError = true;
+          sawError = true;
+        }
         continue;
       }
       const frame = parseMoleculeCurrent(r.stdout);
@@ -238,8 +240,9 @@ export function createMoleculeWidgetController({
     else render();
   }
 
-  // `refresh: false` updates the cwd without querying beads (pi turns call this
-  // on every agent_start; only an actual bead change should spend a `bd` call).
+  // By default setCwd updates the cwd AND refreshes (the adapter calls it on
+  // every agent_start as a per-turn backstop). Pass `refresh: false` to update
+  // the cwd without querying beads.
   function setCwd(nextCwd, { refresh: doRefresh = true, workspaceKey: nextKey } = {}) {
     applyWorkspaceKey(nextKey);
     cwd = nextCwd ?? cwd;
