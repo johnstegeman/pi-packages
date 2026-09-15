@@ -4,7 +4,7 @@
 // extension code runs unmodified; the fixture makes `show` return whatever
 // metadata the test seeds in FAKE_BD_SHOW_JSON.
 import assert from "node:assert/strict";
-import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, chmodSync, realpathSync, existsSync } from "node:fs";
+import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, chmodSync, realpathSync, existsSync, rmSync } from "node:fs";
 import { join, delimiter } from "node:path";
 import { tmpdir } from "node:os";
 import { CONC_GUARD_SH, concEnv } from "./helpers/fake-bd.mjs";
@@ -30,9 +30,33 @@ case "$1" in
     printf '  %s\\n  prefix: rep\\n' ${shellQuote(join(repoDir, ".beads"))}; exit 0 ;;
   show)
     conc_guard
-    printf '%s\\n' "$FAKE_BD_SHOW_JSON"; exit 0 ;;
+    if [ -s "$FAKE_BD_STATE/$2.meta" ]; then
+      printf '[{"id":"%s","metadata":{' "$2"
+      first=1
+      while IFS='=' read -r k v; do
+        [ -n "$k" ] || continue
+        [ "$first" = "1" ] || printf ','
+        first=0
+        printf '"%s":"%s"' "$k" "$v"
+      done < "$FAKE_BD_STATE/$2.meta"
+      printf '}}]\\n'
+    else
+      printf '%s\\n' "$FAKE_BD_SHOW_JSON"
+    fi
+    exit 0 ;;
   update)
     conc_guard
+    bead="$2"; shift 2
+    mkdir -p "$FAKE_BD_STATE"
+    : > "$FAKE_BD_STATE/$bead.meta"
+    while [ $# -gt 0 ]; do
+      if [ "$1" = "--set-metadata" ]; then
+        printf '%s\\n' "$2" >> "$FAKE_BD_STATE/$bead.meta"
+        shift 2
+      else
+        shift
+      fi
+    done
     exit 0 ;;
   list)
     # single-repo prefix resolution (samplePrefixOf) needs one id to derive the
@@ -46,6 +70,7 @@ writeFileSync(join(binDir, "bd"), stub);
 chmodSync(join(binDir, "bd"), 0o755);
 process.env.PATH = `${binDir}${delimiter}${process.env.PATH}`;
 process.env.FAKE_BD_LOG = logFile;
+process.env.FAKE_BD_STATE = join(root, "state");
 
 const { default: piBeadsLean, getBeadsRuntime } = await import("../src/index.ts");
 const { default: costTracking } = await import("../src/cost-tracking.ts");
@@ -83,6 +108,7 @@ function makePi() {
 const openSession = async () => {
   const s = makePi();
   await s.handlers.session_start[0]({}, { cwd: workspace }); // resolves topology: prefix rep -> repoDir
+  rmSync(process.env.FAKE_BD_STATE, { recursive: true, force: true });
   return s;
 };
 
@@ -253,6 +279,21 @@ test("overlapping events for the same bead are serialized (no lost/overlapping R
   } finally {
     restoreConc();
   }
+});
+
+test("overlapping events both land (no lost RMW), not just serialized", async () => {
+  const s = await openSession();
+  process.env.FAKE_BD_SHOW_JSON = JSON.stringify([{ id: "rep-1", metadata: {} }]);
+  resetLog();
+  await Promise.all([
+    fire(s, "subagents:completed", { id: "a1", type: "implementer", status: "completed", description: "x task bead:rep-1", usage: { input: 1, output: 1, cacheRead: 0, cost: { total: 0.1 } } }),
+    fire(s, "subagents:completed", { id: "a2", type: "implementer", status: "completed", description: "x task bead:rep-1", usage: { input: 1, output: 1, cacheRead: 0, cost: { total: 0.2 } } }),
+  ]);
+  const updates = invocations().filter((iv) => iv[0] === "update" && iv[1] === "rep-1");
+  const last = updates.at(-1).join(" ");
+  assert.match(last, /cost\.agents\.a1\.total=0\.1/);
+  assert.match(last, /cost\.agents\.a2\.total=0\.2/);
+  assert.match(last, /cost\.total=0\.3(?!\d)/);
 });
 
 test("handlers are registered once across repeated factory runs", async () => {
