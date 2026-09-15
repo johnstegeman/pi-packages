@@ -126,6 +126,12 @@ case "$1" in
         *) echo "Error: no beads database found" >&2; exit 1 ;;
       esac
     fi
+    if [ "$MODE" = "cwd-only" ]; then
+      case "$CWD" in
+        ${shellQuote(repoDir)}*|${shellQuote(workspace)}*) echo "bd 1.2.2 (fixture)"; exit 0 ;;
+        *) echo "Error: no beads database found" >&2; exit 1 ;;
+      esac
+    fi
     echo "bd 1.2.2 (fixture)"; exit 0 ;;
   ready)
     if [ "$2" = "--mol" ]; then
@@ -697,7 +703,7 @@ test("env-root: PI_BEADS_ROOT unrelated to cwd still resolves at startup", async
     const s = makePi();
     const ui = { setStatus: (...args) => s.status.push(args) };
     await s.handlers.session_start[0]({}, { cwd: outsideDir, ui });
-    assert.ok(s.status.length > 0, "a status segment is set when PI_BEADS_ROOT is a valid root");
+    assert.deepEqual(s.status, [["beads", "bd✓"]], "a ready segment is set when PI_BEADS_ROOT is a valid root");
     assert.equal(s.tools.length, 23, "tools are still registered");
     const probe = invocationsWithCwd().find((iv) => iv.args[0] === "info");
     assert.ok(probe, `expected an info probe; got ${JSON.stringify(invocationsWithCwd())}`);
@@ -708,6 +714,25 @@ test("env-root: PI_BEADS_ROOT unrelated to cwd still resolves at startup", async
   }
 });
 
+test("cwd-only: PI_BEADS_ROOT with no DB stays silent even when cwd has one", async () => {
+  // The configured root (not cwd) governs readiness: cwd has a valid DB, but
+  // PI_BEADS_ROOT points at a dir with no DB, so startup must not fall back.
+  process.env.FAKE_BD_MODE = "cwd-only";
+  process.env.PI_BEADS_ROOT = outsideDir;
+  try {
+    resetLog();
+    const s = makePi();
+    const ui = { setStatus: (...args) => s.status.push(args) };
+    await s.handlers.session_start[0]({}, { cwd: repoDir, ui });
+    assert.deepEqual(s.status, [], "must not report ready when the configured root has no DB");
+    const probe = invocationsWithCwd().find((iv) => iv.args[0] === "info");
+    assert.ok(probe, `expected an info probe; got ${JSON.stringify(invocationsWithCwd())}`);
+    assert.equal(probe.cwd, outsideDir, "the probe runs at PI_BEADS_ROOT, not the DB-bearing cwd");
+  } finally {
+    delete process.env.PI_BEADS_ROOT;
+    delete process.env.FAKE_BD_MODE;
+  }
+});
 test("transient startup failure: first routed write re-resolves and succeeds", async () => {
   const marker = join(root, "transient.marker");
   rmSync(marker, { force: true });

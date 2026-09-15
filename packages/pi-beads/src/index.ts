@@ -278,8 +278,9 @@ export default function piBeadsLean(pi: any) {
     if (root)
       root = path.resolve(root.replace(/^~(?=$|\/)/, process.env.HOME || "~"));
     // Usable-DB gate at the same root readiness is decided from: PI_BEADS_ROOT when
-    // set (the umbrella may be unrelated to cwd), else the session cwd. One cheap
-    // probe; when beads is absent, bail before any topology walk (vle7).
+    // set (the umbrella may be unrelated to cwd), else the session cwd. One probe on
+    // the bail path; the healthy path still re-probes the umbrella below. When beads
+    // is absent, bail before any topology walk (vle7).
     if (!(await bd(["info"], root || activeCwd)).ok) {
       beadsReady = false;
       return;
