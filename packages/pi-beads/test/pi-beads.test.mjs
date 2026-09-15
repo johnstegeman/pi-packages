@@ -216,6 +216,7 @@ case "$1" in
     # bulk dep wiring: bd dep add --file <jsonl> — echo each edge line so tests
     # can assert the exact dependent->blocker edge set the tool writes.
     if [ "$2" = "add" ] && [ "$3" = "--file" ]; then
+      if [ "\${FAKE_BD_DEP_FAIL:-0}" = "1" ]; then echo "boom" >&2; exit 1; fi
       while IFS= read -r line; do printf 'DEPS %s\\n' "$line" >> "$FAKE_BD_LOG"; done < "$4"
       exit 0
     fi
@@ -377,6 +378,9 @@ case "$1" in
   forget) printf 'Forgot %s\n' "$2"; exit 0 ;;
   stale) printf '[{"id":"proj-old","status":"in_progress","title":"Old work","priority":2}]\n'; exit 0 ;;
   lint) printf '{"total":1,"issues":1,"results":[{"id":"proj-1a2","title":"x","type":"task","missing":["## Acceptance Criteria"],"warnings":1}]}\n'; exit 0 ;;
+  reopen)
+    for a in "$@"; do [ "$a" = "crmback-fail" ] && { echo "boom" >&2; exit 1; }; done
+    echo "ok"; exit 0 ;;
   *) echo "ok"; exit 0 ;;
 esac
 `;
@@ -1566,6 +1570,41 @@ test("umbrella: read tools never emit beads:changed", async () => {
     const r = await s.byName.get(name).execute("c", params);
     assert.ok(okResult(r), `${name} failed: ${JSON.stringify(r)}`);
     assert.equal(s.emitted.length, 0, `${name} must not emit beads:changed`);
+  }
+});
+
+test("umbrella: reopen accumulates cross-repo failures and still reopens the rest", async () => {
+  const s = await openSession("umbrella", projDir);
+  resetLog();
+  const r = await s.byName.get("beads_reopen").execute("c", { ids: "crmback-fail umb-1" });
+  const text = r?.content?.[0]?.text ?? "";
+  assert.match(text, /reopened umb-1/);
+  assert.match(text, /bd reopen failed for crmback-fail/);
+});
+
+test("umbrella: mol_pour without a repo reports the pour-specific aggregate error", async () => {
+  const s = await openSession("umbrella", projDir);
+  const r = await s.byName.get("beads_mol_pour").execute("c", { proto: "f" });
+  assert.match(r?.content?.[0]?.text ?? "", /cannot pour in the umbrella aggregate/);
+});
+
+test("single-repo: bulk dep wiring failure reports the minted ids", async () => {
+  const s = await openSession("single", repoDir);
+  process.env.FAKE_BD_DEP_FAIL = "1";
+  try {
+    resetLog();
+    const r = await s.byName.get("beads_create_list").execute("c", {
+      parent: "proj-m1-imp",
+      gate: { title: "Plan reviewed / ready to execute", description: "constraints", reason: "Plan approval" },
+      tasks: [{ title: "Task 1: setup", description: "d1" }],
+    });
+    const text = r?.content?.[0]?.text ?? "";
+    assert.match(text, /bulk wiring failed/);
+    assert.match(text, /proj-m1-imp\.1/); // gate
+    assert.match(text, /proj-gate-1/);    // human gate
+    assert.match(text, /proj-m1-imp\.2/); // task
+  } finally {
+    delete process.env.FAKE_BD_DEP_FAIL;
   }
 });
 

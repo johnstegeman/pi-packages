@@ -347,12 +347,13 @@ export default function piBeadsLean(pi: any) {
       (basenameToDir.get(path.basename(k)) || null)
     );
   }
-  function resolveCreateTarget(repoParam?: string): { dir: string } | { error: string } {
+  const errText = (r: { err?: string | null }) => (r?.err ?? "").trim() || "unknown error";
+  function resolveCreateTarget(repoParam?: string, verb = "create"): { dir: string } | { error: string } {
     const supplied = repoParam !== undefined && repoParam !== null && String(repoParam).trim() !== "";
     if (!supplied) {
       return defaultRepoDir
         ? { dir: defaultRepoDir }
-        : { error: `specify repo (one of: ${knownRepos()}) — cannot create in the umbrella aggregate` };
+        : { error: `specify repo (one of: ${knownRepos()}) — cannot ${verb} in the umbrella aggregate` };
     }
     const dir = resolveRepoTarget(repoParam);
     return dir ? { dir } : { error: `unknown repo '${String(repoParam).trim()}' (known: ${knownRepos()})` };
@@ -1075,7 +1076,7 @@ export default function piBeadsLean(pi: any) {
           const depFile = path.join(depDir, "edges.jsonl");
           writeFileSync(depFile, edges.map((e) => JSON.stringify(e)).join("\n") + "\n", "utf8");
           const dr = await bd(["dep", "add", "--file", depFile], repoDir);
-          if (!dr.ok) depErr = dr.err;
+          if (!dr.ok) depErr = errText(dr);
         } catch (e: any) {
           depErr = e?.message ?? String(e);
         } finally {
@@ -1083,7 +1084,8 @@ export default function piBeadsLean(pi: any) {
         }
         if (depErr) {
           await afterWrite(repoDir);
-          return textResult(`deps: bulk wiring failed: ${depErr}`);
+          const ids = [...(gateId ? [gateId] : []), ...(humanGateId ? [humanGateId] : []), ...taskIds];
+          return textResult(`deps: bulk wiring failed (${depErr}); created ${ids.length} bead(s): ${ids.join(", ")}`);
         }
       }
       await afterWrite(repoDir);
@@ -1322,13 +1324,19 @@ export default function piBeadsLean(pi: any) {
         if (params.reason) args.push("-r", String(params.reason));
         const r = await bd(args, dir);
         if (!r.ok) {
-          failure = `bd reopen failed for ${rids.join(", ")}: ${r.err}`;
-          break;
+          const msg = `bd reopen failed for ${rids.join(", ")}: ${errText(r)}`;
+          failure = failure ? `${failure}; ${msg}` : msg;
+          // each repo's reopen is independent: keep going so later repos are
+          // neither silently skipped nor omitted from the accumulated failure.
+          continue;
         }
         await afterWrite(dir);
         reopenedIds.push(...rids);
       }
-      if (failure) return textResult(failure);
+      if (failure) {
+        const done = reopenedIds.length ? `reopened ${reopenedIds.join(", ")}\nwarning: ${failure}` : failure;
+        return textResult(done);
+      }
       return textResult(`reopened ${reopenedIds.join(", ")}`);
     },
   });
@@ -1596,7 +1604,7 @@ export default function piBeadsLean(pi: any) {
     async execute(_id: string, params: any) {
       await ensureTopology();
       if (!params?.proto) return textResult("proto is required");
-      const target = resolveCreateTarget(params?.repo);
+      const target = resolveCreateTarget(params?.repo, "pour");
       if ("error" in target) return textResult(target.error);
       const repoDir = target.dir;
       const varPairs = String(params.vars ?? "")
