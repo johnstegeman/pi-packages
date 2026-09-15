@@ -42,6 +42,8 @@ You MUST complete each phase before proceeding to the next.
 
 ### Phase 1: Root Cause Investigation
 
+> **Read now:** [reference/red-flags.md](reference/red-flags.md) — the STOP list. Read before forming any fix.
+
 **BEFORE attempting ANY fix:**
 
 1. **Read Error Messages Carefully** — Don't skip past errors or warnings. Read stack traces completely. Note line numbers, file paths, error codes.
@@ -50,24 +52,7 @@ You MUST complete each phase before proceeding to the next.
 
 3. **Check Recent Changes** — Git diff, recent commits, new dependencies, config changes, environmental differences.
 
-4. **Gather Evidence in Multi-Component Systems** — For each component boundary: log what enters, what exits, verify config propagation. Run once to see WHERE it breaks, then investigate that component.
-
-   **Example (multi-layer system):**
-   ```bash
-   # Layer 1: Workflow
-   echo "=== Secrets available: ==="
-   echo "IDENTITY: ${IDENTITY:+SET}${IDENTITY:-UNSET}"
-
-   # Layer 2: Build script
-   echo "=== Env vars in build script: ==="
-   env | grep IDENTITY || echo "IDENTITY not in environment"
-
-   # Layer 3: Signing
-   echo "=== Keychain state: ==="
-   security list-keychains
-   security find-identity -v
-   ```
-   **This reveals:** Which layer fails (e.g., secrets → workflow ✓, workflow → build ✗)
+4. **Gather Evidence in Multi-Component Systems** — For each component boundary: log what enters, what exits, verify config propagation. Run once to see WHERE it breaks, then investigate that component. See [reference/evidence-gathering.md](reference/evidence-gathering.md) for a worked multi-layer example.
 
 5. **Trace Data Flow** — Where does the bad value originate? What called this with the bad value? Keep tracing up until you find the source. Fix at source, not at symptom. See `root-cause-tracing.md` for the complete technique.
 
@@ -96,53 +81,7 @@ You MUST complete each phase before proceeding to the next.
    - If < 3 attempts: Return to Phase 1, re-analyze with new information
    - **If ≥ 3 attempts: STOP (see below)**
 
-### When 3+ Fixes Fail: Question Architecture
-
-**This is NOT a failed hypothesis — it's a wrong architecture.**
-
-Pattern indicating architectural problem:
-- Each fix reveals new shared state/coupling in different places
-- Fixes require "massive refactoring" to implement
-- Each fix creates new symptoms elsewhere
-
-**STOP and question fundamentals:**
-- Is this pattern fundamentally sound?
-- Are we sticking with it through sheer inertia?
-- Should we refactor architecture vs. continue fixing symptoms?
-
-**Discuss with your human partner before attempting more fixes.**
-
-## Red Flags — STOP and Follow Process
-
-If you catch yourself thinking:
-- "Quick fix for now, investigate later"
-- "Just try changing X and see if it works"
-- "Add multiple changes, run tests"
-- "Skip the test, I'll manually verify"
-- "It's probably X, let me fix that"
-- "I don't fully understand but this might work"
-- "Pattern says X but I'll adapt it differently"
-- "Here are the main problems: [lists fixes without investigation]"
-- Proposing solutions before tracing data flow
-- **"One more fix attempt" (when already tried 2+)**
-- **Each fix reveals new problem in different place**
-
-**ALL of these mean: STOP. Return to Phase 1.**
-
-**If 3+ fixes failed:** Question the architecture (see above).
-
-## Common Rationalizations
-
-| Excuse | Reality |
-|--------|---------|
-| "Issue is simple, don't need process" | Simple issues have root causes too. Process is fast for simple bugs. |
-| "Emergency, no time for process" | Systematic debugging is FASTER than guess-and-check thrashing. |
-| "Just try this first, then investigate" | First fix sets the pattern. Do it right from the start. |
-| "I'll write test after confirming fix works" | Untested fixes don't stick. Test first proves it. |
-| "Multiple fixes at once saves time" | Can't isolate what worked. Causes new bugs. |
-| "Reference too long, I'll adapt the pattern" | Partial understanding guarantees bugs. Read it completely. |
-| "I see the problem, let me fix it" | Seeing symptoms ≠ understanding root cause. |
-| "One more fix attempt" (after 2+ failures) | 3+ failures = architectural problem. Question pattern, don't fix again. |
+> **Read now:** [reference/architecture-question.md](reference/architecture-question.md) — what 3+ failed fixes mean. Read before a 4th fix attempt.
 
 ## When Process Reveals "No Root Cause"
 
@@ -160,4 +99,10 @@ These techniques are part of systematic debugging and available in this director
 - **`root-cause-tracing.md`** — Trace bugs backward through call stack to find original trigger
 - **`defense-in-depth.md`** — Add validation at multiple layers after finding root cause
 - **`condition-based-waiting.md`** — Replace arbitrary timeouts with condition polling
-- **`reference/rationalizations.md`** — Why investigation-first matters, common excuses
+
+## Reference material
+
+- [reference/rationalizations.md](reference/rationalizations.md) — why investigation-first matters and the common excuses that lead to guessing.
+- [reference/red-flags.md](reference/red-flags.md) — the STOP list: thoughts that mean stop and return to Phase 1.
+- [reference/architecture-question.md](reference/architecture-question.md) — when 3+ fixes fail: why that signals a wrong architecture.
+- [reference/evidence-gathering.md](reference/evidence-gathering.md) — worked multi-layer evidence-gathering example.
