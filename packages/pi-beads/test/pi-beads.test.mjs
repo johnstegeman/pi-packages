@@ -51,6 +51,9 @@ MODE="\${FAKE_BD_MODE:-single}"
 } >> "$FAKE_BD_LOG"
 case "$1" in
   where)
+    if [ "$MODE" = "single-mol-only" ]; then
+      echo "no beads root: $CWD" >&2; exit 1
+    fi
     if [ "$MODE" = "umbrella-dashed" ]; then
       case "$CWD" in
         ${shellQuote(workspace)}*|${shellQuote(umbrella)})
@@ -195,6 +198,8 @@ case "$1" in
       fi
     elif [ "$MODE" = "single-dashed" ]; then
       echo '[{"id": "pi-packages-1zth", "title": "sample"}]'
+    elif [ "$MODE" = "single-mol-only" ]; then
+      echo '[{"id": "pi-packages-mol-1", "title": "m"}]'
     else
       echo '[{"id": "proj-1a2", "title": "sample"}]'
     fi
@@ -565,6 +570,15 @@ test("single-dashed: dirForPrefix routes the repo's dashed native prefix (native
   assert.equal(rt.dirForPrefix("pi-packages-1zth"), repoDir);
   assert.equal(rt.dirForPrefix("pi-packages-mol-0vre.2"), repoDir);
   assert.equal(rt.dirForPrefix("nosuch-1"), null);
+});
+
+test("single-mol-only: conservative prefix derivation refuses a bogus dashed prefix", async () => {
+  await openSession("single-mol-only", repoDir);
+  const rt = getBeadsRuntime();
+  // sampled id 'pi-packages-mol-1' strips to 'pi-packages'; 'packages' is not a
+  // minted suffix, so no prefix may be invented and 'pi-...' must not route.
+  assert.equal(rt.dirForPrefix("pi-packages-1zth"), null);
+  assert.equal(rt.dirForPrefix("pi-1a2"), null);
 });
 
 test("samplePrefixOf multi-id LCP strips molecule suffixes (matches single-id path)", async () => {
