@@ -1604,6 +1604,25 @@ test("single-repo: bulk dep wiring failure reports the minted ids", async () => 
   }
 });
 
+test("single-repo: a temp-dir failure during dep wiring still runs afterWrite", async () => {
+  const s = await openSession("single", repoDir);
+  const prevTmp = process.env.TMPDIR;
+  process.env.TMPDIR = join(root, "no-such-tmpdir");
+  try {
+    resetLog();
+    s.emitted.length = 0;
+    const r = await s.byName.get("beads_create_list").execute("c", {
+      parent: "proj-m1-imp",
+      gate: { title: "Plan reviewed / ready to execute", description: "constraints", reason: "Plan approval" },
+      tasks: [{ title: "Task 1: setup", description: "d1" }],
+    });
+    assert.match(r?.content?.[0]?.text ?? "", /bulk wiring failed/);
+    assert.equal(s.emitted.filter((e) => e === "beads:changed").length, 1, "afterWrite must still emit");
+  } finally {
+    process.env.TMPDIR = prevTmp;
+  }
+});
+
 // ---------------------------------------------------------------------------
 // run everything (all test() registrations above must complete first)
 // ---------------------------------------------------------------------------

@@ -1070,9 +1070,10 @@ export default function piBeadsLean(pi: any) {
         // tmpdir (a predictable path there is a symlink/collision footgun), and
         // always clean up. A write failure must still run afterWrite so the
         // partial-success report and JSONL re-export are not lost.
-        const depDir = mkdtempSync(path.join(tmpdir(), "pi-beads-deps-"));
         let depErr: string | null = null;
+        let depDir: string | null = null;
         try {
+          depDir = mkdtempSync(path.join(tmpdir(), "pi-beads-deps-"));
           const depFile = path.join(depDir, "edges.jsonl");
           writeFileSync(depFile, edges.map((e) => JSON.stringify(e)).join("\n") + "\n", "utf8");
           const dr = await bd(["dep", "add", "--file", depFile], repoDir);
@@ -1080,7 +1081,7 @@ export default function piBeadsLean(pi: any) {
         } catch (e: any) {
           depErr = e?.message ?? String(e);
         } finally {
-          try { rmSync(depDir, { recursive: true, force: true }); } catch { /* best effort */ }
+          if (depDir) try { rmSync(depDir, { recursive: true, force: true }); } catch { /* best effort */ }
         }
         if (depErr) {
           await afterWrite(repoDir);
