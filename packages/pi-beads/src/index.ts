@@ -27,7 +27,7 @@
  */
 
 import { execFile } from "node:child_process";
-import { writeFileSync, mkdtempSync, rmSync } from "node:fs";
+import { writeFileSync, mkdtempSync, rmSync, realpathSync } from "node:fs";
 import { createHash } from "node:crypto";
 import { tmpdir } from "node:os";
 import { promisify } from "node:util";
@@ -145,6 +145,27 @@ export default function piBeadsLean(pi: any) {
         err: (e?.stderr || e?.message || "bd failed").toString().trim(),
       };
     }
+  }
+
+  // ---- workspace label helpers (multi-worktree disambiguation) ----
+  function canonicalWorkspacePath(p: string): string {
+    try {
+      return realpathSync(p);
+    } catch {
+      return p;
+    }
+  }
+
+  async function resolveWorkspaceKey(cwd: string): Promise<string> {
+    let top = canonicalWorkspacePath(cwd);
+    try {
+      const r = await pexec("git", ["-C", cwd, "rev-parse", "--show-toplevel"], { timeout: 5000 });
+      const out = (r.stdout ?? "").trim();
+      if (out) top = canonicalWorkspacePath(out);
+    } catch {
+      // not a git repo: fall back to the session cwd
+    }
+    return workspaceKey(top);
   }
 
   // ---- resolution helpers ----
@@ -1644,8 +1665,13 @@ export default function piBeadsLean(pi: any) {
         if (!u.ok)
           return textResult(`bd mol pour failed: step:${key} on ${id}: ${u.err}`);
       }
+      const wsKey = await resolveWorkspaceKey(activeCwd);
+      const ws = await bd(["update", root, "--add-label", `ws:${wsKey}`], repoDir);
+      const wsNote = ws.ok
+        ? ""
+        : `\nws label: FAILED (ws:${wsKey}) — widget will fall back to single-molecule inference`;
       await afterWrite(repoDir);
-      return textResult(r.out.trim() || "poured");
+      return textResult((r.out.trim() || "poured") + wsNote);
     },
   });
 

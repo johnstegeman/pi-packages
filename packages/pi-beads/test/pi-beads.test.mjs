@@ -14,6 +14,7 @@
 // drives both single-repo and umbrella topology.
 import assert from "node:assert/strict";
 import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, realpathSync, existsSync, rmSync } from "node:fs";
+import { createHash } from "node:crypto";
 import { join, delimiter } from "node:path";
 import { tmpdir } from "node:os";
 import { CONC_GUARD_SH, concEnv } from "./helpers/fake-bd.mjs";
@@ -370,6 +371,12 @@ case "$1" in
   reopen)
     for a in "$@"; do [ "$a" = "crmback-fail" ] && { echo "boom" >&2; exit 1; }; done
     echo "ok"; exit 0 ;;
+  update)
+    if [ "$MODE" = "ws-fail" ]; then
+      for a in "$@"; do case "$a" in ws:*) echo "boom" >&2; exit 1 ;; esac; done
+    fi
+    echo "ok"; exit 0
+    ;;
   *) echo "ok"; exit 0 ;;
 esac
 `;
@@ -1308,7 +1315,7 @@ test("single-repo: beads_mol_pour stamps step:<key> on every step and gate", asy
   for (const [id, lbl] of expect) findInvocation(["update", id, "--add-label", lbl]);
   assertNoInvocation(["update", "proj-m1", "--add-label", "step:superpowers-workflow"]);
   findInvocation(["mol", "pour", "superpowers-workflow", "--var", "topic=whatever", "--dry-run"]);
-  assert.equal(invocations().filter((inv) => inv[0] === "update").length, 15);
+  assert.equal(invocations().filter((inv) => inv[0] === "update").length, 16);
 });
 
 test("single-repo: beads_mol_pour fails loudly when the step map is incomplete", async () => {
@@ -1661,6 +1668,31 @@ test("workspaceKey matches the shared golden fixture (pi-beads)", () => {
   for (const { path: p, key } of fx) assert.equal(workspaceKey(p), key, `key for ${p}`);
   // trailing slash + surrounding whitespace normalise to the same key
   assert.equal(workspaceKey("  /Users/me/repo/  "), "35696fd2bb77");
+});
+
+test("single-repo: beads_mol_pour stamps ws:<key> on the root only", async () => {
+  const s = await openSession("single", repoDir);
+  resetLog();
+  const r = await s.byName.get("beads_mol_pour").execute("c", { proto: "superpowers-workflow", vars: "topic=x" });
+  assert.ok(okResult(r), JSON.stringify(r));
+  const expected = createHash("sha256").update(repoDir).digest("hex").slice(0, 12);
+  findInvocation(["update", "proj-m1", "--add-label", `ws:${expected}`]);
+  // ws: appears exactly once, and never on a step id
+  assert.equal(invocations().filter((inv) => inv.some((a) => a.startsWith("ws:"))).length, 1);
+  assert.equal(invocations().filter((inv) => inv[0] === "update").length, 16);
+});
+
+test("single-repo: beads_mol_pour still succeeds when the ws label write fails", async () => {
+  const s = await openSession("ws-fail", repoDir);
+  resetLog();
+  const r = await s.byName.get("beads_mol_pour").execute("c", { proto: "superpowers-workflow", vars: "topic=x" });
+  assert.ok(okResult(r), JSON.stringify(r));
+  assert.match(r.content[0].text, /ws label: FAILED/);
+  assert.equal(
+    invocations().filter((inv) => inv[0] === "update" && inv.some((a) => a.startsWith("step:"))).length,
+    15,
+    "step labels still applied",
+  );
 });
 
 // ---------------------------------------------------------------------------
