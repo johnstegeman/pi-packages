@@ -4,9 +4,10 @@
 // extension code runs unmodified; the fixture makes `show` return whatever
 // metadata the test seeds in FAKE_BD_SHOW_JSON.
 import assert from "node:assert/strict";
-import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, chmodSync, realpathSync, existsSync } from "node:fs";
+import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, chmodSync, realpathSync, existsSync, rmSync } from "node:fs";
 import { join, delimiter } from "node:path";
 import { tmpdir } from "node:os";
+import { CONC_GUARD_SH, concEnv } from "./helpers/fake-bd.mjs";
 
 const root = realpathSync(mkdtempSync(join(tmpdir(), "pi-beads-cost-")));
 const binDir = join(root, "bin");
@@ -23,33 +24,39 @@ CWD="$(pwd)"
   printf 'INV cwd=%s\\n' "$CWD"
   for a in "$@"; do printf 'ARG %s\\n' "$a"; done
 } >> "$FAKE_BD_LOG"
-# concurrency instrumentation (shared with pi-beads.test.mjs's create case): when
-# FAKE_BD_CONC=1, detect two bd ops in flight at once. A correct serialized
-# show->update RMW never overlaps; a racy one writes CONCURRENT to the marker.
-conc_guard() {
-  [ "\${FAKE_BD_CONC:-0}" = "1" ] || return 0
-  mkdir -p "$FAKE_BD_CONC_DIR"
-  CLAIM="$FAKE_BD_CONC_DIR/$$"
-  mkdir "$CLAIM" 2>/dev/null || { echo "cannot claim" >&2; exit 1; }
-  N="$(ls -A "$FAKE_BD_CONC_DIR" | wc -l | tr -d ' ')"
-  if [ "$N" -gt 1 ]; then
-    mkdir -p "$(dirname "$FAKE_BD_CONC_MARKER")"
-    printf 'CONCURRENT\\n' >> "$FAKE_BD_CONC_MARKER"
-    rmdir "$CLAIM" 2>/dev/null
-    echo "concurrent bd op detected" >&2
-    exit 1
-  fi
-  sleep 0.05
-  rmdir "$CLAIM" 2>/dev/null
-}
+${CONC_GUARD_SH}
 case "$1" in
   where)
     printf '  %s\\n  prefix: rep\\n' ${shellQuote(join(repoDir, ".beads"))}; exit 0 ;;
   show)
     conc_guard
-    printf '%s\\n' "$FAKE_BD_SHOW_JSON"; exit 0 ;;
+    if [ -s "$FAKE_BD_STATE/$2.meta" ]; then
+      printf '[{"id":"%s","metadata":{' "$2"
+      first=1
+      while IFS='=' read -r k v; do
+        [ -n "$k" ] || continue
+        [ "$first" = "1" ] || printf ','
+        first=0
+        printf '"%s":"%s"' "$k" "$v"
+      done < "$FAKE_BD_STATE/$2.meta"
+      printf '}}]\\n'
+    else
+      printf '%s\\n' "$FAKE_BD_SHOW_JSON"
+    fi
+    exit 0 ;;
   update)
     conc_guard
+    bead="$2"; shift 2
+    mkdir -p "$FAKE_BD_STATE"
+    : > "$FAKE_BD_STATE/$bead.meta"
+    while [ $# -gt 0 ]; do
+      if [ "$1" = "--set-metadata" ]; then
+        printf '%s\\n' "$2" >> "$FAKE_BD_STATE/$bead.meta"
+        shift 2
+      else
+        shift
+      fi
+    done
     exit 0 ;;
   list)
     # single-repo prefix resolution (samplePrefixOf) needs one id to derive the
@@ -63,9 +70,10 @@ writeFileSync(join(binDir, "bd"), stub);
 chmodSync(join(binDir, "bd"), 0o755);
 process.env.PATH = `${binDir}${delimiter}${process.env.PATH}`;
 process.env.FAKE_BD_LOG = logFile;
+process.env.FAKE_BD_STATE = join(root, "state");
 
 const { default: piBeadsLean, getBeadsRuntime } = await import("../src/index.ts");
-const { default: costTracking } = await import("../src/cost-tracking.ts");
+const { default: costTracking, __beadQueueSize } = await import("../src/cost-tracking.ts");
 
 let failures = 0;
 const tests = [];
@@ -100,6 +108,7 @@ function makePi() {
 const openSession = async () => {
   const s = makePi();
   await s.handlers.session_start[0]({}, { cwd: workspace }); // resolves topology: prefix rep -> repoDir
+  rmSync(process.env.FAKE_BD_STATE, { recursive: true, force: true });
   return s;
 };
 
@@ -255,9 +264,7 @@ test("dotted agent id is sanitized to underscore and still counted in rollups", 
 test("overlapping events for the same bead are serialized (no lost/overlapping RMW)", async () => {
   const s = await openSession();
   process.env.FAKE_BD_SHOW_JSON = JSON.stringify([{ id: "rep-1", metadata: {} }]);
-  process.env.FAKE_BD_CONC = "1";
-  process.env.FAKE_BD_CONC_DIR = join(root, "conc");
-  process.env.FAKE_BD_CONC_MARKER = join(root, "conc.marker");
+  const restoreConc = concEnv(join(root, "conc"), join(root, "conc.marker"));
   try {
     resetLog();
     await Promise.all([
@@ -270,8 +277,23 @@ test("overlapping events for the same bead are serialized (no lost/overlapping R
     try { marker = readFileSync(process.env.FAKE_BD_CONC_MARKER, "utf8"); } catch {}
     assert.equal(marker.trim(), "", `overlapping RMW observed: ${marker}`);
   } finally {
-    delete process.env.FAKE_BD_CONC; delete process.env.FAKE_BD_CONC_DIR; delete process.env.FAKE_BD_CONC_MARKER;
+    restoreConc();
   }
+});
+
+test("overlapping events both land (no lost RMW), not just serialized", async () => {
+  const s = await openSession();
+  process.env.FAKE_BD_SHOW_JSON = JSON.stringify([{ id: "rep-1", metadata: {} }]);
+  resetLog();
+  await Promise.all([
+    fire(s, "subagents:completed", { id: "a1", type: "implementer", status: "completed", description: "x task bead:rep-1", usage: { input: 1, output: 1, cacheRead: 0, cost: { total: 0.1 } } }),
+    fire(s, "subagents:completed", { id: "a2", type: "implementer", status: "completed", description: "x task bead:rep-1", usage: { input: 1, output: 1, cacheRead: 0, cost: { total: 0.2 } } }),
+  ]);
+  const updates = invocations().filter((iv) => iv[0] === "update" && iv[1] === "rep-1");
+  const last = updates.at(-1).join(" ");
+  assert.match(last, /cost\.agents\.a1\.total=0\.1/);
+  assert.match(last, /cost\.agents\.a2\.total=0\.2/);
+  assert.match(last, /cost\.total=0\.3(?!\d)/);
 });
 
 test("handlers are registered once across repeated factory runs", async () => {
@@ -306,6 +328,15 @@ test("smoke: realistic subagent completion drives the shipped entrypoints end-to
     "--set-metadata", "cost.agents.count=1",
   ]);
   assert.ok(s.emitted.includes("beads:changed"), "afterWrite emits beads:changed");
+});
+
+test("per-bead queue is pruned once the write settles", async () => {
+  const s = await openSession();
+  process.env.FAKE_BD_SHOW_JSON = JSON.stringify([{ id: "rep-1", metadata: {} }]);
+  resetLog();
+  await fire(s, "subagents:completed", { id: "z1", type: "implementer", status: "completed", description: "x task bead:rep-1", usage: { cost: { total: 0.5 } } });
+  await new Promise((r) => setTimeout(r, 0));
+  assert.equal(__beadQueueSize(), 0, "queue entry must be pruned after settle");
 });
 
 run();

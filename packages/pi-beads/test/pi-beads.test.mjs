@@ -16,6 +16,7 @@ import assert from "node:assert/strict";
 import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, realpathSync, existsSync, rmSync } from "node:fs";
 import { join, delimiter } from "node:path";
 import { tmpdir } from "node:os";
+import { CONC_GUARD_SH, concEnv } from "./helpers/fake-bd.mjs";
 
 // ---------------------------------------------------------------------------
 // fixture topology: a temp tree with a single "repo" and an "umbrella" that
@@ -49,8 +50,19 @@ MODE="\${FAKE_BD_MODE:-single}"
   printf 'INV cwd=%s mode=%s\\n' "$CWD" "$MODE"
   for a in "$@"; do printf 'ARG %s\\n' "$a"; done
 } >> "$FAKE_BD_LOG"
+${CONC_GUARD_SH}
 case "$1" in
   where)
+    if [ "$MODE" = "single-mol-only" ] || [ "$MODE" = "multi-mol-dashed" ] || [ "$MODE" = "single-mol-dashless" ]; then
+      echo "no beads root: $CWD" >&2; exit 1
+    fi
+    if [ "$MODE" = "umbrella-collision" ]; then
+      case "$CWD" in
+        ${shellQuote(workspace)}*|${shellQuote(umbrella)}|${shellQuote(backendDir)}*)
+          printf '  %s\\n  prefix: pi-packages\\n' ${shellQuote(join(umbrella, ".beads"))}; exit 0 ;;
+        *) echo "no beads root: $CWD" >&2; exit 1 ;;
+      esac
+    fi
     if [ "$MODE" = "umbrella-dashed" ]; then
       case "$CWD" in
         ${shellQuote(workspace)}*|${shellQuote(umbrella)})
@@ -81,7 +93,7 @@ case "$1" in
   repo)
     if [ "$2" = "list" ]; then
       case "$MODE" in
-        umbrella|umbrella-dashed)
+        umbrella|umbrella-dashed|umbrella-collision)
           printf '  - %s\\n' ${shellQuote(backendDir)} ;;
       esac
     fi
@@ -185,7 +197,7 @@ case "$1" in
         *2*) printf '{"issues":[{"id":"proj-m2-imp","title":"Implement T2","status":"open","priority":2,"labels":["step:implement"]}],"meta":{"count":1}}' ;;
         *)   printf '{"issues":[{"id":"proj-m1-imp","title":"Implement T1","status":"open","priority":2,"labels":["step:implement"]},{"id":"proj-m1-done","title":"Explore done","status":"closed","priority":2,"labels":["step:implement"]}],"meta":{"count":2}}' ;;
       esac
-    elif [ "$MODE" = "umbrella" ] || [ "$MODE" = "umbrella-dashed" ]; then
+    elif [ "$MODE" = "umbrella" ] || [ "$MODE" = "umbrella-dashed" ] || [ "$MODE" = "umbrella-collision" ]; then
       if [ "$CWD" = ${shellQuote(backendDir)} ]; then
         # backend's samplePrefixOf call: two MOLECULE ids so the multi-id LCP path
         # is exercised (suffix stripping must yield the bare 'crmback' prefix).
@@ -195,6 +207,12 @@ case "$1" in
       fi
     elif [ "$MODE" = "single-dashed" ]; then
       echo '[{"id": "pi-packages-1zth", "title": "sample"}]'
+    elif [ "$MODE" = "single-mol-only" ]; then
+      echo '[{"id": "pi-packages-mol-1", "title": "m"}]'
+    elif [ "$MODE" = "multi-mol-dashed" ]; then
+      echo '[{"id": "pi-packages-mol-1", "title": "m"}, {"id": "pi-packages-mol-2", "title": "m"}]'
+    elif [ "$MODE" = "single-mol-dashless" ]; then
+      echo '[{"id": "crmback-mol-1", "title": "m"}]'
     else
       echo '[{"id": "proj-1a2", "title": "sample"}]'
     fi
@@ -204,6 +222,7 @@ case "$1" in
     # bulk dep wiring: bd dep add --file <jsonl> — echo each edge line so tests
     # can assert the exact dependent->blocker edge set the tool writes.
     if [ "$2" = "add" ] && [ "$3" = "--file" ]; then
+      if [ "\${FAKE_BD_DEP_FAIL:-0}" = "1" ]; then echo "boom" >&2; exit 1; fi
       while IFS= read -r line; do printf 'DEPS %s\\n' "$line" >> "$FAKE_BD_LOG"; done < "$4"
       exit 0
     fi
@@ -313,24 +332,7 @@ case "$1" in
     echo "ok"; exit 0
     ;;
   create)
-    if [ "\${FAKE_BD_CONC:-0}" = "1" ]; then
-      # concurrency-aware mode: detect two creates in flight at once — the exact
-      # regression beads_create_list's awaited loop exists to prevent. Write
-      # CONCURRENT to the marker and exit non-zero if overlap is observed.
-      mkdir -p "$FAKE_BD_CONC_DIR"
-      CLAIM="$FAKE_BD_CONC_DIR/$$"
-      mkdir "$CLAIM" 2>/dev/null || { echo "cannot claim" >&2; exit 1; }
-      N="$(ls -A "$FAKE_BD_CONC_DIR" | wc -l | tr -d ' ')"
-      if [ "$N" -gt 1 ]; then
-        mkdir -p "$(dirname "$FAKE_BD_CONC_MARKER")"
-        printf 'CONCURRENT\\n' >> "$FAKE_BD_CONC_MARKER"
-        rmdir "$CLAIM" 2>/dev/null
-        echo "concurrent create detected" >&2
-        exit 1
-      fi
-      sleep 0.05
-      rmdir "$CLAIM" 2>/dev/null
-    fi
+    conc_guard
     case "$2" in
       "Plan reviewed / ready to execute") printf 'proj-m1-imp.1\\n'; exit 0 ;;
       "Task 1: setup") printf 'proj-m1-imp.2\\n'; exit 0 ;;
@@ -365,6 +367,9 @@ case "$1" in
   forget) printf 'Forgot %s\n' "$2"; exit 0 ;;
   stale) printf '[{"id":"proj-old","status":"in_progress","title":"Old work","priority":2}]\n'; exit 0 ;;
   lint) printf '{"total":1,"issues":1,"results":[{"id":"proj-1a2","title":"x","type":"task","missing":["## Acceptance Criteria"],"warnings":1}]}\n'; exit 0 ;;
+  reopen)
+    for a in "$@"; do [ "$a" = "crmback-fail" ] && { echo "boom" >&2; exit 1; }; done
+    echo "ok"; exit 0 ;;
   *) echo "ok"; exit 0 ;;
 esac
 `;
@@ -472,6 +477,35 @@ function depEdges() {
     .map((l) => JSON.parse(l.slice(5)));
 }
 
+// Independent direction model: bd's `dep add --file` JSONL is
+// {from: <dependent>, to: <blocker>, type}. expectedCreateListEdges derives the
+// set from the PLAN, not from the tool's echoed JSONL, so an inverted tool
+// convention cannot pass.
+test("dep-direction oracle pins from=dependent / to=blocker", () => {
+  const good = expectedCreateListEdges("gate-1", ["t1"]);
+  assert.deepEqual(good, [{ from: "t1", to: "gate-1", type: "blocks" }]);
+  // Hand-written 3-task golden pins the full chain (gate fan-in + i>0 chain)
+  // independently of the source's edge-construction loop.
+  assert.deepEqual(expectedCreateListEdges("g", ["t1", "t2", "t3"]), [
+    { from: "t1", to: "g", type: "blocks" },
+    { from: "t2", to: "g", type: "blocks" },
+    { from: "t2", to: "t1", type: "blocks" },
+    { from: "t3", to: "g", type: "blocks" },
+    { from: "t3", to: "t2", type: "blocks" },
+  ]);
+  const inverted = good.map((e) => ({ from: e.to, to: e.from, type: e.type }));
+  assert.notDeepEqual(inverted, good, "an inverted edge set must not equal the oracle's");
+});
+function expectedCreateListEdges(gateId, taskIds) {
+  const edges = [];
+  for (let i = 0; i < taskIds.length; i++) {
+    if (gateId) edges.push({ from: taskIds[i], to: gateId, type: "blocks" });
+    if (i > 0) edges.push({ from: taskIds[i], to: taskIds[i - 1], type: "blocks" });
+  }
+  return edges;
+}
+const edgeKey = (e) => `${e.from}->${e.to}(${e.type})`;
+
 function findInvocation(args) {
   const argsStr = JSON.stringify(args);
   const found = invocations().find(
@@ -559,12 +593,46 @@ test("umbrella-dashed: dirForPrefix routes the umbrella's dashed native prefix",
   assert.equal(rt.dirForPrefix("nosuch-1"), null);
 });
 
+test("umbrella-collision: member resolving upward does not steal the umbrella prefix", async () => {
+  await openSession("umbrella-collision", projDir);
+  const rt = getBeadsRuntime();
+  assert.equal(rt.dirForPrefix("pi-packages-1zth"), umbrella, "umbrella keeps its dashed prefix");
+  assert.equal(rt.dirForPrefix("crmback-1a2"), backendDir, "member keeps its own prefix");
+});
+
 test("single-dashed: dirForPrefix routes the repo's dashed native prefix (nativePrefixOf probe)", async () => {
   await openSession("single-dashed", repoDir);
   const rt = getBeadsRuntime();
   assert.equal(rt.dirForPrefix("pi-packages-1zth"), repoDir);
   assert.equal(rt.dirForPrefix("pi-packages-mol-0vre.2"), repoDir);
   assert.equal(rt.dirForPrefix("nosuch-1"), null);
+});
+
+test("single-mol-only: conservative prefix derivation refuses a bogus dashed prefix", async () => {
+  await openSession("single-mol-only", repoDir);
+  const rt = getBeadsRuntime();
+  // sampled id 'pi-packages-mol-1' strips to 'pi-packages'; 'packages' is not a
+  // minted suffix, so no prefix may be invented and 'pi-...' must not route.
+  assert.equal(rt.dirForPrefix("pi-packages-1zth"), null);
+  assert.equal(rt.dirForPrefix("pi-1a2"), null);
+});
+
+test("multi-mol-dashed: two dashed-prefix molecule roots keep the full dashed prefix", async () => {
+  await openSession("multi-mol-dashed", repoDir);
+  const rt = getBeadsRuntime();
+  // sampled ids 'pi-packages-mol-1' / '-mol-2' both normalize to 'pi-packages';
+  // the >=2-id LCP equals the full dashed prefix and must be kept intact, not
+  // truncated to the bogus 'pi' prefix (which would misroute 'pi-*' ids).
+  assert.equal(rt.dirForPrefix("pi-packages-1zth"), repoDir);
+  assert.equal(rt.dirForPrefix("pi-1a2"), null, "the truncated 'pi' prefix must not be registered");
+});
+
+test("single-mol-dashless: a dashless molecule-root sample still routes", async () => {
+  await openSession("single-mol-dashless", repoDir);
+  const rt = getBeadsRuntime();
+  // sampled id 'crmback-mol-1' strips to the dashless 'crmback'; the whole string
+  // is the prefix (no hyphen to truncate at), so 'crmback-*' ids must route.
+  assert.equal(rt.dirForPrefix("crmback-1a2"), repoDir);
 });
 
 test("samplePrefixOf multi-id LCP strips molecule suffixes (matches single-id path)", async () => {
@@ -713,9 +781,7 @@ test("single-repo: beads_create_list creates sequentially, wires gate+chain deps
   // correct sequential (awaited) loop never overlaps, so the marker must stay absent.
   const concDir = join(root, "conc");
   const concMarker = join(root, "conc.marker");
-  process.env.FAKE_BD_CONC = "1";
-  process.env.FAKE_BD_CONC_DIR = concDir;
-  process.env.FAKE_BD_CONC_MARKER = concMarker;
+  const restoreConc = concEnv(concDir, concMarker);
   try {
     const r = await s.byName.get("beads_create_list").execute("c", {
       parent: "proj-m1-imp",
@@ -749,13 +815,8 @@ test("single-repo: beads_create_list creates sequentially, wires gate+chain deps
     // the edge set: from = dependent, to = blocker; each task blocks the gate,
     // task i+1 blocks task i (plan chain).
     const edges = depEdges();
-    const has = (from, to) => edges.some((e) => e.from === from && e.to === to && e.type === "blocks");
-    assert.ok(has("proj-m1-imp.2", "proj-m1-imp.1"), "t1 depends on gate");
-    assert.ok(has("proj-m1-imp.3", "proj-m1-imp.1"), "t2 depends on gate");
-    assert.ok(has("proj-m1-imp.4", "proj-m1-imp.1"), "t3 depends on gate");
-    assert.ok(has("proj-m1-imp.3", "proj-m1-imp.2"), "t2 depends on t1");
-    assert.ok(has("proj-m1-imp.4", "proj-m1-imp.3"), "t3 depends on t2");
-    assert.equal(edges.length, 5, JSON.stringify(edges));
+    const expected = expectedCreateListEdges("proj-m1-imp.1", ["proj-m1-imp.2", "proj-m1-imp.3", "proj-m1-imp.4"]);
+    assert.deepEqual(edges.sort((a, b) => edgeKey(a).localeCompare(edgeKey(b))), expected.sort((a, b) => edgeKey(a).localeCompare(edgeKey(b))), JSON.stringify(edges));
 
     // the whole point: one atomic call, creates issued SEQUENTIALLY in gate -> t1 -> t2 -> t3 order
     // (each awaited before the next) so ids come out parent.1..N in plan order.
@@ -804,9 +865,7 @@ test("single-repo: beads_create_list creates sequentially, wires gate+chain deps
     }
     assert.equal(marker.trim(), "", `concurrent creates observed: '${marker}'`);
   } finally {
-    delete process.env.FAKE_BD_CONC;
-    delete process.env.FAKE_BD_CONC_DIR;
-    delete process.env.FAKE_BD_CONC_MARKER;
+    restoreConc();
   }
 });
 
@@ -1538,6 +1597,60 @@ test("umbrella: read tools never emit beads:changed", async () => {
     const r = await s.byName.get(name).execute("c", params);
     assert.ok(okResult(r), `${name} failed: ${JSON.stringify(r)}`);
     assert.equal(s.emitted.length, 0, `${name} must not emit beads:changed`);
+  }
+});
+
+test("umbrella: reopen accumulates cross-repo failures and still reopens the rest", async () => {
+  const s = await openSession("umbrella", projDir);
+  resetLog();
+  const r = await s.byName.get("beads_reopen").execute("c", { ids: "crmback-fail umb-1" });
+  const text = r?.content?.[0]?.text ?? "";
+  assert.match(text, /reopened umb-1/);
+  assert.match(text, /bd reopen failed for crmback-fail/);
+});
+
+test("umbrella: mol_pour without a repo reports the pour-specific aggregate error", async () => {
+  const s = await openSession("umbrella", projDir);
+  const r = await s.byName.get("beads_mol_pour").execute("c", { proto: "f" });
+  assert.match(r?.content?.[0]?.text ?? "", /cannot pour in the umbrella aggregate/);
+});
+
+test("single-repo: bulk dep wiring failure reports the minted ids", async () => {
+  const s = await openSession("single", repoDir);
+  process.env.FAKE_BD_DEP_FAIL = "1";
+  try {
+    resetLog();
+    const r = await s.byName.get("beads_create_list").execute("c", {
+      parent: "proj-m1-imp",
+      gate: { title: "Plan reviewed / ready to execute", description: "constraints", reason: "Plan approval" },
+      tasks: [{ title: "Task 1: setup", description: "d1" }],
+    });
+    const text = r?.content?.[0]?.text ?? "";
+    assert.match(text, /bulk wiring failed/);
+    assert.match(text, /proj-m1-imp\.1/); // gate
+    assert.match(text, /proj-gate-1/);    // human gate
+    assert.match(text, /proj-m1-imp\.2/); // task
+  } finally {
+    delete process.env.FAKE_BD_DEP_FAIL;
+  }
+});
+
+test("single-repo: a temp-dir failure during dep wiring still runs afterWrite", async () => {
+  const s = await openSession("single", repoDir);
+  const prevTmp = process.env.TMPDIR;
+  process.env.TMPDIR = join(root, "no-such-tmpdir");
+  try {
+    resetLog();
+    s.emitted.length = 0;
+    const r = await s.byName.get("beads_create_list").execute("c", {
+      parent: "proj-m1-imp",
+      gate: { title: "Plan reviewed / ready to execute", description: "constraints", reason: "Plan approval" },
+      tasks: [{ title: "Task 1: setup", description: "d1" }],
+    });
+    assert.match(r?.content?.[0]?.text ?? "", /bulk wiring failed/);
+    assert.equal(s.emitted.filter((e) => e === "beads:changed").length, 1, "afterWrite must still emit");
+  } finally {
+    process.env.TMPDIR = prevTmp;
   }
 });
 

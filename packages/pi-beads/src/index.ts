@@ -189,34 +189,48 @@ export default function piBeadsLean(pi: any) {
     if (mol > 0) s = s.slice(0, mol);
     return s;
   }
+  // A minted id suffix is short and alphanumeric (e.g. '1a2', 'c4fj'). Only when the
+  // tail after the last hyphen looks like one do we treat what precedes it as a
+  // prefix; otherwise a molecule-root id (stripped to 'pi-packages') would yield a
+  // bogus 'pi'. Returning "" lets routing fall back to basename/default.
+  const ID_SUFFIX_RE = /^[0-9a-z]{1,6}$/i;
   function prefixFromId(id: string): string {
     const s = stripIdSuffix(id);
     const dash = s.lastIndexOf("-");
-    return dash > 0 ? s.slice(0, dash) : s;
+    if (dash < 0) return s; // dashless prefix is itself — no truncation risk
+    if (dash === 0) return ""; // malformed leading hyphen
+    return ID_SUFFIX_RE.test(s.slice(dash + 1)) ? s.slice(0, dash) : "";
+  }
+  // Derive a repo prefix from sampled ids. With >=2 ids the longest common prefix
+  // recovers a DASHED native prefix (e.g. pi-packages) rather than the first
+  // hyphen-delimited token; suffixes are already stripped by normalization, so the
+  // LCP cannot end in '-mol'. A dashless LCP is itself the prefix. A fully empty
+  // LCP falls back to the conservative single-id rule.
+  function derivePrefixFromIds(ids: string[]): string {
+    const norm = ids.map(stripIdSuffix).filter(Boolean);
+    if (norm.length === 0) return "";
+    if (norm.length === 1) return prefixFromId(norm[0]);
+    const lcp = longestCommonPrefix(norm);
+    if (!lcp) return prefixFromId(norm[0]);
+    const cut = lcp.lastIndexOf("-");
+    if (cut <= 0) return lcp; // dashless LCP (e.g. 'crmback') is the prefix
+    const tail = lcp.slice(cut + 1);
+    // The LCP may end exactly at the separator ('pi-packages-'), or leave a
+    // partial minted-suffix fragment ('crmback-1a'). Only those mean the part
+    // before the hyphen is the prefix; otherwise the hyphen belongs to a dashed
+    // prefix ('pi-packages') and must be kept.
+    if (tail === "" || ID_SUFFIX_RE.test(tail)) return lcp.slice(0, cut);
+    return lcp;
   }
   async function samplePrefixOf(repoDir: string): Promise<string> {
-    // a per-repo DB only holds its own issues -> any id reveals the prefix. Derive it
-    // from the longest common prefix of sampled ids so a DASHED native prefix
-    // (e.g. pi-packages) is recovered, not just the first hyphen-delimited token.
+    // a per-repo DB only holds its own issues -> any id reveals the prefix.
     const r = await bd(["list", "--all", "-n", "5", "--json"], repoDir);
     if (r.ok) {
       try {
         const a = JSON.parse(r.out);
         const rows = Array.isArray(a) ? a : (a?.issues ?? []);
-        const ids = rows
-          .map((x: any) => x?.id)
-          .filter(Boolean)
-          .map(String)
-          .map(stripIdSuffix);
-        if (ids.length >= 2) {
-          const lcp = longestCommonPrefix(ids);
-          const cut = lcp.lastIndexOf("-");
-          if (cut > 0) return lcp.slice(0, cut);
-          // no hyphen left after normalization (dashless prefix such as
-          // 'crmback') -> the LCP itself is the prefix, matching prefixFromId.
-          if (lcp) return lcp;
-        }
-        if (ids.length === 1) return prefixFromId(ids[0]);
+        const ids = rows.map((x: any) => x?.id).filter(Boolean).map(String);
+        return derivePrefixFromIds(ids);
       } catch {
         /* ignore */
       }
@@ -255,14 +269,19 @@ export default function piBeadsLean(pi: any) {
       umbrella = root;
       isUmbrella = true;
       const repos = await additionalRepos(umbrella);
-      const np = await nativePrefixOf(umbrella);
-      if (np) prefixToDir.set(np, umbrella);
+      const umbrellaPrefix = await nativePrefixOf(umbrella);
       basenameToDir.set(path.basename(umbrella), umbrella);
+      // Members claim prefixes FIRST: a member's `bd where` can resolve upward to
+      // the umbrella, which would otherwise let it steal the umbrella's prefix and
+      // misroute umbrella writes. When a member reports the umbrella's own prefix,
+      // fall back to sampling the member's DB. First claim wins (no overwrite).
       for (const dir of repos) {
         basenameToDir.set(path.basename(dir), dir);
-        const pfx = (await nativePrefixOf(dir)) || (await samplePrefixOf(dir));
-        if (pfx) prefixToDir.set(pfx, dir);
+        const np = await nativePrefixOf(dir);
+        const pfx = np && np !== umbrellaPrefix ? np : await samplePrefixOf(dir);
+        if (pfx && !prefixToDir.has(pfx)) prefixToDir.set(pfx, dir);
       }
+      if (umbrellaPrefix && !prefixToDir.has(umbrellaPrefix)) prefixToDir.set(umbrellaPrefix, umbrella);
       const ar = await repoRootOf(activeCwd);
       defaultRepoDir = ar && ar !== umbrella ? ar : null;
     } else {
@@ -333,12 +352,13 @@ export default function piBeadsLean(pi: any) {
       (basenameToDir.get(path.basename(k)) || null)
     );
   }
-  function resolveCreateTarget(repoParam?: string): { dir: string } | { error: string } {
+  const errText = (r: { err?: string | null }) => (r?.err ?? "").trim() || "unknown error";
+  function resolveCreateTarget(repoParam?: string, verb = "create"): { dir: string } | { error: string } {
     const supplied = repoParam !== undefined && repoParam !== null && String(repoParam).trim() !== "";
     if (!supplied) {
       return defaultRepoDir
         ? { dir: defaultRepoDir }
-        : { error: `specify repo (one of: ${knownRepos()}) — cannot create in the umbrella aggregate` };
+        : { error: `specify repo (one of: ${knownRepos()}) — cannot ${verb} in the umbrella aggregate` };
     }
     const dir = resolveRepoTarget(repoParam);
     return dir ? { dir } : { error: `unknown repo '${String(repoParam).trim()}' (known: ${knownRepos()})` };
@@ -839,7 +859,7 @@ export default function piBeadsLean(pi: any) {
           ["dep", "tree", ids[0], "--direction", dir, "--json"],
           umbrella,
         );
-        if (!r.ok) return textResult(`bd dep tree failed: ${r.err}`);
+        if (!r.ok) return textResult(`bd dep tree failed: ${errText(r)}`);
         const arr = jparse(r.out);
         if (!Array.isArray(arr) || arr.length <= 1)
           return textResult(`${ids[0]} ${label}: (none)`);
@@ -1055,21 +1075,23 @@ export default function piBeadsLean(pi: any) {
         // tmpdir (a predictable path there is a symlink/collision footgun), and
         // always clean up. A write failure must still run afterWrite so the
         // partial-success report and JSONL re-export are not lost.
-        const depDir = mkdtempSync(path.join(tmpdir(), "pi-beads-deps-"));
         let depErr: string | null = null;
+        let depDir: string | null = null;
         try {
+          depDir = mkdtempSync(path.join(tmpdir(), "pi-beads-deps-"));
           const depFile = path.join(depDir, "edges.jsonl");
           writeFileSync(depFile, edges.map((e) => JSON.stringify(e)).join("\n") + "\n", "utf8");
           const dr = await bd(["dep", "add", "--file", depFile], repoDir);
-          if (!dr.ok) depErr = dr.err;
+          if (!dr.ok) depErr = errText(dr);
         } catch (e: any) {
           depErr = e?.message ?? String(e);
         } finally {
-          try { rmSync(depDir, { recursive: true, force: true }); } catch { /* best effort */ }
+          if (depDir) try { rmSync(depDir, { recursive: true, force: true }); } catch { /* best effort */ }
         }
         if (depErr) {
           await afterWrite(repoDir);
-          return textResult(`deps: bulk wiring failed: ${depErr}`);
+          const ids = [...(gateId ? [gateId] : []), ...(humanGateId ? [humanGateId] : []), ...taskIds];
+          return textResult(`deps: bulk wiring failed (${depErr}); created ${ids.length} bead(s): ${ids.join(", ")}`);
         }
       }
       await afterWrite(repoDir);
@@ -1232,7 +1254,7 @@ export default function piBeadsLean(pi: any) {
         if (params?.noAuto === true || params?.noAuto === "true") args.push("--no-auto");
         const r = await bd(args, dir);
         if (!r.ok) {
-          const msg = `bd close failed for ${rids.join(", ")}: ${r.err}`;
+          const msg = `bd close failed for ${rids.join(", ")}: ${errText(r)}`;
           failure = failure ? `${failure}; ${msg}` : msg;
           // each repo's close is independent: keep going so later repos are
           // neither silently skipped nor omitted from the accumulated failure.
@@ -1255,7 +1277,7 @@ export default function piBeadsLean(pi: any) {
               const sarr = Array.isArray(so) ? so : Array.isArray((so as any)?.issues) ? (so as any).issues : [];
               const sIssue = sarr.find((x: any) => x && String(x.id) === nxt) ?? sarr[0];
               if (sIssue && String(sIssue.status) === "closed") break;
-              const msg = `parent cascade: ${nxt} not closed: ${rc.err}`;
+              const msg = `parent cascade: ${nxt} not closed: ${errText(rc)}`;
               failure = failure ? `${failure}; ${msg}` : msg;
               break;
             }
@@ -1308,13 +1330,19 @@ export default function piBeadsLean(pi: any) {
         if (params.reason) args.push("-r", String(params.reason));
         const r = await bd(args, dir);
         if (!r.ok) {
-          failure = `bd reopen failed for ${rids.join(", ")}: ${r.err}`;
-          break;
+          const msg = `bd reopen failed for ${rids.join(", ")}: ${errText(r)}`;
+          failure = failure ? `${failure}; ${msg}` : msg;
+          // each repo's reopen is independent: keep going so later repos are
+          // neither silently skipped nor omitted from the accumulated failure.
+          continue;
         }
         await afterWrite(dir);
         reopenedIds.push(...rids);
       }
-      if (failure) return textResult(failure);
+      if (failure) {
+        const done = reopenedIds.length ? `reopened ${reopenedIds.join(", ")}\nwarning: ${failure}` : failure;
+        return textResult(done);
+      }
       return textResult(`reopened ${reopenedIds.join(", ")}`);
     },
   });
@@ -1582,7 +1610,7 @@ export default function piBeadsLean(pi: any) {
     async execute(_id: string, params: any) {
       await ensureTopology();
       if (!params?.proto) return textResult("proto is required");
-      const target = resolveCreateTarget(params?.repo);
+      const target = resolveCreateTarget(params?.repo, "pour");
       if ("error" in target) return textResult(target.error);
       const repoDir = target.dir;
       const varPairs = String(params.vars ?? "")
@@ -1759,7 +1787,7 @@ export default function piBeadsLean(pi: any) {
         ["dep", "remove", String(params.issue), String(params.blocker)],
         dir,
       );
-      if (!r.ok) return textResult(`bd dep remove failed: ${r.err}`);
+      if (!r.ok) return textResult(`bd dep remove failed: ${errText(r)}`);
       await afterWrite(dir);
       return textResult(r.out.trim() || "dependency removed");
     },

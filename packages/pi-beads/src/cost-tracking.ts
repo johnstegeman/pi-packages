@@ -21,6 +21,11 @@ const registered = new WeakSet<object>();
 // subagents:completed events for the SAME bead would otherwise race and drop a
 // contribution (last-write-wins). Different beads still run concurrently.
 const beadQueues = new Map<string, Promise<void>>();
+
+// Test-only observability into the per-bead write queue (module-private map).
+export function __beadQueueSize(): number {
+  return beadQueues.size;
+}
 function enqueue(beadId: string, task: () => Promise<void>): Promise<void> {
   const prev = beadQueues.get(beadId) ?? Promise.resolve();
   const next = prev.then(task, task);
