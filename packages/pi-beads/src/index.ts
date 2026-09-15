@@ -277,6 +277,13 @@ export default function piBeadsLean(pi: any) {
     let root = (process.env.PI_BEADS_ROOT || "").trim();
     if (root)
       root = path.resolve(root.replace(/^~(?=$|\/)/, process.env.HOME || "~"));
+    // Usable-DB gate at the same root readiness is decided from: PI_BEADS_ROOT when
+    // set (the umbrella may be unrelated to cwd), else the session cwd. One cheap
+    // probe; when beads is absent, bail before any topology walk (vle7).
+    if (!(await bd(["info"], root || activeCwd)).ok) {
+      beadsReady = false;
+      return;
+    }
     if (!root) {
       // walk up: a hydrated umbrella is a .beads whose config lists additional repos
       let d = activeCwd;
@@ -658,14 +665,6 @@ export default function piBeadsLean(pi: any) {
   pi.on("session_start", async (_event: any, ctx: any) => {
     try {
       activeCwd = ctx?.cwd ?? process.cwd();
-      // Cheap usable-DB probe: one `bd info`. If beads is not set up (including a
-      // config-only .beads/ with no database), stop here — no topology walk, no
-      // status segment, no output. Beads is optional at startup.
-      const probe = await bd(["info"], activeCwd);
-      if (!probe.ok) {
-        beadsReady = false;
-        return;
-      }
       await resolveTopology();
       if (beadsReady) setStatusLine(ctx);
     } catch (e: any) {
