@@ -473,6 +473,25 @@ function depEdges() {
     .map((l) => JSON.parse(l.slice(5)));
 }
 
+// Independent direction model: bd's `dep add --file` JSONL is
+// {from: <dependent>, to: <blocker>, type}. This golden is hand-written to pin the
+// convention; expectedCreateListEdges derives the set from the PLAN, not from the
+// tool's echoed JSONL, so an inverted tool convention cannot pass.
+const DEP_DIRECTION_GOLDEN = [{ from: "dependent-id", to: "blocker-id", type: "blocks" }];
+assert.deepEqual(
+  DEP_DIRECTION_GOLDEN.map((e) => ({ dependent: e.from, blocker: e.to })),
+  [{ dependent: "dependent-id", blocker: "blocker-id" }],
+);
+function expectedCreateListEdges(gateId, taskIds) {
+  const edges = [];
+  for (let i = 0; i < taskIds.length; i++) {
+    if (gateId) edges.push({ from: taskIds[i], to: gateId, type: "blocks" });
+    if (i > 0) edges.push({ from: taskIds[i], to: taskIds[i - 1], type: "blocks" });
+  }
+  return edges;
+}
+const edgeKey = (e) => `${e.from}->${e.to}(${e.type})`;
+
 function findInvocation(args) {
   const argsStr = JSON.stringify(args);
   const found = invocations().find(
@@ -764,13 +783,8 @@ test("single-repo: beads_create_list creates sequentially, wires gate+chain deps
     // the edge set: from = dependent, to = blocker; each task blocks the gate,
     // task i+1 blocks task i (plan chain).
     const edges = depEdges();
-    const has = (from, to) => edges.some((e) => e.from === from && e.to === to && e.type === "blocks");
-    assert.ok(has("proj-m1-imp.2", "proj-m1-imp.1"), "t1 depends on gate");
-    assert.ok(has("proj-m1-imp.3", "proj-m1-imp.1"), "t2 depends on gate");
-    assert.ok(has("proj-m1-imp.4", "proj-m1-imp.1"), "t3 depends on gate");
-    assert.ok(has("proj-m1-imp.3", "proj-m1-imp.2"), "t2 depends on t1");
-    assert.ok(has("proj-m1-imp.4", "proj-m1-imp.3"), "t3 depends on t2");
-    assert.equal(edges.length, 5, JSON.stringify(edges));
+    const expected = expectedCreateListEdges("proj-m1-imp.1", ["proj-m1-imp.2", "proj-m1-imp.3", "proj-m1-imp.4"]);
+    assert.deepEqual(edges.sort((a, b) => edgeKey(a).localeCompare(edgeKey(b))), expected.sort((a, b) => edgeKey(a).localeCompare(edgeKey(b))), JSON.stringify(edges));
 
     // the whole point: one atomic call, creates issued SEQUENTIALLY in gate -> t1 -> t2 -> t3 order
     // (each awaited before the next) so ids come out parent.1..N in plan order.
