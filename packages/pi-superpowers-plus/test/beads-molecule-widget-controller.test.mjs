@@ -653,4 +653,84 @@ const roots = (entries) => JSON.stringify(entries.map((e) => ({ issue_type: "mol
   assert.equal(warns.length, 0, "clean not-found clears silently");
 }
 
+// ---------- workspace: guard probe failure keeps the prior frame, never adopts globally ----------
+{
+  const ui = makeFakeUi();
+  const calls = [];
+  let phase = "seed";
+  const controller = createMoleculeWidgetController({
+    exec: async (cmd, args) => {
+      calls.push([cmd, ...args]);
+      if (args[0] === "list") {
+        if (args.includes("--label-pattern")) return { code: 2, stdout: "", stderr: "locked" };
+        if (phase === "seed")
+          return { code: 0, stdout: roots([{ id: "bd-mol-A", updated_at: "2026-01-01" }]), stderr: "" };
+        return { code: 0, stdout: "[]", stderr: "" };
+      }
+      // unscoped global query is ["mol","current","--json"] -> args[2] === "--json"
+      if (args[0] === "mol" && args[2] === "--json") return { code: 0, stdout: RAW_B, stderr: "" };
+      // Seed a *finished* frame so the molecule lock is released and the next
+      // refresh actually reaches refreshWorkspace's multi-worktree guard.
+      if (phase === "seed") return { code: 0, stdout: rawFinished("bd-mol-A"), stderr: "" };
+      return { code: 0, stdout: RAW_A, stderr: "" };
+    },
+    subscribeChanges: () => () => {},
+  });
+  controller.bindSession({ ui, cwd: "/repo", workspaceKey: "k1" });
+  await tick();
+  assert.ok(
+    ui.lastLines()?.some((l) => l.includes("finished")),
+    `frame seeded: ${ui.lastLines()}`,
+  );
+
+  phase = "zero-probe-fails";
+  calls.length = 0;
+  await controller.refresh();
+  controller.render();
+  assert.ok(
+    !calls.some((c) => c[0] === "bd" && c[1] === "mol" && c[2] === "current" && c[3] === "--json"),
+    `probe failure must not fall through to the unscoped global query; got ${JSON.stringify(calls)}`,
+  );
+  assert.ok(
+    ui.lastLines()?.some((l) => l.includes("finished")),
+    `probe failure keeps the prior frame: ${ui.lastLines()}`,
+  );
+}
+
+// ---------- workspace: all-clean-not-found roots clear the frame ----------
+{
+  const ui = makeFakeUi();
+  let phase = "seed";
+  const controller = createMoleculeWidgetController({
+    exec: async (cmd, args) => {
+      if (args[0] === "list")
+        return {
+          code: 0,
+          stdout:
+            phase === "seed"
+              ? roots([{ id: "bd-mol-A", updated_at: "2026-01-01" }])
+              : roots([
+                  { id: "bd-mol-A", updated_at: "2026-01-01" },
+                  { id: "bd-mol-B", updated_at: "2026-01-02" },
+                ]),
+          stderr: "",
+        };
+      if (phase === "seed") return { code: 0, stdout: rawFinished("bd-mol-A"), stderr: "" };
+      return { code: 1, stdout: "", stderr: "no beads database found" }; // clean not-found
+    },
+    subscribeChanges: () => () => {},
+  });
+  controller.bindSession({ ui, cwd: "/repo", workspaceKey: "k1" });
+  await tick();
+  assert.ok(
+    ui.lastLines()?.some((l) => l.includes("finished")),
+    `frame seeded: ${ui.lastLines()}`,
+  );
+
+  phase = "notfound";
+  await controller.refresh();
+  controller.render();
+  assert.equal(ui.lastLines(), null, "all-clean-not-found roots must clear, not retain a stale frame");
+}
+
 console.log("beads-molecule-widget-controller: all assertions passed");
