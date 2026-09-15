@@ -194,6 +194,20 @@ umbrella aggregate is not allowed: routing by id prefix is the only path.
 Finally, `bd`'s output format is not a stable contract. Verified against 1.2.2; on other
 versions the parsing may drift away from reality.
 
+### Live-database smoke checklist
+
+The test suites above run against a fixture `bd`, not the real binary. Before relying
+on dashed-prefix routing in a hydrated umbrella, verify against live `bd` (1.2.2) with a
+dashed native prefix (e.g. `pi-packages`):
+
+- [ ] The umbrella's `bd where` reports the dashed native prefix; a member's `bd where`
+      reports its own prefix.
+- [ ] Creating an issue for a member routes to that member; the umbrella's prefix mapping
+      is not overwritten.
+- [ ] A member whose `bd where` resolves upward does not steal the umbrella's prefix.
+- [ ] `beads_create_list` writes bulk-dep edges `from = dependent`, `to = blocker`, and
+      `bd` accepts them.
+
 ## Cost tracking
 
 A second registered extension (`src/cost-tracking.ts`) attributes subagent spend to
