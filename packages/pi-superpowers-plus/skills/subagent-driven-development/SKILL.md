@@ -226,7 +226,6 @@ and fix-round diffs need it.
   fix-loop rounds 1-3 resume this agent via `Agent({ subagent_type:
   "implementer", resume: <agent_id>, ... })`.
 - Never dispatch multiple implementation subagents in parallel (conflicts).
-- Never hand bead management to the implementer. Task tracking (creating, updating, closing this task's bead) is the controller's job alone, and the task closes only after its review passes. The implementer prompt template carries this guardrail — do not override it.
 
 Template: [implementer-prompt.md](implementer-prompt.md)
 
