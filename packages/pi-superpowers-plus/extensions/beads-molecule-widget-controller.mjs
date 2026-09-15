@@ -240,8 +240,9 @@ export function createMoleculeWidgetController({
     else render();
   }
 
-  // `refresh: false` updates the cwd without querying beads (pi turns call this
-  // on every agent_start; only an actual bead change should spend a `bd` call).
+  // By default setCwd updates the cwd AND refreshes (the adapter calls it on
+  // every agent_start as a per-turn backstop). Pass `refresh: false` to update
+  // the cwd without querying beads.
   function setCwd(nextCwd, { refresh: doRefresh = true, workspaceKey: nextKey } = {}) {
     applyWorkspaceKey(nextKey);
     cwd = nextCwd ?? cwd;
