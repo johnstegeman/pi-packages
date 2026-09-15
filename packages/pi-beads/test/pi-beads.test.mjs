@@ -32,7 +32,9 @@ const workspace = join(root, "ws"); // session cwd INSIDE the umbrella workspace
 const projDir = join(workspace, "proj");
 const umbrella = join(root, "umbrella"); // hydrates: aggregates repo + backend
 const backendDir = join(umbrella, "sub", "backend");
-for (const d of [binDir, repoDir, workspace, projDir, umbrella, backendDir])
+const envRootDir = join(root, "env-root"); // PI_BEADS_ROOT target (unrelated to cwd)
+const outsideDir = join(root, "outside");  // session cwd, NOT under envRootDir
+for (const d of [binDir, repoDir, workspace, projDir, umbrella, backendDir, envRootDir, outsideDir])
   mkdirSync(d, { recursive: true });
 const logFile = join(root, "bd.log");
 
@@ -84,6 +86,13 @@ case "$1" in
         *) echo "no beads root: $CWD" >&2; exit 1 ;;
       esac
     fi
+    if [ "$MODE" = "env-root" ]; then
+      case "$CWD" in
+        ${shellQuote(envRootDir)}*)
+          printf '  %s\\n  prefix: envr\\n' ${shellQuote(join(envRootDir, ".beads"))}; exit 0 ;;
+        *) echo "no beads root: $CWD" >&2; exit 1 ;;
+      esac
+    fi
     case "$CWD" in
       ${shellQuote(repoDir)}*|${shellQuote(workspace)}*)
         printf '  %s\\n' ${shellQuote(join(repoDir, ".beads"))}; exit 0 ;;
@@ -110,6 +119,18 @@ case "$1" in
         echo "Error: no beads database found" >&2
         exit 1
       fi
+    fi
+    if [ "$MODE" = "env-root" ]; then
+      case "$CWD" in
+        ${shellQuote(envRootDir)}*) echo "bd 1.2.2 (fixture)"; exit 0 ;;
+        *) echo "Error: no beads database found" >&2; exit 1 ;;
+      esac
+    fi
+    if [ "$MODE" = "cwd-only" ]; then
+      case "$CWD" in
+        ${shellQuote(repoDir)}*|${shellQuote(workspace)}*) echo "bd 1.2.2 (fixture)"; exit 0 ;;
+        *) echo "Error: no beads database found" >&2; exit 1 ;;
+      esac
     fi
     echo "bd 1.2.2 (fixture)"; exit 0 ;;
   ready)
@@ -674,6 +695,44 @@ test("no workspace: startup probes info once, sets no status, emits nothing", as
   assert.deepEqual(invs[0], ["info"], "the single startup probe is bd info");
 });
 
+test("env-root: PI_BEADS_ROOT unrelated to cwd still resolves at startup", async () => {
+  process.env.FAKE_BD_MODE = "env-root";
+  process.env.PI_BEADS_ROOT = envRootDir;
+  try {
+    resetLog();
+    const s = makePi();
+    const ui = { setStatus: (...args) => s.status.push(args) };
+    await s.handlers.session_start[0]({}, { cwd: outsideDir, ui });
+    assert.deepEqual(s.status, [["beads", "bd✓"]], "a ready segment is set when PI_BEADS_ROOT is a valid root");
+    assert.equal(s.tools.length, 23, "tools are still registered");
+    const probe = invocationsWithCwd().find((iv) => iv.args[0] === "info");
+    assert.ok(probe, `expected an info probe; got ${JSON.stringify(invocationsWithCwd())}`);
+    assert.equal(probe.cwd, envRootDir, "the usable-DB probe runs at PI_BEADS_ROOT, not cwd");
+  } finally {
+    delete process.env.PI_BEADS_ROOT;
+    delete process.env.FAKE_BD_MODE;
+  }
+});
+
+test("cwd-only: PI_BEADS_ROOT with no DB stays silent even when cwd has one", async () => {
+  // The configured root (not cwd) governs readiness: cwd has a valid DB, but
+  // PI_BEADS_ROOT points at a dir with no DB, so startup must not fall back.
+  process.env.FAKE_BD_MODE = "cwd-only";
+  process.env.PI_BEADS_ROOT = outsideDir;
+  try {
+    resetLog();
+    const s = makePi();
+    const ui = { setStatus: (...args) => s.status.push(args) };
+    await s.handlers.session_start[0]({}, { cwd: repoDir, ui });
+    assert.deepEqual(s.status, [], "must not report ready when the configured root has no DB");
+    const probe = invocationsWithCwd().find((iv) => iv.args[0] === "info");
+    assert.ok(probe, `expected an info probe; got ${JSON.stringify(invocationsWithCwd())}`);
+    assert.equal(probe.cwd, outsideDir, "the probe runs at PI_BEADS_ROOT, not the DB-bearing cwd");
+  } finally {
+    delete process.env.PI_BEADS_ROOT;
+    delete process.env.FAKE_BD_MODE;
+  }
+});
 test("transient startup failure: first routed write re-resolves and succeeds", async () => {
   const marker = join(root, "transient.marker");
   rmSync(marker, { force: true });
@@ -698,7 +757,7 @@ test("transient startup failure: first routed write re-resolves and succeeds", a
   delete process.env.FAKE_BD_TRANSIENT_MARKER;
 });
 
-test("repeated resolution failures are throttled to one walk per window", async () => {
+test("repeated resolution failures are throttled to one probe per window", async () => {
   process.env.FAKE_BD_MODE = "none";
   resetLog();
   const s = makePi();
@@ -707,11 +766,11 @@ test("repeated resolution failures are throttled to one walk per window", async 
   resetLog();
 
   await s.byName.get("beads_show").execute("c", { id: "proj-1a2" });
-  const afterFirst = invocations().filter((iv) => iv[0] === "where").length;
-  assert.ok(afterFirst >= 1, `first call should resolve at least once; got ${JSON.stringify(invocations())}`);
+  const afterFirst = invocations().filter((iv) => iv[0] === "info").length;
+  assert.ok(afterFirst >= 1, `first call should attempt a resolve; got ${JSON.stringify(invocations())}`);
   await s.byName.get("beads_show").execute("c", { id: "proj-1a2" });
-  const afterSecond = invocations().filter((iv) => iv[0] === "where").length;
-  assert.equal(afterSecond, afterFirst, "second call within the throttle window must not re-resolve");
+  const afterSecond = invocations().filter((iv) => iv[0] === "info").length;
+  assert.equal(afterSecond, afterFirst, "second call within the throttle window must make no resolve probe");
 });
 
 test("single-repo: beads_create builds argv and emits beads:changed", async () => {
