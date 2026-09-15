@@ -11,6 +11,7 @@ import {
   parseMoleculeRoots,
   pickWorkspaceMolecule,
 } from "./beads-molecule-widget.mjs";
+import { isDoltLockError, withDoltLockRetry } from "./dolt-lock-retry.mjs";
 
 const MAX_LOG_TEXT = 200;
 
@@ -71,8 +72,26 @@ export function createMoleculeWidgetController({
   }
 
   async function safeExec(args, gen) {
+    // Retry only embedded-dolt lock failures; every other outcome is
+    // returned/rethrown unchanged so the existing warn paths stay intact.
+    const timeout = timers?.setTimeout ?? setTimeout;
     try {
-      return await exec("bd", args, { cwd, timeout: 5000 });
+      return await withDoltLockRetry(
+        async () => {
+          try {
+            const r = await exec("bd", args, { cwd, timeout: 5000 });
+            return {
+              value: r,
+              lock: r.code !== 0 && isDoltLockError(`${r.stdout ?? ""}\n${r.stderr ?? ""}`),
+            };
+          } catch (err) {
+            const text = String(err?.message ?? err);
+            if (isDoltLockError(text)) return { value: { code: -1, stdout: "", stderr: text }, lock: true };
+            throw err;
+          }
+        },
+        { sleep: (ms) => new Promise((resolve) => timeout(resolve, ms)) },
+      );
     } catch (err) {
       if (gen === refreshGen)
         warn("[pi-superpowers-plus] molecule refresh failed:", sanitizeLogText(err?.message ?? err));
