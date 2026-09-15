@@ -733,4 +733,101 @@ const roots = (entries) => JSON.stringify(entries.map((e) => ({ issue_type: "mol
   assert.equal(ui.lastLines(), null, "all-clean-not-found roots must clear, not retain a stale frame");
 }
 
+// ---------- dolt lock: transient lock is retried silently, frame applied ----------
+{
+  const warns = [];
+  const ui = makeFakeUi();
+  let call = 0;
+  const immediateTimers = {
+    setTimeout: (cb) => {
+      cb();
+      return {};
+    },
+    clearTimeout: () => {},
+  };
+  const controller = createMoleculeWidgetController({
+    exec: async () => {
+      call += 1;
+      if (call === 1) return { code: 1, stdout: "", stderr: "database is locked" };
+      return { code: 0, stdout: RAW_A, stderr: "" };
+    },
+    subscribeChanges: () => () => {},
+    warn: (...a) => warns.push(a),
+    timers: immediateTimers,
+  });
+  controller.bindSession({ ui, cwd: "/repo" });
+  await tick();
+  controller.render();
+  assert.equal(warns.length, 0, "a lock that clears on retry emits zero warnings");
+  assert.ok(
+    ui.lastLines()?.some((l) => l.includes("Ask clarifying questions")),
+    `frame applied after the lock clears: ${ui.lastLines()}`,
+  );
+}
+
+// ---------- dolt lock: persistent lock warns exactly once ----------
+{
+  const warns = [];
+  const ui = makeFakeUi();
+  let listCalls = 0;
+  const immediateTimers = {
+    setTimeout: (cb) => {
+      cb();
+      return {};
+    },
+    clearTimeout: () => {},
+  };
+  const controller = createMoleculeWidgetController({
+    exec: async (_cmd, args) => {
+      if (args[0] === "list") {
+        listCalls += 1;
+        return { code: 1, stdout: "", stderr: "database is locked" };
+      }
+      return { code: 0, stdout: RAW_A, stderr: "" };
+    },
+    subscribeChanges: () => () => {},
+    warn: (...a) => warns.push(a),
+    timers: immediateTimers,
+  });
+  controller.bindSession({ ui, cwd: "/repo", workspaceKey: "k1" });
+  await tick();
+  assert.equal(listCalls, 5, "persistent lock exhausts the bounded retry budget");
+  assert.equal(warns.length, 1, "a persistent lock warns exactly once");
+  assert.ok(
+    String(warns[0][0]).includes("workspace query error"),
+    `persistent lock warns via the workspace query path: ${warns[0]}`,
+  );
+}
+
+// ---------- dolt lock: a non-lock throw is never retried, warns once ----------
+{
+  const warns = [];
+  const ui = makeFakeUi();
+  let calls = 0;
+  const immediateTimers = {
+    setTimeout: (cb) => {
+      cb();
+      return {};
+    },
+    clearTimeout: () => {},
+  };
+  const controller = createMoleculeWidgetController({
+    exec: async () => {
+      calls += 1;
+      throw new Error("connection refused");
+    },
+    subscribeChanges: () => () => {},
+    warn: (...a) => warns.push(a),
+    timers: immediateTimers,
+  });
+  controller.bindSession({ ui, cwd: "/repo" });
+  await tick();
+  assert.equal(calls, 1, "a non-lock throw is never retried");
+  assert.equal(warns.length, 1, "a non-lock throw warns exactly once");
+  assert.ok(
+    String(warns[0][0]).includes("molecule refresh failed"),
+    `non-lock throw warns via the refresh-failed path: ${warns[0]}`,
+  );
+}
+
 console.log("beads-molecule-widget-controller: all assertions passed");

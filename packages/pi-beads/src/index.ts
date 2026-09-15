@@ -33,6 +33,7 @@ import { tmpdir } from "node:os";
 import { promisify } from "node:util";
 import * as path from "node:path";
 import { fileURLToPath } from "node:url";
+import { isDoltLockError, withDoltLockRetry } from "./lock-retry.ts";
 
 const pexec = promisify(execFile);
 
@@ -126,25 +127,30 @@ export default function piBeadsLean(pi: any) {
   const RESOLVE_RETRY_MS = 5000; // failure throttle
 
   // ---- bd runner (execFile = no shell injection); cwd selects which DB bd resolves ----
+  // Every bd call is wrapped in withDoltLockRetry: a transient embedded-dolt lock
+  // (surfaced as non-zero exit + lock text) is retried with bounded backoff, while
+  // any other failure is returned immediately unchanged via the same { ok, out, err }.
   async function bd(
     args: string[],
     cwd: string = umbrella,
     timeout = 15000,
   ): Promise<{ ok: boolean; out: string; err: string }> {
-    try {
-      const { stdout } = await pexec("bd", args, {
-        cwd: cwd || process.cwd(),
-        maxBuffer: 8 * 1024 * 1024,
-        timeout,
-      });
-      return { ok: true, out: stdout ?? "", err: "" };
-    } catch (e: any) {
-      return {
-        ok: false,
-        out: e?.stdout ?? "",
-        err: (e?.stderr || e?.message || "bd failed").toString().trim(),
-      };
-    }
+    return withDoltLockRetry(async () => {
+      try {
+        const { stdout } = await pexec("bd", args, {
+          cwd: cwd || process.cwd(),
+          maxBuffer: 8 * 1024 * 1024,
+          timeout,
+        });
+        return { value: { ok: true, out: stdout ?? "", err: "" }, lock: false };
+      } catch (e: any) {
+        const err = (e?.stderr || e?.message || "bd failed").toString().trim();
+        return {
+          value: { ok: false, out: e?.stdout ?? "", err },
+          lock: isDoltLockError(err),
+        };
+      }
+    });
   }
 
   // ---- workspace label helpers (multi-worktree disambiguation) ----

@@ -53,34 +53,11 @@ digraph when_to_use {
 
 ## Workflows (SubagentWorkflow)
 
-SubagentWorkflow (pi-subagents >=0.19, pi >=0.84) runs deterministic scripts that coordinate many subagents in the background — `agent()`, `parallel()`, `pipeline()`, `gate`, `resume` (see the pi-subagents README / docs/workflows.md). It is for batches, not single tasks: use `Agent` for one delegated task or a handful you can name up front.
+`SubagentWorkflow` (pi-subagents >=0.19, pi >=0.84) runs deterministic scripts that coordinate many subagents in the background — batch shapes only; plain `Agent` dispatch wins whenever the batch is small enough to name up front.
 
-**When a workflow is right.** Prefer `SubagentWorkflow` for SDD's batch shapes:
+> **Read now:** [reference/subagent-workflows.md](reference/subagent-workflows.md) — SubagentWorkflow batch semantics, wave-parallel implementation, the context budget, and the absent-workflow fallback. Read before dispatching a wave or any workflow.
 
-- **Final whole-branch review** — fan review dimensions (or files/findings) out and verify each independently before believing the aggregate.
-- **Verification fan-out** — any "check all N things" pass over a runtime-discovered list.
-- **Wave-parallel implementation** — per-task batches dispatched from the beads ready frontier (only with a file-conflict gate; per the wave-parallel work).
-
-The preference is judgement-based: a small plan's final review is one reviewer, a two-item fan-out is two named calls — plain Agent dispatch wins whenever the batch is small enough to name up front. A workflow costs a subprocess per agent plus ~5k tokens/turn of tool-spec context; use one only when the parallelism pays for both. Per-task implementation stays on Agent dispatch when per-task cost attribution is wanted; wave batches (see Wave-parallel implementation below) may run on the workflow with per-batch cost, chosen deliberately per plan.
-
-**The fallback rule.** If `SubagentWorkflow` is present (pi-subagents >=0.19, pi >=0.84, `workflowsEnabled` not off, no stand-down), use it for the shapes above. If it is absent, the existing Agent-dispatch loop is unchanged — dispatch sequentially; never emulate workflows with parallel Agent calls.
-
-**The context budget.** The tool spec costs ~5k tokens of system prompt every turn while `workflowsEnabled` is on (source: `packages/pi-subagents/src/workflow/tool-description.ts`), used or not. Spend deliberately: when the plan has no batch phase in sight, consider pinning `"workflowsEnabled": false` in `subagents.json` (or `/agents → Settings → Workflows`) and re-enabling when a batch is planned. Guidance only — never toggle a host's settings from a skill.
-
-**Stand-down semantics.** The tool stands down automatically when another extension already provides a `Workflow`/`SubagentWorkflow` tool (exact-name match, checked at session start). Stand-down is equivalent to absence; the fallback applies unchanged.
-
-**Controller-owned state.** Workflow scripts and their children are read-only on beads and the ledger — they never create/update/close beads. Results funnel back through the controller, which alone records them in the SDD ledger; the ledger stays the record of truth (workflow resume journals are session-scoped; nothing a workflow produced persists cross-session except what the controller wrote).
-
-**Wave-parallel implementation.** For plans with several ready, INDEPENDENT tasks, batch them as waves on the workflow (one `SubagentWorkflow` run per wave; see `scripts/wave-parallel.js`). Per wave:
-
-1. Read the ready frontier (`beads_mol_ready`), filter to unclaimed tasks, and read each task bead's `Files:` section (plus the optional `**Gate:**` line — see writing-plans). A wave contains only tasks with PAIRWISE-DISJOINT file sets: compute the file-overlap groups; tasks that share any file are withheld and picked up by the next frontier. Never include colliding tasks in one wave. Tasks with no Files section (e.g. doc-only) are not wave-eligible — they stay on the sequential path (a wave review must be file-scoped).
-2. Claim every wave task bead (`beads_update({ id, claim: true })`), and record the ledger cursor `Wave <W>: dispatched — <task ids> on <base>`.
-3. Run `SubagentWorkflow({ scriptPath: "<skill>/scripts/wave-parallel.js", args: { wave: [{ taskBeadId, gate?, files: [...] }], base, reportDir, gateBeadId, reviewPackage } })` where `base` is the current HEAD, `reportDir` the plan workspace, `gateBeadId` the plan-approval gate bead, `reviewPackage` the absolute path to this skill's `scripts/review-package`.
-4. Process the returned envelope per task: `done` + `spec.specCompliant` + no critical/important → ledger `Task <N>: complete (...)`, close the bead. `done_with_concerns` → ledger the concerns; the review proceeds and the task flows through the same complete/fix-loop branches as `done`. `specCompliant: false` or issues present → the issues become the open findings; run the EXISTING controller-side fix loop (declared `Gate:` → `fix-loop.js`; else the prose path; rounds 1–5 + breaker as normal — these are plain-Agent dispatches, so per-task cost events return here). `needs_context`/`blocked` → answer via `beads_comment`, re-dispatch on the next wave (the task bead stays claimed). `gate-failed`/`failed` → fix loop with the declared gate (or prose path). `review-failed` → re-run that review once on the plain path. Wave-level `degraded` → ledger note per task; nothing silently dropped. If the `wave-parallel.js` run itself errors (a thrown script, e.g. bad args), fall back to sequential per-task dispatch for that wave's tasks — never silently drop them.
-5. Re-read the ready frontier and repeat until the implement step's tasks are closed; then the normal final whole-branch review runs once over the whole branch (it diffs merge-base..HEAD as usual — waves are invisible to it).
-
-Choose waves over sequential dispatch deliberately: waves waive per-task cost attribution (workflow children emit no lifecycle events) and freeze task beads mid-run (children are read-only on beads; the live mid-run eye is `/agents → Workflows`). The engine caps concurrency at `min(16, cpus−2)` — larger waves queue naturally. If `SubagentWorkflow` is absent, the sequential loop is unchanged — never emulate a wave with parallel `Agent` calls.
-
+For plans with several ready, INDEPENDENT tasks, waves of PAIRWISE-DISJOINT file sets may run on the workflow (`scripts/wave-parallel.js`); if `SubagentWorkflow` is absent, the sequential Agent loop is unchanged — never emulate a wave with parallel `Agent` calls.
 
 ## The Process
 
@@ -189,12 +166,7 @@ and `beads_mol_show({ id: "<implement-step-id>" })` for reading the task beads u
 - The ledger is your recovery map: the commits it names exist in git even
   when your context no longer remembers creating them. After compaction,
   trust the ledger and `git log` over your own recollection.
-- **Second recovery path: @handle.** Every implementer dispatch carries a canonical name (`task-<sanitized-task-id>-impl` — see The Task Loop · 1. Dispatch the implementer), and that handle works wherever an id does: `steer_subagent` / `get_subagent_result` accept it by name, and at the prompt `@task-…-impl` messages a running implementer, resumes a finished one, and reopens one from disk long after its in-memory record is evicted. Sessions persist by default (`rememberAgents`): a finished implementer's conversation lives on disk; a tombstone keeps the handle resolving after eviction (~10 min) and a later query reopens the conversation from disk, re-resolving the currently defined `implementer` frontmatter. After compaction, re-derive the handle from the task bead id you still hold and query — recover the outcome without re-dispatch. `get_subagent_result` / `steer_subagent` resolve live records only (within the ~10-minute eviction window after the implementer finishes; eviction is real-time, independent of controller compaction); after eviction the recovery channel is the `@task-…-impl` prompt mention, which reopens the conversation from disk as a fresh run rather than reading a stored result, and a tool-bound controller cannot type mentions.
-- **The boundary is the session.** The 100 most recent handles are kept, and all are forgotten on `/new` and session switch — the @handle path is recovery within the live session only. The ledger stays the cross-session recovery map, and now indexes each implementer (`agent:` and `handle:` on dispatch and fix-round lines), so recovery is ledger → handle → query.
-- **`run_in_background` on resume.** A foreground resume reopens an existing session and never hits the spawn path or the concurrency pool; a background resume takes a background slot and queues with other background agents. Fix-loop resumes are background by default — dispatch and let the completion notification carry the result, don't block. A finished agent resumes only once its run has finished; `steer_subagent` is the mid-run channel.
-- **Absent-extension caveat.** Naming and @handle require pi-subagents ≥0.19 with `rememberAgents` enabled; without them the ledger remains the sole recovery path and the naming bullet is moot.
-- `git clean -fdx` will destroy the workspace (it's git-ignored scratch); if
-  that happens, recover from `git log`.
+> **Read now:** [reference/recovery.md](reference/recovery.md) — @handle recovery, the session boundary, resume semantics, and workspace-recovery steps. Read before relying on recovery or resume.
 
 Read the molecule once (`beads_mol_current({ id: "<implement-step-id>" })`), note its context, and
 confirm the `plan-approved` gate is closed (`beads_show({ id: "<plan-approval-gate-bead-id>" })`) before
@@ -242,12 +214,8 @@ and fix-round diffs need it.
   gives no `in_progress` signal, so the widget's deepest-open fallback can't
   tell "being worked" from "next up"; claim it at dispatch so ◐ means a real
   claimed step.
-- **Canonical handle (named dispatch):** give every implementer dispatch a deterministic `name:` so a finished implementer stays reachable: `task-` + the task bead id with every "." replaced by "-" + `-impl` (example: task bead `pi-packages-l8x9.2` → `task-pi-packages-l8x9-2-impl`; Agent names allow letters/digits/_/- only, hence the dot substitution). Dispatch: `Agent({ subagent_type: "implementer", name: "task-<sanitized-task-id>-impl", ... })`. The handle works wherever ids do — `steer_subagent` / `get_subagent_result` accept it by name — and is deterministically re-derivable from the task bead id after compaction (see Setup · Second recovery path: @handle). Record `agent:` **and** `handle:` on the ledger dispatch line. The canonical name is held by the first implementer that claims it: a second fresh dispatch of the same task (fix rounds 4-5, or a BLOCKED/NEEDS_CONTEXT re-dispatch) within the live+tombstone window is silently renamed to `task-…-impl-2` — the spawn response never echoes the assigned alias, only an agent id — while the unsuffixed handle still resolves to the older, finished implementer, so recovery by the canonical name silently returns a stale outcome. For recovery, prefer the recorded `agent:` id (the durable resume key) or the actually-resolved handle, and record both `agent:` and `handle:` together on every ledger dispatch/fix-round line — never one without the other.
-- **Cost attribution:** include the task's bead id as a `bead:<task-id>` token in the Agent dispatch's `description` (e.g. `description: "Implement task bead:pi-packages-l8x9.2"`). The pi-beads cost-tracking extension parses `bead:<id>` out of the `subagents:completed`/`subagents:failed` event payload and writes the run's spend to the task bead's `cost.*` metadata (see docs/superpowers/specs/2026-09-10-cost-tracking-on-task-beads-design.md). Apply the token to implementer, task-reviewer, and re-review dispatches aimed at a tracked task bead; omit it for agents not aimed at a bead — cost tracking simply skips them.
-- **Report file:** name the implementer's report file after its task id
-  (`<workspace>/<task-id>-report.md`) and put it in the dispatch prompt. The
-  implementer writes the full report there and returns only status, commits,
-  a one-line test summary, and concerns.
+> **Read now:** [reference/dispatch-implementer.md](reference/dispatch-implementer.md) — canonical handle, cost attribution, report-file naming, and the bead-management guardrail. Read before your first dispatch.
+
 - A dispatch prompt describes one task, not the session's history. Do not
   paste accumulated prior-task summaries ("state after Tasks 1-3") into
   later dispatches. A fresh subagent needs its task, the interfaces it
@@ -258,7 +226,6 @@ and fix-round diffs need it.
   fix-loop rounds 1-3 resume this agent via `Agent({ subagent_type:
   "implementer", resume: <agent_id>, ... })`.
 - Never dispatch multiple implementation subagents in parallel (conflicts).
-- Never hand bead management to the implementer. Task tracking (creating, updating, closing this task's bead) is the controller's job alone, and the task closes only after its review passes. The implementer prompt template carries this guardrail — do not override it.
 
 Template: [implementer-prompt.md](implementer-prompt.md)
 
@@ -303,128 +270,15 @@ needed.
   call. Use the BASE you recorded before dispatching the implementer —
   never `HEAD~1`, which silently truncates multi-commit tasks. Never
   dispatch a task reviewer without a diff file.
-- **Reviewer inputs:** the task reviewer gets three paths — the same task
-  bead id, the report file, and the review package — plus the gate bead
-  id holding the plan's canonical Global Constraints.
-- The Global Constraints block is the reviewer's attention lens. Read it
-  once from the plan-approval gate bead's description
-  (`beads_show({ id: "<plan-approval-gate-bead-id>", full: true })`, populated by `writing-plans`) and pass that
-  gate id to the reviewer dispatch — the reviewer template carries the read instruction itself,
-  so the constraints are byte-identical across every task review. The reviewer's template
-  already carries the process rules (YAGNI, test hygiene, review method) — the constraints are
-  for what THIS project's spec demands.
-- Do not add open-ended directives like "check all uses" or "run race tests
-  if useful" without a concrete, task-specific reason
-- Do not ask a reviewer to re-run tests the implementer already ran on the
-  same code — the implementer's report carries the test evidence
-- Do not pre-judge findings for the reviewer — never instruct a reviewer to
-  ignore or not flag a specific issue. If you believe a finding would be a
-  false positive, let the reviewer raise it and adjudicate it in the review
-  loop. If the prompt you are writing contains "do not flag," "don't treat X
-  as a defect," "at most Minor," or "the plan chose" — stop: you are
-  pre-judging, usually to spare yourself a review loop.
-
-The task reviewer may report "⚠️ Cannot verify from diff" items — requirements
-that live in unchanged code or span tasks. These do not block the rest of the
-review, but you must resolve each one yourself before marking the task
-complete: you hold the plan and cross-task context the reviewer
-lacks. If you confirm an item is a real gap, treat it as a failed spec
-review — it enters the fix loop with the other findings.
+> **Read now:** [reference/task-review.md](reference/task-review.md) — reviewer inputs, the Global Constraints lens, anti-pre-judging directives, and the cannot-verify rule. Read before dispatching a task reviewer.
 
 Template: [task-reviewer-prompt.md](task-reviewer-prompt.md)
 
 ### 4. The fix loop
 
-The loop triggers when the review reports spec ❌, any Critical or Important
-finding, or a ⚠️ item you confirmed as a real gap.
+The loop triggers when the review reports spec ❌, any Critical or Important finding, or a ⚠️ item you confirmed as a real gap. Five rounds maximum per task; when round 5's re-review still leaves findings open, the breaker decides — park with a ruling or report BLOCKED, never a silent discard.
 
-Before the loop starts, two routes leave it immediately:
-
-- Record Minor findings in the progress ledger as you go
-  (`Task <N>: minor (deferred): <one-liner>`), and point the final
-  whole-branch review at that list so it can triage which must be fixed
-  before merge. A roll-up nobody reads is a silent discard. Minor findings
-  never enter the loop.
-- A finding labeled plan-mandated — or any finding that conflicts with
-  what the task text requires — is the human's decision, like any plan
-  contradiction: present the finding and the task text, ask which governs.
-  Do not dismiss the finding because the plan mandates it, and do not
-  dispatch a fix that contradicts the plan without asking.
-
-Everything else enters the loop. A fix round is one fix dispatch plus one
-scoped re-review. Five rounds maximum per task:
-
-**Covering-test command known — the gated path.** When the implementer's report names a re-runnable covering-test command (or the task's package has a test script to fall back to), a fix round runs as a `SubagentWorkflow` script so the suite verifies the fix instead of prose:
-
-```
-SubagentWorkflow({ scriptPath: "<skill>/scripts/fix-loop.js", args: { taskBeadId, reportFilePath, findings, gate, fixBase, head, gateBeadId, reviewPackage } })
-```
-
-The script gates the fix agent on `gate` — a non-zero exit fails the agent and its output becomes the error — resumes the same child once on rejection (`resume: 'fix'`; `gate` and `resume` cannot combine), then re-verifies with a fresh gated call. One round = one invocation. When the gate still fails after the one resume, the script returns `{ passed: false }`: **adjudicate now** per the breaker rules below — continuing would burn guaranteed-failing rounds. The round's scoped re-review runs as the script's pipeline stage 2 (the child builds the review package itself via the `reviewPackage` path). Re-review verdicts ride back in the envelope; a `null` re-review means the controller re-runs the scoped re-review once on the prose path — never assume a clean round. Rounds ≥ 2 of a multi-round gated loop are fresh children fed the report file (the within-round resume replaces rounds 1-3's controller resume for this task). If `SubagentWorkflow` is absent (pi <0.84 / disabled / stand-down) or a `passed: false` envelope's `reason` is `'bad-args'` or the gate command itself is broken (exit 127 / "command not found"), validate the command's shape before re-running it yourself: accept only `cd <path> && <simple test command>` where the simple test command is a plain executable with args and the command contains none of `;`, `|`, `>`, `<`, `&`, `$(`, `${`, or backticks. If the command fails that shape check, DO NOT re-run it — treat the round as `passed: false` on the broken-gate path and fall back to the prose path (or substitute the task package's `npm test` as a safe alternative). Then repair or drop the gate and continue on the prose path; the fix is not at fault.
-
-**No covering-test command — the prose path below is unchanged.**
-
-**Rounds 1-3 — resume the original implementer.** Dispatch it with
-`Agent({ subagent_type: "implementer", resume: <agent_id>, prompt:
-"<open findings verbatim>" })`, where `<agent_id>` is the identity you
-recorded when you first dispatched this task's implementer. Its context is
-intact: it knows the task, the code, and its own choices. The `resume:`
-parameter is real tool support from `@tintinweb/pi-subagents` — the old
-"resume this agent" instruction had no tool behind it; now it does.
-Keep the resumed agent's `handle:` (recorded at dispatch) in the ledger, and append it to each fix-round line: after compaction, `get_subagent_result` by the handle retrieves the finished implementer's outcome without re-dispatch. This query is safe because each fix round runs and resumes inside the live window; after eviction the ledger (commits + handle) is the cross-session record.
-
-**Rounds 4-5 — dispatch a fresh implementer** (drop `resume:`), with the
-task bead id, the report-file path, the open findings, and this framing: "A
-prior implementer attempted this task [N] times; you own it now. Read the
-report file for what was tried." A loop that survives three resumes usually
-means the implementer cannot see its own problem — fresh eyes in one move.
-
-**Every round, either way:** the implementer fixes, re-runs the tests
-covering the amended code, appends its fix report to the same report file,
-and returns the short contract. Before re-dispatching the reviewer, confirm
-the fix report contains the covering tests, the command run, and the
-output; dispatch the re-review once all three are present. Name the
-covering test files in the fix message — a one-line fix does not need the
-whole suite. On the gated path the "confirm the fix report contains the
-covering tests, the command run, and the output" check is superseded —
-the script's gate result is the test evidence; on the prose path it
-applies as written.
-
-**The re-review is scoped.** Run `scripts/review-package <implement-step-id> FIX_BASE HEAD`
-where FIX_BASE is the head the previous review saw, and dispatch
-[re-review-prompt.md](re-review-prompt.md) with the findings list, the
-task bead id, the report file, and the printed diff path. The re-reviewer verdicts
-each finding ADDRESSED or NOT ADDRESSED and flags new breakage in the fix
-diff only. New Critical/Important breakage in the fix diff joins the open
-findings list. Out-of-scope observations go to the ledger as deferred
-minors — they never extend the loop.
-
-**After each round,** append to the ledger:
-`Task <N>: fix round <R>/5 (<X> addressed, <Y> open — <finding one-liners>; commits <a7>..<b7>)`
-
-Gated rounds use one of these instead: `Task <N>: fix round <R>/5 gated: <cmd> passed — <X> addressed, <Y> open; commits <base>..<head>`, and on a failed gate `Task <N>: fix round <R>/5 GATE FAILED (<cmd>) — <output tail>; <ruling>`. `passed: false` rulings use the existing breaker entries unchanged (parked / deferred / `Task <N>: BLOCKED — <reason>`).
-
-Never fix findings yourself in the controller session — your context stays
-clean for coordination, and controller fixes skip review.
-
-**The breaker.** When round 5's re-review still leaves findings open, stop
-dispatching. Adjudicate each open finding yourself — you hold the plan and
-the cross-task context the reviewer lacks:
-
-- **The reviewer is wrong, or the point is contestable:** park it —
-  `Task <N>: parked — <finding> — ruling: <why the code stands>`. The final
-  review sees both sides.
-- **Real, but nothing downstream builds on it:** park it the same way, with
-  a ruling that says it's real and deferred.
-- **Real and load-bearing** — a later task builds on it, or it reveals a
-  plan defect: STOP. Append `Task <N>: BLOCKED — <reason>` and report to
-  your human partner with the finding, the task text it collides with, and
-  the fix history. Parking a structural failure lets every dependent task
-  build on it and hands the final review a problem it cannot fix either.
-
-Adjudicate only at the cap. Adjudicating earlier to end a loop is
-pre-judging with a different name. Every adjudication is a ledger entry —
-a silent discard is forbidden.
+> **Read now:** [reference/fix-loop.md](reference/fix-loop.md) — fix rounds, gated path, prose path, re-review scoping, ledger formats, and breaker rules. Do not start the fix loop without it.
 
 ### 5. Complete the task
 
@@ -469,59 +323,12 @@ above. When the final review is clean:
 
 After generating the package, choose the review path:
 
-- **Workflow path** (preferred when `SubagentWorkflow` is present and the branch is large or broad — multi-file, many commits, security-sensitive, or deferred minors to triage): invoke the skill's final-review workflow:
+> **Read now:** [reference/subagent-workflows.md](reference/subagent-workflows.md) — SubagentWorkflow batch semantics and the absent-workflow fallback. Read before choosing the workflow path.
 
-      SubagentWorkflow({
-        scriptPath: "<skill-scripts-dir>/final-review.js", // the dir containing this skill's scripts/ (e.g. packages/pi-superpowers-plus/skills/subagent-driven-development/scripts/)
-        args: {
-          packagePath: "<printed package path>",
-          base: "<MERGE_BASE>",
-          head: "<HEAD>",
-          description: "<what was implemented — one paragraph from the After-All-Tasks summary>",
-          gateBeadId: "<plan-approval-gate-bead-id>",
-          findingsFile: "<sdd-workspace>/final-review-<run-id>.jsonl", // absolute path, git-ignored — keeps the run's return envelope compact
-        },
-      })
+> **Read now:** [reference/final-review.md](reference/final-review.md) — the final-review workflow payload and args, plus the findings-file audit. Read before choosing the workflow path.
 
-  It runs in the background — wait for the completion notification. Pass `findingsFile` (a FRESH absolute path to a JSONL under the git-ignored sdd workspace — the children append to it, so a stale file for the same range from an earlier run would otherwise merge into the new run) so the workflow persists its findings instead of returning them inline: the run's return value is then the compact envelope `{ findingsFile, count, degraded, dimStatus, refuted, persisted }` (`persisted` tells whether the writer child reported writing the file — the audit below is the real check), and the full per-finding payload is read from the JSONL file — find lines carry `kind: "find"` with the dimension on the line itself (`dimension: <DIM>`) and the schema-validated findings array (each finding item carries `file`, optional `line`, `severity`, `description` — the dimension does not ride per item); verify lines carry `kind: "verify"` with the copied fields `file`, `line`, `severity`, `description` plus the adversarial `verdict { isReal, reason }`. Join verify lines to findings by file/line/normalized-description — the same dedupe key the script uses. Findings with `isReal: false` are refuted — not open — unless the refutation's reason is contestable, in which case re-adjudicate it yourself (never silently drop). If the envelope reports `degraded` — set whenever any dimension finder fails (partial or total, e.g. `degraded: "N of M dimension finders failed"`) — or the run errors (or `findingsFile` lines are missing), fall back to the single-reviewer path. When `count === 0` no file is written for a clean run — accept `{ count: 0, degraded: null }` as clean, without file audit and without fallback (the audit applies only when `count > 0`). When `count > 0`, verify the audit trail before adjudicating: `node -e "const fs=require('fs');for(const l of fs.readFileSync(process.argv[1],'utf8').trim().split('\n'))JSON.parse(l);console.log('ok '+process.argv[1])" <findingsFile>` must print ok (every line valid JSON); if it fails, or the line count is less than `count`, treat the run as degraded and fall back to the single-reviewer path.
-
+- **Workflow path** (preferred when `SubagentWorkflow` is present and the branch is large or broad — multi-file, many commits, security-sensitive, or deferred minors to triage): invoke the skill's final-review workflow per `reference/final-review.md`.
 - **Single-reviewer path** (fallback — `SubagentWorkflow` absent, a small plan, or a degraded workflow run): dispatch the `code-reviewer` agent with the [code-reviewer.md](../requesting-code-review/code-reviewer.md) template, passing the printed package path.
-
-## When a Subagent Fails
-
-**You are the orchestrator. You do NOT write code. You dispatch subagents that write code.**
-
-If an implementer subagent fails, errors out, or produces incomplete work:
-
-1. **Attempt 1:** Dispatch a NEW fix subagent with specific instructions about what went wrong and what needs to change. Include the error output and the original task text.
-2. **Attempt 2:** If the fix subagent also fails, dispatch one more with a different approach or simplified scope.
-3. **After 2 failed attempts: STOP.** Report the failure to the user and ask how to proceed. The task likely needs redesign.
-
-**NEVER:**
-- Write code yourself to "help" or "finish up" — you are the orchestrator, not an implementer
-- Try to fix the subagent's work inline — this pollutes your context and defeats the fresh-subagent model
-- Silently skip the failed task and move on
-- Reduce quality gates (skip reviews) because a task is "almost done"
-
-## Red Flags
-
-**Never:**
-- Start implementation on main/master branch without explicit user consent
-- Skip the task review (spec + quality)
-- Proceed with unfixed issues that are neither fixed nor parked-with-ruling
-- Dispatch multiple implementation subagents in parallel (conflicts) — the sanctioned exception is a scheduled wave of DISJOINT-file tasks via `scripts/wave-parallel.js`; never free-form parallel `Agent` dispatch
-- Make a subagent read more than its own task bead (hand it the whole plan / molecule tree)
-- Skip scene-setting context (subagent needs to understand where task fits)
-- Ignore subagent questions (answer before letting them proceed)
-- Accept "close enough" on spec compliance
-- Skip review loops (reviewer found issues = implementer fixes = re-review)
-- Let implementer self-review replace the task review (both are needed)
-- Move to the next task while the review has open Critical/Important issues
-- Pre-judge findings for a reviewer ("do not flag", "at most Minor")
-- Silently discard a finding — every adjudication is a ledger entry
-- Fix findings yourself in the controller session
-- Re-dispatch a completed task from memory because the controller lost its report — query the finished implementer by its canonical handle (Setup · Second recovery path: @handle) or trust the ledger first
-- Emulate workflows with parallel `Agent` dispatch when `SubagentWorkflow` is absent (the fallback is the sequential loop, not fake parallelism)
 
 ## Integration
 
@@ -536,3 +343,13 @@ If an implementer subagent fails, errors out, or produces incomplete work:
 
 **Alternative workflow:**
 - **`/skill:executing-plans`** - Use for parallel session instead of same-session execution
+
+## Reference material
+
+- [reference/subagent-workflows.md](reference/subagent-workflows.md) — SubagentWorkflow batch semantics, wave-parallel implementation, context budget, and fallback.
+- [reference/recovery.md](reference/recovery.md) — @handle recovery, session boundary, resume semantics, and workspace recovery.
+- [reference/dispatch-implementer.md](reference/dispatch-implementer.md) — canonical handle, cost attribution, report-file naming, and the bead-management guardrail.
+- [reference/task-review.md](reference/task-review.md) — reviewer inputs, Global Constraints lens, anti-pre-judging directives, cannot-verify rule.
+- [reference/fix-loop.md](reference/fix-loop.md) — fix rounds, gated path, prose path, re-review scoping, ledger formats, breaker rules.
+- [reference/final-review.md](reference/final-review.md) — final-review workflow payload/args and the findings-file audit.
+- [reference/red-flags.md](reference/red-flags.md) — failure handling, orchestrator non-negotiables, and the red-flag catalog.

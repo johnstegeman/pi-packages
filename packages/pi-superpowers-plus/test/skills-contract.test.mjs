@@ -2,7 +2,7 @@
 // (docs/superpowers/specs/2026-09-11-superpowers-skill-prompt-contradictions-design.md).
 // Plain node, no dependencies.
 import assert from "node:assert/strict";
-import { readdirSync, readFileSync } from "node:fs";
+import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -93,6 +93,84 @@ test("no shipped skill restates the code-reviewer identity", () => {
       `${f} restates the code-reviewer identity (canonical source is agent-templates/code-reviewer.md)`,
     );
   }
+});
+
+// --- reference-material contract ---
+const skillsRoot = join(root, "skills");
+function skillDirs() {
+  return readdirSync(skillsRoot, { withFileTypes: true })
+    .filter((e) => e.isDirectory())
+    .map((e) => join(skillsRoot, e.name));
+}
+function readRefFiles(dir) {
+  try {
+    return readdirSync(join(dir, "reference"));
+  } catch (e) {
+    if (e && e.code === "ENOENT") return [];
+    throw e;
+  }
+}
+
+test("every reference file is linked from its SKILL.md", () => {
+  const offenders = [];
+  for (const dir of skillDirs()) {
+    const skill = readFileSync(join(dir, "SKILL.md"), "utf8");
+    for (const f of readRefFiles(dir)) {
+      if (!skill.includes(`reference/${f}`)) offenders.push(`${dir}: reference/${f} unlinked`);
+    }
+  }
+  assert.deepEqual(offenders, []);
+});
+
+test("every relative markdown link in a SKILL.md or reference file resolves", () => {
+  const offenders = [];
+  for (const dir of skillDirs()) {
+    const files = [join(dir, "SKILL.md")];
+    try {
+      for (const f of readdirSync(join(dir, "reference"))) {
+        if (f.endsWith(".md")) files.push(join(dir, "reference", f));
+      }
+    } catch {
+      // no reference/ directory for this skill
+    }
+    for (const file of files) {
+      const src = readFileSync(file, "utf8");
+      for (const m of src.matchAll(/\[[^\]]*\]\(([^)\s]+)\)/g)) {
+        const t = m[1];
+        if (/^[a-z][a-z0-9+.-]*:/.test(t) || t.startsWith("#")) continue;
+        if (!existsSync(join(dirname(file), t))) offenders.push(`${file} -> ${t}`);
+      }
+    }
+  }
+  assert.deepEqual(offenders, []);
+});
+
+test("read-gate lines match the marker and target real files", () => {
+  const offenders = [];
+  for (const dir of skillDirs()) {
+    const src = readFileSync(join(dir, "SKILL.md"), "utf8");
+    for (const line of src.split("\n")) {
+      if (!/^>\s*\*\*Read now:\*\*/.test(line)) continue;
+      const m = line.match(/^>\s*\*\*Read now:\*\*\s*\[[^\]]*\]\(([^)\s]+)\)\s+—\s+\S/);
+      if (!m) {
+        offenders.push(`${dir}: read-gate malformed (missing em-dash description): ${line.trim()}`);
+        continue;
+      }
+      if (!existsSync(join(dir, m[1]))) offenders.push(`${dir}: read-gate -> ${m[1]}`);
+    }
+  }
+  assert.deepEqual(offenders, []);
+});
+
+test("no set_phase call lives in reference material", () => {
+  const offenders = [];
+  for (const dir of skillDirs()) {
+    for (const f of readRefFiles(dir)) {
+      const src = readFileSync(join(dir, "reference", f), "utf8");
+      if (/set_phase\(\{/.test(src)) offenders.push(`${dir}/reference/${f}`);
+    }
+  }
+  assert.deepEqual(offenders, []);
 });
 
 run();
