@@ -16,7 +16,7 @@ import assert from "node:assert/strict";
 import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, realpathSync, existsSync, rmSync } from "node:fs";
 import { join, delimiter } from "node:path";
 import { tmpdir } from "node:os";
-import { CONC_GUARD_SH, concEnv } from "./helpers/fake-bd.mjs";
+import { CONC_GUARD_SH, LOCK_GUARD_SH, concEnv } from "./helpers/fake-bd.mjs";
 
 // ---------------------------------------------------------------------------
 // fixture topology: a temp tree with a single "repo" and an "umbrella" that
@@ -53,6 +53,8 @@ MODE="\${FAKE_BD_MODE:-single}"
   for a in "$@"; do printf 'ARG %s\\n' "$a"; done
 } >> "$FAKE_BD_LOG"
 ${CONC_GUARD_SH}
+${LOCK_GUARD_SH}
+lock_guard
 case "$1" in
   where)
     if [ "$MODE" = "single-mol-only" ] || [ "$MODE" = "multi-mol-dashed" ] || [ "$MODE" = "single-mol-dashless" ]; then
@@ -1418,6 +1420,54 @@ test("single-repo: read tools never emit beads:changed", async () => {
     assert.ok(okResult(r), `${name} failed: ${JSON.stringify(r)}`);
     findInvocation(argv); // the read really went to bd with the right argv
     assert.equal(s.emitted.length, 0, `${name} must not emit beads:changed`);
+  }
+});
+
+test("single-repo: bd retries a transient embedded-dolt lock and the read still succeeds", async () => {
+  const s = await openSession("single", repoDir);
+  const counter = join(root, "lock-counter-transient");
+  rmSync(counter, { force: true });
+  process.env.FAKE_BD_LOCK_UNTIL = "1";
+  process.env.FAKE_BD_LOCK_COUNTER = counter;
+  try {
+    resetLog();
+    const r = await s.byName.get("beads_show").execute("c", { id: "proj-1a2" });
+    assert.ok(okResult(r), JSON.stringify(r));
+    // the lock cleared within the retry budget: the read result is the normal one,
+    // with no lock text and no surfaced failure
+    assert.doesNotMatch(r.content[0].text, /database is locked/i);
+    assert.doesNotMatch(r.content[0].text, /bd show failed/i);
+    // the same argv was issued twice: the first attempt hit the lock, the retry passed
+    const invs = invocations();
+    assert.equal(invs.length, 2, `expected the argv issued twice; got ${JSON.stringify(invs)}`);
+    assert.deepEqual(invs[0], ["show", "proj-1a2", "--json"]);
+    assert.deepEqual(invs[1], ["show", "proj-1a2", "--json"]);
+  } finally {
+    delete process.env.FAKE_BD_LOCK_UNTIL;
+    delete process.env.FAKE_BD_LOCK_COUNTER;
+  }
+});
+
+test("single-repo: a persistent embedded-dolt lock surfaces the failure exactly once", async () => {
+  const s = await openSession("single", repoDir);
+  const counter = join(root, "lock-counter-persistent");
+  rmSync(counter, { force: true });
+  process.env.FAKE_BD_LOCK_UNTIL = "100";
+  process.env.FAKE_BD_LOCK_COUNTER = counter;
+  try {
+    resetLog();
+    const r = await s.byName.get("beads_show").execute("c", { id: "proj-1a2" });
+    assert.ok(okResult(r), JSON.stringify(r));
+    const text = r.content[0].text;
+    // the retry budget is bounded and exhausted: the tool reports its normal failure,
+    // once, with the original lock text intact
+    assert.match(text, /bd show failed/);
+    assert.match(text, /database is locked by another dolt process/);
+    const invs = invocations();
+    assert.equal(invs.length, 5, `expected exactly 5 bounded attempts; got ${JSON.stringify(invs)}`);
+  } finally {
+    delete process.env.FAKE_BD_LOCK_UNTIL;
+    delete process.env.FAKE_BD_LOCK_COUNTER;
   }
 });
 

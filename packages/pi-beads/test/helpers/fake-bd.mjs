@@ -31,3 +31,24 @@ export function concEnv(dir, marker) {
     delete process.env.FAKE_BD_CONC_MARKER;
   };
 }
+
+
+// lock_guard: when FAKE_BD_LOCK_UNTIL=<n> is set, the first n invocations of this
+// fixture fail with the embedded-dolt lock text on stderr and a non-zero exit;
+// invocation n+1 onward proceed normally. FAKE_BD_LOCK_COUNTER names the counter
+// file (one line appended per invocation), so each test can point at its own file
+// and no lock mode bleeds across tests. Embed into a /bin/sh fixture and call it
+// once at the top of the script, before any command dispatch.
+export const LOCK_GUARD_SH = `lock_guard() {
+  [ -n "\${FAKE_BD_LOCK_UNTIL:-}" ] || return 0
+  C="\${FAKE_BD_LOCK_COUNTER:-}"
+  [ -n "$C" ] || return 0
+  N=0
+  [ -f "$C" ] && N="$(wc -l < "$C" | tr -d ' ')"
+  N=$((N + 1))
+  printf 'x\\n' >> "$C"
+  if [ "$N" -le "$FAKE_BD_LOCK_UNTIL" ]; then
+    echo "embeddeddolt: open db: failed to load database: the database is locked by another dolt process" >&2
+    exit 1
+  fi
+}`;
