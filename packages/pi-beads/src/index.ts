@@ -854,7 +854,7 @@ export default function piBeadsLean(pi: any) {
           ["dep", "tree", ids[0], "--direction", dir, "--json"],
           umbrella,
         );
-        if (!r.ok) return textResult(`bd dep tree failed: ${r.err}`);
+        if (!r.ok) return textResult(`bd dep tree failed: ${errText(r)}`);
         const arr = jparse(r.out);
         if (!Array.isArray(arr) || arr.length <= 1)
           return textResult(`${ids[0]} ${label}: (none)`);
@@ -1248,7 +1248,7 @@ export default function piBeadsLean(pi: any) {
         if (params?.noAuto === true || params?.noAuto === "true") args.push("--no-auto");
         const r = await bd(args, dir);
         if (!r.ok) {
-          const msg = `bd close failed for ${rids.join(", ")}: ${r.err}`;
+          const msg = `bd close failed for ${rids.join(", ")}: ${errText(r)}`;
           failure = failure ? `${failure}; ${msg}` : msg;
           // each repo's close is independent: keep going so later repos are
           // neither silently skipped nor omitted from the accumulated failure.
@@ -1271,7 +1271,7 @@ export default function piBeadsLean(pi: any) {
               const sarr = Array.isArray(so) ? so : Array.isArray((so as any)?.issues) ? (so as any).issues : [];
               const sIssue = sarr.find((x: any) => x && String(x.id) === nxt) ?? sarr[0];
               if (sIssue && String(sIssue.status) === "closed") break;
-              const msg = `parent cascade: ${nxt} not closed: ${rc.err}`;
+              const msg = `parent cascade: ${nxt} not closed: ${errText(rc)}`;
               failure = failure ? `${failure}; ${msg}` : msg;
               break;
             }
@@ -1781,7 +1781,7 @@ export default function piBeadsLean(pi: any) {
         ["dep", "remove", String(params.issue), String(params.blocker)],
         dir,
       );
-      if (!r.ok) return textResult(`bd dep remove failed: ${r.err}`);
+      if (!r.ok) return textResult(`bd dep remove failed: ${errText(r)}`);
       await afterWrite(dir);
       return textResult(r.out.trim() || "dependency removed");
     },
