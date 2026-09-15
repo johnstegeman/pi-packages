@@ -73,7 +73,7 @@ process.env.FAKE_BD_LOG = logFile;
 process.env.FAKE_BD_STATE = join(root, "state");
 
 const { default: piBeadsLean, getBeadsRuntime } = await import("../src/index.ts");
-const { default: costTracking } = await import("../src/cost-tracking.ts");
+const { default: costTracking, __beadQueueSize } = await import("../src/cost-tracking.ts");
 
 let failures = 0;
 const tests = [];
@@ -328,6 +328,15 @@ test("smoke: realistic subagent completion drives the shipped entrypoints end-to
     "--set-metadata", "cost.agents.count=1",
   ]);
   assert.ok(s.emitted.includes("beads:changed"), "afterWrite emits beads:changed");
+});
+
+test("per-bead queue is pruned once the write settles", async () => {
+  const s = await openSession();
+  process.env.FAKE_BD_SHOW_JSON = JSON.stringify([{ id: "rep-1", metadata: {} }]);
+  resetLog();
+  await fire(s, "subagents:completed", { id: "z1", type: "implementer", status: "completed", description: "x task bead:rep-1", usage: { cost: { total: 0.5 } } });
+  await new Promise((r) => setTimeout(r, 0));
+  assert.equal(__beadQueueSize(), 0, "queue entry must be pruned after settle");
 });
 
 run();
