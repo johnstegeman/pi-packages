@@ -16,6 +16,7 @@ import assert from "node:assert/strict";
 import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, realpathSync, existsSync, rmSync } from "node:fs";
 import { join, delimiter } from "node:path";
 import { tmpdir } from "node:os";
+import { CONC_GUARD_SH, concEnv } from "./helpers/fake-bd.mjs";
 
 // ---------------------------------------------------------------------------
 // fixture topology: a temp tree with a single "repo" and an "umbrella" that
@@ -49,6 +50,7 @@ MODE="\${FAKE_BD_MODE:-single}"
   printf 'INV cwd=%s mode=%s\\n' "$CWD" "$MODE"
   for a in "$@"; do printf 'ARG %s\\n' "$a"; done
 } >> "$FAKE_BD_LOG"
+${CONC_GUARD_SH}
 case "$1" in
   where)
     if [ "$MODE" = "single-mol-only" ]; then
@@ -326,24 +328,7 @@ case "$1" in
     echo "ok"; exit 0
     ;;
   create)
-    if [ "\${FAKE_BD_CONC:-0}" = "1" ]; then
-      # concurrency-aware mode: detect two creates in flight at once — the exact
-      # regression beads_create_list's awaited loop exists to prevent. Write
-      # CONCURRENT to the marker and exit non-zero if overlap is observed.
-      mkdir -p "$FAKE_BD_CONC_DIR"
-      CLAIM="$FAKE_BD_CONC_DIR/$$"
-      mkdir "$CLAIM" 2>/dev/null || { echo "cannot claim" >&2; exit 1; }
-      N="$(ls -A "$FAKE_BD_CONC_DIR" | wc -l | tr -d ' ')"
-      if [ "$N" -gt 1 ]; then
-        mkdir -p "$(dirname "$FAKE_BD_CONC_MARKER")"
-        printf 'CONCURRENT\\n' >> "$FAKE_BD_CONC_MARKER"
-        rmdir "$CLAIM" 2>/dev/null
-        echo "concurrent create detected" >&2
-        exit 1
-      fi
-      sleep 0.05
-      rmdir "$CLAIM" 2>/dev/null
-    fi
+    conc_guard
     case "$2" in
       "Plan reviewed / ready to execute") printf 'proj-m1-imp.1\\n'; exit 0 ;;
       "Task 1: setup") printf 'proj-m1-imp.2\\n'; exit 0 ;;
@@ -745,9 +730,7 @@ test("single-repo: beads_create_list creates sequentially, wires gate+chain deps
   // correct sequential (awaited) loop never overlaps, so the marker must stay absent.
   const concDir = join(root, "conc");
   const concMarker = join(root, "conc.marker");
-  process.env.FAKE_BD_CONC = "1";
-  process.env.FAKE_BD_CONC_DIR = concDir;
-  process.env.FAKE_BD_CONC_MARKER = concMarker;
+  const restoreConc = concEnv(concDir, concMarker);
   try {
     const r = await s.byName.get("beads_create_list").execute("c", {
       parent: "proj-m1-imp",
@@ -836,9 +819,7 @@ test("single-repo: beads_create_list creates sequentially, wires gate+chain deps
     }
     assert.equal(marker.trim(), "", `concurrent creates observed: '${marker}'`);
   } finally {
-    delete process.env.FAKE_BD_CONC;
-    delete process.env.FAKE_BD_CONC_DIR;
-    delete process.env.FAKE_BD_CONC_MARKER;
+    restoreConc();
   }
 });
 

@@ -7,6 +7,7 @@ import assert from "node:assert/strict";
 import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, chmodSync, realpathSync, existsSync } from "node:fs";
 import { join, delimiter } from "node:path";
 import { tmpdir } from "node:os";
+import { CONC_GUARD_SH, concEnv } from "./helpers/fake-bd.mjs";
 
 const root = realpathSync(mkdtempSync(join(tmpdir(), "pi-beads-cost-")));
 const binDir = join(root, "bin");
@@ -23,25 +24,7 @@ CWD="$(pwd)"
   printf 'INV cwd=%s\\n' "$CWD"
   for a in "$@"; do printf 'ARG %s\\n' "$a"; done
 } >> "$FAKE_BD_LOG"
-# concurrency instrumentation (shared with pi-beads.test.mjs's create case): when
-# FAKE_BD_CONC=1, detect two bd ops in flight at once. A correct serialized
-# show->update RMW never overlaps; a racy one writes CONCURRENT to the marker.
-conc_guard() {
-  [ "\${FAKE_BD_CONC:-0}" = "1" ] || return 0
-  mkdir -p "$FAKE_BD_CONC_DIR"
-  CLAIM="$FAKE_BD_CONC_DIR/$$"
-  mkdir "$CLAIM" 2>/dev/null || { echo "cannot claim" >&2; exit 1; }
-  N="$(ls -A "$FAKE_BD_CONC_DIR" | wc -l | tr -d ' ')"
-  if [ "$N" -gt 1 ]; then
-    mkdir -p "$(dirname "$FAKE_BD_CONC_MARKER")"
-    printf 'CONCURRENT\\n' >> "$FAKE_BD_CONC_MARKER"
-    rmdir "$CLAIM" 2>/dev/null
-    echo "concurrent bd op detected" >&2
-    exit 1
-  fi
-  sleep 0.05
-  rmdir "$CLAIM" 2>/dev/null
-}
+${CONC_GUARD_SH}
 case "$1" in
   where)
     printf '  %s\\n  prefix: rep\\n' ${shellQuote(join(repoDir, ".beads"))}; exit 0 ;;
@@ -255,9 +238,7 @@ test("dotted agent id is sanitized to underscore and still counted in rollups", 
 test("overlapping events for the same bead are serialized (no lost/overlapping RMW)", async () => {
   const s = await openSession();
   process.env.FAKE_BD_SHOW_JSON = JSON.stringify([{ id: "rep-1", metadata: {} }]);
-  process.env.FAKE_BD_CONC = "1";
-  process.env.FAKE_BD_CONC_DIR = join(root, "conc");
-  process.env.FAKE_BD_CONC_MARKER = join(root, "conc.marker");
+  const restoreConc = concEnv(join(root, "conc"), join(root, "conc.marker"));
   try {
     resetLog();
     await Promise.all([
@@ -270,7 +251,7 @@ test("overlapping events for the same bead are serialized (no lost/overlapping R
     try { marker = readFileSync(process.env.FAKE_BD_CONC_MARKER, "utf8"); } catch {}
     assert.equal(marker.trim(), "", `overlapping RMW observed: ${marker}`);
   } finally {
-    delete process.env.FAKE_BD_CONC; delete process.env.FAKE_BD_CONC_DIR; delete process.env.FAKE_BD_CONC_MARKER;
+    restoreConc();
   }
 });
 
