@@ -31,7 +31,11 @@ export default function (pi: ExtensionAPI) {
     warn: (...args) => console.warn(...args),
   });
 
+  let cachedKeyCwd: string | null = null;
+  let cachedKey: string | null = null;
+
   async function resolveWorkspaceKey(cwd: string): Promise<string> {
+    if (cwd === cachedKeyCwd && cachedKey !== null) return cachedKey;
     let top = cwd;
     try {
       const r = await pi.exec("git", ["rev-parse", "--show-toplevel"], { cwd });
@@ -44,7 +48,9 @@ export default function (pi: ExtensionAPI) {
     } catch {
       // keep the unresolved path
     }
-    return workspaceKey(top);
+    cachedKeyCwd = cwd;
+    cachedKey = workspaceKey(top);
+    return cachedKey;
   }
 
   pi.on("session_start", async (_event: unknown, ctx: SessionContext) => {

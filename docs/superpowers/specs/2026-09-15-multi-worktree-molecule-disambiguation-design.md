@@ -66,10 +66,11 @@ WRITE  packages/pi-beads/src/index.ts
               (inside beads_mol_pour; source is the session worktree)
 
 READ   pi  ──► beads-molecule-widget.ts (adapter)
-                    │  event wiring unchanged; passes cwd
+                    │  resolveWorkspaceKey(cwd) via injected exec
+                    │  (git rev-parse --show-toplevel + realpath);
+                    │  event wiring unchanged; passes cwd + workspaceKey
                     ▼
               beads-molecule-widget-controller.mjs
-                    │  resolveWorkspaceKey(cwd) via injected exec
                     │  bd list --type molecule --label ws:<key> --json
                     │  then bd mol current <root> --json (existing machinery)
                     ▼
@@ -131,14 +132,15 @@ failure into "do not use".
 
 ## Read path, selection, and fallback
 
-The adapter keeps passing `cwd`; the controller resolves the workspace key
-itself (it already owns injected `exec` and `cwd`). Refresh flow, replacing the
-current "`nextRefreshArgs` → one bd call":
+The adapter resolves the workspace key from `cwd` (via injected `exec`: `git
+rev-parse --show-toplevel` + realpath) and injects it into the controller, which
+does NOT shell out to git itself. Refresh flow, replacing the current
+`nextRefreshArgs` → one bd call:
 
 ```
 refresh():
   gen = ++refreshGen
-  1. key = resolveWorkspaceKey(cwd)          // memoized per cwd
+  1. key = injected workspaceKey             // resolved + memoized by the adapter
        └─ if key changed since last refresh → drop activeMolecule + lock
   2. if lockedMoleculeId usable:
        → bd mol current <locked> --json       // existing by-id path; unchanged
@@ -158,12 +160,12 @@ refresh():
 **Pure selector** (`beads-molecule-widget.mjs`):
 
 ```js
-pickWorkspaceMolecule(items) // items = [{ frame, updatedAt }], sorted newest-first by the controller
+pickWorkspaceMolecule(items) // items = [{ frame, updatedAt }]; NOT required to be pre-sorted
   score(f) = f.current_step && !finished ? 2   // active
            : !finished                 ? 1     // open, not yet started
            : 0                                  // finished
   finished = f.doneCount === f.total && !f.current_step
-  pick = max(score); ties resolved by input order (newest updatedAt first)
+  pick = max(score); ties broken by newest updatedAt, then smallest molecule_id
 ```
 
 This encodes the fallback policy: a single workspace match always wins; with
@@ -197,9 +199,11 @@ A single vectors file at repo root, `scripts/fixtures/workspace-key-vectors.json
 
 ```json
 [
-  { "toplevel": "/Users/me/repo",   "key": "35696fd2bb77" },
-  { "toplevel": "/Users/me/repo/",  "key": "35696fd2bb77" },
-  { "toplevel": "/tmp",        "key": "11fe14a563f7" }  // realpath = /private/tmp
+  { "path": "/Users/me/repo",          "key": "35696fd2bb77" },
+  { "path": "/Users/me/repo/",         "key": "35696fd2bb77" },
+  { "path": "/private/tmp",            "key": "11fe14a563f7" },
+  { "path": "/repo/worktrees/feature", "key": "6b8e99cc467b" },
+  { "path": "/repo/worktrees/other",   "key": "2404d77127d9" }
 ]
 ```
 
@@ -220,6 +224,8 @@ In `beads-molecule-widget.test.mjs` / `beads-molecule-widget-controller.test.mjs
   - N roots → selector outcome adopted.
   - 0 roots + 1 global candidate → adopt it.
   - 0 roots + ≥2 global candidates → clear (never guesses another worktree).
+  - 0 roots + any `ws:`-stamped open molecule elsewhere → clear (never adopts
+    an unscoped global candidate owned by another worktree; the FIX A guard).
   - lock held → workspace query skipped.
   - cwd key change → frame + lock reset.
   - `bd list` transient error → frame kept; clean not-found/no-DB → cleared.
@@ -234,6 +240,19 @@ In `beads-molecule-widget.test.mjs` / `beads-molecule-widget-controller.test.mjs
 - `ws:` label write failure → pour still returns success plus the
   `ws label: FAILED …` diagnostic; step-label hard-fail path unchanged.
 - Existing tool-surface doc-drift guard still passes (no tool added/removed).
+
+### Manual two-worktree smoke
+
+Cross-process behavior is not automatable in the suites; verify by hand:
+
+1. In one repo, add two worktrees: `git worktree add ../wt-a && git worktree add
+   ../wt-b`. Both share the main checkout's beads DB.
+2. Open a pi session in each worktree and pour a superpowers molecule in each.
+3. Confirm each session's widget shows **its own** molecule (the reference to
+   the molecule poured in that worktree).
+4. Open an idle third worktree (one with no molecule poured) and confirm its
+   widget shows **nothing** — it must not render another worktree's molecule.
+   This is the zero-roots fallback guard (FIX A).
 
 ## Acceptance Criteria
 

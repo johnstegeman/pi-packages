@@ -14,7 +14,6 @@
 // drives both single-repo and umbrella topology.
 import assert from "node:assert/strict";
 import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, realpathSync, existsSync, rmSync } from "node:fs";
-import { createHash } from "node:crypto";
 import { join, delimiter } from "node:path";
 import { tmpdir } from "node:os";
 import { CONC_GUARD_SH, concEnv } from "./helpers/fake-bd.mjs";
@@ -1671,12 +1670,15 @@ test("workspaceKey matches the shared golden fixture (pi-beads)", () => {
 });
 
 test("single-repo: beads_mol_pour stamps ws:<key> on the root only", async () => {
-  const s = await openSession("single", repoDir);
+  // Open in a cwd that differs from the owning repo dir (the `where` stub still
+  // resolves `workspace` to repoDir's .beads). This fails if the key were ever
+  // derived from `repo` instead of the session's activeCwd.
+  const s = await openSession("single-dashed", workspace);
   resetLog();
   const r = await s.byName.get("beads_mol_pour").execute("c", { proto: "superpowers-workflow", vars: "topic=x" });
   assert.ok(okResult(r), JSON.stringify(r));
-  const expected = createHash("sha256").update(repoDir).digest("hex").slice(0, 12);
-  findInvocation(["update", "proj-m1", "--add-label", `ws:${expected}`]);
+  findInvocation(["update", "proj-m1", "--add-label", `ws:${workspaceKey(workspace)}`]);
+  assertNoInvocation(["update", "proj-m1", "--add-label", `ws:${workspaceKey(repoDir)}`]);
   // ws: appears exactly once, and never on a step id
   assert.equal(invocations().filter((inv) => inv.some((a) => a.startsWith("ws:"))).length, 1);
   assert.equal(invocations().filter((inv) => inv[0] === "update").length, 16);

@@ -227,6 +227,8 @@ function isNewerCandidate(a, b) {
 /**
  * Choose the molecule to display for a workspace: active (2) > started (1) >
  * finished (0), ties broken by newest updatedAt then smallest molecule_id.
+ * Candidates need NOT be pre-sorted; the selector compares every pair (via
+ * isNewerCandidate) so input order only matters as a final determinism guard.
  */
 export function pickWorkspaceMolecule(candidates) {
   if (!Array.isArray(candidates) || candidates.length === 0) return null;

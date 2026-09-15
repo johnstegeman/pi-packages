@@ -5,6 +5,7 @@ import {
   hasLockedMolecule,
   isCleanNotFound,
   moleculeWidgetLines,
+  nextRefreshArgs,
   parseMoleculeCurrent,
   parseMoleculeCurrents,
   parseMoleculeRoots,
@@ -69,11 +70,12 @@ export function createMoleculeWidgetController({
     }
   }
 
-  async function safeExec(args) {
+  async function safeExec(args, gen) {
     try {
       return await exec("bd", args, { cwd, timeout: 5000 });
     } catch (err) {
-      warn("[pi-superpowers-plus] molecule refresh failed:", sanitizeLogText(err?.message ?? err));
+      if (gen === refreshGen)
+        warn("[pi-superpowers-plus] molecule refresh failed:", sanitizeLogText(err?.message ?? err));
       return null;
     }
   }
@@ -110,7 +112,7 @@ export function createMoleculeWidgetController({
   }
 
   async function refreshWorkspace(gen) {
-    const listR = await safeExec(["list", "--type", "molecule", "--label", `ws:${activeWorkspaceKey}`, "--json"]);
+    const listR = await safeExec(["list", "--type", "molecule", "--label", `ws:${activeWorkspaceKey}`, "--json"], gen);
     if (gen !== refreshGen) return;
     if (!listR) return; // exec threw; safeExec warned, keep the prior frame
     if (listR.code !== 0) {
@@ -125,10 +127,25 @@ export function createMoleculeWidgetController({
     }
     const found = parseMoleculeRoots(listR.stdout);
     if (found.length === 0) {
-      const gR = await safeExec(["mol", "current", "--json"]);
+      // Multi-worktree guard: if any ws:-stamped open molecule exists and none is
+      // ours (found.length === 0), another worktree owns an active cycle — never
+      // adopt an unscoped global candidate in that case.
+      const anyWs = await safeExec(["list", "--type", "molecule", "--label-pattern", "ws:*", "--json"], gen);
+      if (gen !== refreshGen) return;
+      if (anyWs && anyWs.code === 0 && parseMoleculeRoots(anyWs.stdout).length > 0) {
+        clearFrame();
+        return;
+      }
+      const gR = await safeExec(["mol", "current", "--json"], gen);
       if (gen !== refreshGen || !gR) return;
       if (gR.code !== 0) {
         if (isCleanNotFound(gR)) clearFrame();
+        else
+          warn(
+            "[pi-superpowers-plus] molecule workspace fallback error:",
+            gR.code,
+            sanitizeLogText(`${gR.stdout ?? ""}\n${gR.stderr ?? ""}`),
+          );
         return;
       }
       const frames = parseMoleculeCurrents(gR.stdout);
@@ -139,10 +156,21 @@ export function createMoleculeWidgetController({
     const candidates = [];
     let sawError = false;
     for (const root of found) {
-      const r = await safeExec(["mol", "current", root.id, "--json"]);
+      const r = await safeExec(["mol", "current", root.id, "--json"], gen);
       if (gen !== refreshGen) return;
-      if (!r || r.code !== 0) {
-        if (!r || !isCleanNotFound(r)) sawError = true;
+      if (!r) {
+        sawError = true;
+        continue;
+      }
+      if (r.code !== 0) {
+        if (!isCleanNotFound(r))
+          warn(
+            "[pi-superpowers-plus] molecule workspace root query error:",
+            root.id,
+            r.code,
+            sanitizeLogText(`${r.stdout ?? ""}\n${r.stderr ?? ""}`),
+          );
+        sawError = true;
         continue;
       }
       const frame = parseMoleculeCurrent(r.stdout);
@@ -160,14 +188,14 @@ export function createMoleculeWidgetController({
     const gen = ++refreshGen;
 
     if (hasLockedMolecule(lockedMoleculeId)) {
-      const r = await safeExec(["mol", "current", lockedMoleculeId, "--json"]);
+      const r = await safeExec(nextRefreshArgs(lockedMoleculeId), gen);
       if (gen !== refreshGen) return;
       applySingleResult(r, true);
       return;
     }
 
     if (!activeWorkspaceKey) {
-      const r = await safeExec(["mol", "current", "--json"]);
+      const r = await safeExec(nextRefreshArgs(null), gen);
       if (gen !== refreshGen) return;
       applySingleResult(r, false);
       return;
@@ -184,16 +212,22 @@ export function createMoleculeWidgetController({
     coalescer?.trigger();
   }
 
+  // Apply a workspace-key change: a key that actually changed drops the
+  // previous worktree's frame + lock so it cannot leak into the new workspace.
+  function applyWorkspaceKey(nextKey) {
+    if (nextKey !== undefined) {
+      if (nextKey !== activeWorkspaceKey) clearFrame();
+      activeWorkspaceKey = nextKey;
+    }
+  }
+
   // `initialRefresh: false` binds the session without issuing a `bd` query.
   // The adapter passes it so pi startup never touches the beads DB; the first
   // `beads:changed`/`superpowers:phase` event (or an explicit refresh) paints.
   function bindSession({ ui: nextUi, cwd: nextCwd, workspaceKey: nextKey, initialRefresh = true }) {
     ui = nextUi ?? null;
     cwd = nextCwd ?? cwd;
-    if (nextKey !== undefined) {
-      if (nextKey !== activeWorkspaceKey) clearFrame();
-      activeWorkspaceKey = nextKey;
-    }
+    applyWorkspaceKey(nextKey);
     if (!unsubscribe) {
       unsubscribe = subscribeChanges(triggerChange) ?? null;
     }
@@ -207,10 +241,7 @@ export function createMoleculeWidgetController({
   // `refresh: false` updates the cwd without querying beads (pi turns call this
   // on every agent_start; only an actual bead change should spend a `bd` call).
   function setCwd(nextCwd, { refresh: doRefresh = true, workspaceKey: nextKey } = {}) {
-    if (nextKey !== undefined) {
-      if (nextKey !== activeWorkspaceKey) clearFrame();
-      activeWorkspaceKey = nextKey;
-    }
+    applyWorkspaceKey(nextKey);
     cwd = nextCwd ?? cwd;
     if (doRefresh) refreshAndRender();
     else render();

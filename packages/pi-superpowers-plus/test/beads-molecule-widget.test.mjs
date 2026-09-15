@@ -95,8 +95,6 @@ assert.equal(
 assert.equal(pickWorkspaceMolecule([]), null);
 
 // ---------- parser: malformed input never throws ----------
-
-// ---------- parser: malformed input never throws ----------
 assert.deepEqual(parseMoleculeCurrent(""), null);
 assert.deepEqual(parseMoleculeCurrent("not json"), null);
 assert.deepEqual(parseMoleculeCurrent("[]"), null);
