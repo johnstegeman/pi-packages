@@ -474,14 +474,15 @@ function depEdges() {
 }
 
 // Independent direction model: bd's `dep add --file` JSONL is
-// {from: <dependent>, to: <blocker>, type}. This golden is hand-written to pin the
-// convention; expectedCreateListEdges derives the set from the PLAN, not from the
-// tool's echoed JSONL, so an inverted tool convention cannot pass.
-const DEP_DIRECTION_GOLDEN = [{ from: "dependent-id", to: "blocker-id", type: "blocks" }];
-assert.deepEqual(
-  DEP_DIRECTION_GOLDEN.map((e) => ({ dependent: e.from, blocker: e.to })),
-  [{ dependent: "dependent-id", blocker: "blocker-id" }],
-);
+// {from: <dependent>, to: <blocker>, type}. expectedCreateListEdges derives the
+// set from the PLAN, not from the tool's echoed JSONL, so an inverted tool
+// convention cannot pass.
+test("dep-direction oracle pins from=dependent / to=blocker", () => {
+  const good = expectedCreateListEdges("gate-1", ["t1"]);
+  assert.deepEqual(good, [{ from: "t1", to: "gate-1", type: "blocks" }]);
+  const inverted = good.map((e) => ({ from: e.to, to: e.from, type: e.type }));
+  assert.notDeepEqual(inverted, good, "an inverted edge set must not equal the oracle's");
+});
 function expectedCreateListEdges(gateId, taskIds) {
   const edges = [];
   for (let i = 0; i < taskIds.length; i++) {
