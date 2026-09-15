@@ -143,8 +143,9 @@ probe target and the resolved `umbrella` cannot disagree.
 
 ## Acceptance Criteria
 
-- A transient `resolveTopology()` failure no longer matters here; the startup
-  usable-DB judgment is made at the same root readiness is decided from.
+- The startup usable-DB judgment is made at the candidate root inside
+  `resolveTopology()`, not at `activeCwd`, so the probe target and the path that
+  decides readiness agree.
 - `PI_BEADS_ROOT` pointing at a root that does not contain cwd: startup resolves
   (status set) instead of silently skipping.
 - Absent beads still costs exactly one `bd` call at startup and stays silent
