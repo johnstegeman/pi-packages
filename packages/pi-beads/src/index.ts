@@ -197,25 +197,30 @@ export default function piBeadsLean(pi: any) {
   function prefixFromId(id: string): string {
     const s = stripIdSuffix(id);
     const dash = s.lastIndexOf("-");
-    if (dash <= 0) return "";
+    if (dash < 0) return s; // dashless prefix is itself — no truncation risk
+    if (dash === 0) return ""; // malformed leading hyphen
     return ID_SUFFIX_RE.test(s.slice(dash + 1)) ? s.slice(0, dash) : "";
   }
   // Derive a repo prefix from sampled ids. With >=2 ids the longest common prefix
   // recovers a DASHED native prefix (e.g. pi-packages) rather than the first
-  // hyphen-delimited token; the LCP may still end in '-mol' which we cut, and a
-  // dashless LCP is itself the prefix. A fully empty LCP falls back to the
-  // conservative single-id rule.
+  // hyphen-delimited token; suffixes are already stripped by normalization, so the
+  // LCP cannot end in '-mol'. A dashless LCP is itself the prefix. A fully empty
+  // LCP falls back to the conservative single-id rule.
   function derivePrefixFromIds(ids: string[]): string {
     const norm = ids.map(stripIdSuffix).filter(Boolean);
     if (norm.length === 0) return "";
     if (norm.length === 1) return prefixFromId(norm[0]);
     const lcp = longestCommonPrefix(norm);
-    if (lcp) {
-      const cut = lcp.lastIndexOf("-");
-      if (cut > 0) return lcp.slice(0, cut);
-      return lcp; // dashless prefix such as 'crmback'
-    }
-    return prefixFromId(norm[0]);
+    if (!lcp) return prefixFromId(norm[0]);
+    const cut = lcp.lastIndexOf("-");
+    if (cut <= 0) return lcp; // dashless LCP (e.g. 'crmback') is the prefix
+    const tail = lcp.slice(cut + 1);
+    // The LCP may end exactly at the separator ('pi-packages-'), or leave a
+    // partial minted-suffix fragment ('crmback-1a'). Only those mean the part
+    // before the hyphen is the prefix; otherwise the hyphen belongs to a dashed
+    // prefix ('pi-packages') and must be kept.
+    if (tail === "" || ID_SUFFIX_RE.test(tail)) return lcp.slice(0, cut);
+    return lcp;
   }
   async function samplePrefixOf(repoDir: string): Promise<string> {
     // a per-repo DB only holds its own issues -> any id reveals the prefix.
