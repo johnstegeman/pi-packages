@@ -105,8 +105,9 @@ function skillDirs() {
 function readRefFiles(dir) {
   try {
     return readdirSync(join(dir, "reference"));
-  } catch {
-    return [];
+  } catch (e) {
+    if (e && e.code === "ENOENT") return [];
+    throw e;
   }
 }
 
@@ -144,15 +145,15 @@ test("every relative markdown link in a SKILL.md or reference file resolves", ()
   assert.deepEqual(offenders, []);
 });
 
-test("read-gate lines target real files", () => {
+test("read-gate lines match the marker and target real files", () => {
   const offenders = [];
   for (const dir of skillDirs()) {
     const src = readFileSync(join(dir, "SKILL.md"), "utf8");
     for (const line of src.split("\n")) {
       if (!/^>\s*\*\*Read now:\*\*/.test(line)) continue;
-      const m = line.match(/\[[^\]]*\]\(([^)\s]+)\)/);
+      const m = line.match(/^>\s*\*\*Read now:\*\*\s*\[[^\]]*\]\(([^)\s]+)\)\s+—\s+\S/);
       if (!m) {
-        offenders.push(`${dir}: read-gate without link: ${line.trim()}`);
+        offenders.push(`${dir}: read-gate malformed (missing em-dash description): ${line.trim()}`);
         continue;
       }
       if (!existsSync(join(dir, m[1]))) offenders.push(`${dir}: read-gate -> ${m[1]}`);
