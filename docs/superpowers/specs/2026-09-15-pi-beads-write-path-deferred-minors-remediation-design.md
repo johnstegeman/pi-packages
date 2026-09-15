@@ -102,9 +102,10 @@ helper changes underneath it.
 ### 2. Error / return-path fixes (`packages/pi-beads/src/index.ts`)
 
 - **`rc.err` guard.** Add `errText(r) => (r.err ?? "").trim() || "unknown error"`
-  and use it at every `${r.err}` / `${rc.err}` interpolation site — the
-  cascade-parent failure path, `beads_deps` tree, `beads_undep`, and the bulk-dep
-  failure. No literal `undefined` reaches a message.
+  and use it at the write-path interpolation sites — the cascade-parent failure
+  path, `beads_reopen`, `beads_undep`, and the bulk-dep failure. Remaining
+  read/query interpolation sites are out of scope for this run. No literal
+  `undefined` reaches a write-path message.
 - **`beads_reopen`.** Mirror the `beads_close` pattern: accumulate failures
   (`failure = failure ? `${failure}; ${msg}` : msg`) instead of the plain
   `failure =` overwrite followed by `break`, so one repo's failure no longer
@@ -146,7 +147,8 @@ runs the tool suite, the cost-tracking suite, and the tool-surface drift guard.
 New/changed tests:
 
 - `prefixFromId`: plain id, molecule-root id, dashless id, non-suffix tail → `""`.
-- Empty-LCP fallback and genuine no-shared-prefix behavior.
+- Multi-id dashed-prefix molecule sample keeps the full dashed prefix (no bogus
+  `pi` truncation); a single dashless molecule-root sample still routes.
 - Member/umbrella prefix collision → member's sampled prefix wins; umbrella
   prefix stays mapped to the umbrella.
 - `beads_reopen` cross-repo failure accumulation.
@@ -174,7 +176,6 @@ Run against a real hydrated umbrella with a dashed native prefix (e.g.
 This checklist is also added to the pi-beads README's Limitations section, next to
 the existing "bd output format is not a stable contract; verified against 1.2.2"
 caveat.
-already lives.
 
 ## Acceptance criteria
 

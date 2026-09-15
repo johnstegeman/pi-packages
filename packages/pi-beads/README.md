@@ -196,7 +196,7 @@ versions the parsing may drift away from reality.
 
 ### Live-database smoke checklist
 
-The test suites above run against a fixture `bd`, not the real binary. Before relying
+The test suites in **Development** below run against a fixture `bd`, not the real binary. Before relying
 on dashed-prefix routing in a hydrated umbrella, verify against live `bd` (1.2.2) with a
 dashed native prefix (e.g. `pi-packages`):
 
