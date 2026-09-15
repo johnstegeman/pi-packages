@@ -121,14 +121,24 @@ test("every reference file is linked from its SKILL.md", () => {
   assert.deepEqual(offenders, []);
 });
 
-test("every relative markdown link in a SKILL.md resolves", () => {
+test("every relative markdown link in a SKILL.md or reference file resolves", () => {
   const offenders = [];
   for (const dir of skillDirs()) {
-    const src = readFileSync(join(dir, "SKILL.md"), "utf8");
-    for (const m of src.matchAll(/\[[^\]]*\]\(([^)\s]+)\)/g)) {
-      const t = m[1];
-      if (/^[a-z][a-z0-9+.-]*:/.test(t) || t.startsWith("#")) continue;
-      if (!existsSync(join(dir, t))) offenders.push(`${dir}/SKILL.md -> ${t}`);
+    const files = [join(dir, "SKILL.md")];
+    try {
+      for (const f of readdirSync(join(dir, "reference"))) {
+        if (f.endsWith(".md")) files.push(join(dir, "reference", f));
+      }
+    } catch {
+      // no reference/ directory for this skill
+    }
+    for (const file of files) {
+      const src = readFileSync(file, "utf8");
+      for (const m of src.matchAll(/\[[^\]]*\]\(([^)\s]+)\)/g)) {
+        const t = m[1];
+        if (/^[a-z][a-z0-9+.-]*:/.test(t) || t.startsWith("#")) continue;
+        if (!existsSync(join(dirname(file), t))) offenders.push(`${file} -> ${t}`);
+      }
     }
   }
   assert.deepEqual(offenders, []);

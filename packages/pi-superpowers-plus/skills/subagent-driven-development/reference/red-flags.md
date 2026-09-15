@@ -31,5 +31,5 @@ If an implementer subagent fails, errors out, or produces incomplete work:
 - Pre-judge findings for a reviewer ("do not flag", "at most Minor")
 - Silently discard a finding — every adjudication is a ledger entry
 - Fix findings yourself in the controller session
-- Re-dispatch a completed task from memory because the controller lost its report — query the finished implementer by its canonical handle (Setup · Second recovery path: @handle) or trust the ledger first
+- Re-dispatch a completed task from memory because the controller lost its report — query the finished implementer by its canonical handle (see [recovery.md](recovery.md)) or trust the ledger first
 - Emulate workflows with parallel `Agent` dispatch when `SubagentWorkflow` is absent (the fallback is the sequential loop, not fake parallelism)

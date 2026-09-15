@@ -119,9 +119,9 @@ Notes:
 - **Three-scenario TDD** — skills, agent templates, and plan templates all use the same model: new feature (full TDD), modifying tested code (run existing tests), trivial change (use judgment).
 - The **widgets** from `pi-subagents` (live agents / FleetView) and this package's `beads-molecule-widget` extension (active workflow step) show progress above the editor. (The old pi-beads widget was removed; beads issue/progress display now lives in this package's molecule widget.)
 - Tools like **`beads_create`/`beads_update`/`beads_close`** and **`Agent`** store execution state and run subagents outside the prompt.
-- Reference material that used to bloat a skill's `SKILL.md` was split into separate reference files in the skill's own directory (e.g. `reference/rationalizations.md`), which the agent reads on demand instead of loading everything up front. The six oversized skills now ship a `reference/` directory whose files are opened on demand via read-gates in `SKILL.md`, so the inline file stays a lean decision tree.
+- Reference material that used to bloat a skill's `SKILL.md` was split into separate reference files in the skill's own directory (e.g. `reference/rationalizations.md`), which the agent reads on demand instead of loading everything up front. The six oversized skills now ship a `reference/` directory whose files are opened on demand via read-gates or index links in `SKILL.md`, so the inline file stays a lean decision tree.
 
-The package ships **13 skills**, of which **11 are hidden** (`disable-model-invocation: true`) and load only when invoked via `/skill:`. The system prompt is the only always-on context, so it carries just the two visible skills — `using-superpowers` and `systematic-debugging`: **~52 tokens** of descriptions, versus the upstream [`coctostan/pi-superpowers`](https://github.com/coctostan/pi-superpowers) package's **~450 tokens** across all 13 visible skills. That bounded default context is what lets each `SKILL.md` be fuller and self-contained without taxing every turn — the trade is a larger on-invoke load.
+The package ships **13 skills**, of which **11 are hidden** (`disable-model-invocation: true`) and load only when invoked via `/skill:`. The system prompt is the only always-on context, so it carries just the two visible skills — `using-superpowers` and `systematic-debugging`: **~52 tokens** of descriptions, versus the upstream [`coctostan/pi-superpowers`](https://github.com/coctostan/pi-superpowers) package's **~450 tokens** across all 13 visible skills. That bounded default context is what lets each `SKILL.md` stay lean rather than self-contained — it is a decision tree that links out to on-demand `reference/` files, so the always-on cost stays low and the full detail loads only when a skill is invoked.
 
 The per-skill `SKILL.md` sizes below (approximate KB, at time of writing) compare each skill against the upstream package. After the reference split, `pi-superpowers-plus` is roughly **1.4x the upstream baseline** across the 12 shared skills (down from ~2x before the split); the split tracked in `pi-packages-axam` is complete. (The design spec's per-skill size estimates were rough targets, not goals; the measured values in the table supersede them.)
 
@@ -347,7 +347,7 @@ pi-superpowers-plus/
 ├── config-examples/                   # Recommended fail-closed dispatch configs
 │   ├── subagents.global.json          # → ~/.pi/agent/subagents.json (global)
 │   └── subagents.project.json         # → .pi/subagents.json (project-local)
-├── skills/                           # 13 workflow skills (26 markdown files)
+├── skills/                           # 13 workflow skills (48 markdown files)
 │   ├── using-superpowers/
 │   ├── brainstorming/
 │   ├── writing-plans/
