@@ -109,7 +109,10 @@ export function createMoleculeWidgetController({
     coalescer?.trigger();
   }
 
-  function bindSession({ ui: nextUi, cwd: nextCwd }) {
+  // `initialRefresh: false` binds the session without issuing a `bd` query.
+  // The adapter passes it so pi startup never touches the beads DB; the first
+  // `beads:changed`/`superpowers:phase` event (or an explicit refresh) paints.
+  function bindSession({ ui: nextUi, cwd: nextCwd, initialRefresh = true }) {
     ui = nextUi ?? null;
     cwd = nextCwd ?? cwd;
     if (!unsubscribe) {
@@ -118,12 +121,16 @@ export function createMoleculeWidgetController({
     if (!coalescer) {
       coalescer = createChangeCoalescer(refreshAndRender, windowMs, timers, warn);
     }
-    refreshAndRender();
+    if (initialRefresh) refreshAndRender();
+    else render();
   }
 
-  function setCwd(nextCwd) {
+  // `refresh: false` updates the cwd without querying beads (pi turns call this
+  // on every agent_start; only an actual bead change should spend a `bd` call).
+  function setCwd(nextCwd, { refresh: doRefresh = true } = {}) {
     cwd = nextCwd ?? cwd;
-    refreshAndRender();
+    if (doRefresh) refreshAndRender();
+    else render();
   }
 
   function unbindSession() {

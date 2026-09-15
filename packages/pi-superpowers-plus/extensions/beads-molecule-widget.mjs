@@ -149,16 +149,21 @@ export function applyMoleculeFrame(prevActiveMolecule, prevLockedId, parsed, que
 }
 
 /**
- * True only for bd's clean "this molecule is gone" signals. Considers both
- * output streams (bd writes some errors on stdout). Requires "molecule" and
+ * True only for bd's clean "nothing to show" signals. Considers both output
+ * streams (bd writes some errors on stdout). Requires "molecule" and
  * "not found" on the same line, so "molecule" in stdout cannot pair with
  * "not found" in stderr. A bare "not found" — e.g. `bd: command not found` —
- * is NOT a clean signal.
+ * is NOT a clean signal. `no beads database found` (beads not initialized in
+ * this directory) is clean: no database means no molecule to display.
  */
 export function isCleanNotFound(r) {
   if (!r) return false;
   const msg = `${r.stdout ?? ""}\n${r.stderr ?? ""}`;
-  return /no active molecule/i.test(msg) || /\bmolecule\b[^\n]*\bnot found\b/i.test(msg);
+  return (
+    /no active molecule/i.test(msg) ||
+    /\bmolecule\b[^\n]*\bnot found\b/i.test(msg) ||
+    /no beads database found/i.test(msg)
+  );
 }
 
 /**
