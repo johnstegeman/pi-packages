@@ -130,8 +130,8 @@ helper changes underneath it.
 - **Stateful `show` for the cost test.** The fixture records the last `update`
   metadata per bead and returns it from `show`, so the test asserts *both* writes
   land (no lost RMW), not merely that the two bd ops never overlap.
-- **`beadQueues` prune test.** Expose a minimal test-observable surface in
-  `src/cost-tracking.ts` (an exported `__beadQueueSize()` or equivalent counter)
+- **`beadQueues` prune test.** Expose a minimal, test-only `__beadQueueSize()`
+  export in `src/cost-tracking.ts` and assert the map shrinks to zero once the
   and assert the map shrinks to zero once the queued promise settles.
 - **`mkdtempSync` inside the `try`** for the dep temp dir, so a temp-dir-creation
   failure still runs `afterWrite` and cleanup.
@@ -171,7 +171,9 @@ Run against a real hydrated umbrella with a dashed native prefix (e.g.
 - [ ] `beads_create_list` writes the bulk-dep edges with `from = dependent`,
       `to = blocker`, and `bd` accepts them.
 
-This checklist is also surfaced in the pi-beads README where the live-db caveat
+This checklist is also added to the pi-beads README's Limitations section, next to
+the existing "bd output format is not a stable contract; verified against 1.2.2"
+caveat.
 already lives.
 
 ## Acceptance criteria
