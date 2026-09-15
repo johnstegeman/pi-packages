@@ -350,4 +350,307 @@ const tick = () => new Promise((resolve) => setTimeout(resolve, 0));
   controller.unbindSession();
 }
 
+const rawFinished = (id) =>
+  JSON.stringify([
+    {
+      molecule_id: id,
+      molecule_title: "superpowers-workflow",
+      current_step: null,
+      next_step: null,
+      steps: [
+        {
+          issue: { id: `${id}.1`, title: "Finish", issue_type: "task", status: "closed" },
+          status: "done",
+          is_current: false,
+        },
+      ],
+    },
+  ]);
+const roots = (entries) => JSON.stringify(entries.map((e) => ({ issue_type: "molecule", ...e })));
+
+// ---------- workspace: one root -> by-id query ----------
+{
+  const ui = makeFakeUi();
+  const calls = [];
+  const controller = createMoleculeWidgetController({
+    exec: async (cmd, args) => {
+      calls.push([cmd, ...args]);
+      if (args[0] === "list")
+        return { code: 0, stdout: roots([{ id: "bd-mol-A", updated_at: "2026-01-01" }]), stderr: "" };
+      return { code: 0, stdout: RAW_A, stderr: "" };
+    },
+    subscribeChanges: () => () => {},
+  });
+  controller.bindSession({ ui, cwd: "/repo", workspaceKey: "k1" });
+  await tick();
+  assert.deepEqual(calls[0], ["bd", "list", "--type", "molecule", "--label", "ws:k1", "--json"]);
+  assert.deepEqual(calls[1], ["bd", "mol", "current", "bd-mol-A", "--json"]);
+  assert.ok(
+    ui.lastLines()?.some((l) => l.includes("Ask clarifying questions")),
+    `rendered: ${ui.lastLines()}`,
+  );
+}
+
+// ---------- workspace: several roots -> active beats finished ----------
+{
+  const ui = makeFakeUi();
+  const controller = createMoleculeWidgetController({
+    exec: async (cmd, args) => {
+      if (args[0] === "list")
+        return {
+          code: 0,
+          stdout: roots([
+            { id: "bd-mol-A", updated_at: "2026-02-01" },
+            { id: "bd-mol-B", updated_at: "2026-01-01" },
+          ]),
+          stderr: "",
+        };
+      if (args[2] === "bd-mol-A") return { code: 0, stdout: rawFinished("bd-mol-A"), stderr: "" };
+      return { code: 0, stdout: RAW_B, stderr: "" };
+    },
+    subscribeChanges: () => () => {},
+  });
+  controller.bindSession({ ui, cwd: "/repo", workspaceKey: "k1" });
+  await tick();
+  assert.ok(
+    ui.lastLines()?.some((l) => l.includes("Propose approaches")),
+    `active wins: ${ui.lastLines()}`,
+  );
+}
+
+// ---------- workspace: no roots + one global candidate -> adopt ----------
+{
+  const ui = makeFakeUi();
+  const controller = createMoleculeWidgetController({
+    exec: async (cmd, args) => {
+      if (args[0] === "list") return { code: 0, stdout: "[]", stderr: "" };
+      return { code: 0, stdout: RAW_A, stderr: "" };
+    },
+    subscribeChanges: () => () => {},
+  });
+  controller.bindSession({ ui, cwd: "/repo", workspaceKey: "k1" });
+  await tick();
+  assert.ok(ui.lastLines()?.some((l) => l.includes("Ask clarifying questions")));
+}
+
+// ---------- workspace: no roots + two global candidates -> clear ----------
+{
+  const ui = makeFakeUi();
+  const two = JSON.stringify([...JSON.parse(RAW_A), ...JSON.parse(RAW_B)]);
+  const controller = createMoleculeWidgetController({
+    exec: async (cmd, args) =>
+      args[0] === "list" ? { code: 0, stdout: "[]", stderr: "" } : { code: 0, stdout: two, stderr: "" },
+    subscribeChanges: () => () => {},
+  });
+  controller.bindSession({ ui, cwd: "/repo", workspaceKey: "k1" });
+  await tick();
+  assert.equal(ui.lastLines(), null, "ambiguous global fallback clears rather than guessing");
+}
+
+// ---------- workspace: 0 roots but another worktree's ws:-stamped molecule -> clear (guard) ----------
+{
+  const ui = makeFakeUi();
+  const calls = [];
+  const controller = createMoleculeWidgetController({
+    exec: async (cmd, args) => {
+      calls.push([cmd, ...args]);
+      if (args[0] === "list") {
+        if (args.includes("--label-pattern"))
+          return { code: 0, stdout: roots([{ id: "bd-mol-other", updated_at: "2026-01-01" }]), stderr: "" };
+        return { code: 0, stdout: "[]", stderr: "" };
+      }
+      return { code: 0, stdout: RAW_A, stderr: "" };
+    },
+    subscribeChanges: () => () => {},
+  });
+  controller.bindSession({ ui, cwd: "/repo", workspaceKey: "k1" });
+  await tick();
+  assert.deepEqual(
+    calls[1],
+    ["bd", "list", "--type", "molecule", "--label-pattern", "ws:*", "--json"],
+    "zero-roots path probes for any ws:-stamped molecule",
+  );
+  assert.ok(
+    !calls.some((c) => c[0] === "bd" && c[1] === "mol" && c[2] === "current" && c[3] === "--json"),
+    "guard short-circuits before the unscoped global query",
+  );
+  assert.equal(ui.lastLines(), null, "an idle worktree never adopts another worktree's molecule");
+}
+
+// ---------- workspace: transient per-root error keeps the prior frame and warns ----------
+{
+  const warns = [];
+  const ui = makeFakeUi();
+  let rootCall = 0;
+  const controller = createMoleculeWidgetController({
+    exec: async (cmd, args) => {
+      if (args[0] === "list")
+        return {
+          code: 0,
+          stdout: roots([
+            { id: "bd-mol-A", updated_at: "2026-01-01" },
+            { id: "bd-mol-B", updated_at: "2026-01-02" },
+          ]),
+          stderr: "",
+        };
+      rootCall += 1;
+      if (rootCall === 1) return { code: 0, stdout: rawFinished("bd-mol-A"), stderr: "" };
+      return { code: 1, stdout: "", stderr: "connection refused" };
+    },
+    subscribeChanges: () => () => {},
+    warn: (...a) => warns.push(a),
+  });
+  controller.bindSession({ ui, cwd: "/repo", workspaceKey: "k1" });
+  await tick();
+  assert.ok(
+    ui.lastLines()?.some((l) => l.includes("finished")),
+    `finished frame seeded (lock released): ${ui.lastLines()}`,
+  );
+  await controller.refresh(); // every per-root query now fails transiently
+  controller.render();
+  assert.ok(
+    ui.lastLines()?.some((l) => l.includes("finished")),
+    "transient per-root error keeps the prior frame",
+  );
+  assert.ok(
+    warns.some((a) => String(a[0]).includes("root query error")),
+    "transient per-root error warns instead of silently swallowing",
+  );
+}
+
+// ---------- race: superseded multi-step workspace refresh is discarded ----------
+{
+  const ui = makeFakeUi();
+  const resolvers = [];
+  const controller = createMoleculeWidgetController({
+    exec: (_cmd, args) => new Promise((resolve) => resolvers.push({ args, resolve })),
+    subscribeChanges: () => () => {},
+  });
+  controller.bindSession({ ui, cwd: "/repo", workspaceKey: "k1" }); // refresh #1 -> list
+  await tick();
+  resolvers[0].resolve({
+    code: 0,
+    stdout: roots([
+      { id: "bd-mol-A", updated_at: "2026-01-01" },
+      { id: "bd-mol-B", updated_at: "2026-01-02" },
+    ]),
+    stderr: "",
+  });
+  await tick(); // refresh #1 -> held per-root query for bd-mol-A
+  const second = controller.refresh(); // refresh #2 (same workspace key)
+  await tick();
+  resolvers[2].resolve({ code: 0, stdout: roots([{ id: "bd-mol-B", updated_at: "2026-01-02" }]), stderr: "" });
+  await tick(); // refresh #2 -> per-root query for bd-mol-B
+  resolvers[3].resolve({ code: 0, stdout: RAW_B, stderr: "" });
+  await second;
+  resolvers[1].resolve({ code: 0, stdout: RAW_A, stderr: "" }); // stale refresh #1 resolves late
+  await tick();
+  controller.render();
+  const lines = ui.lastLines();
+  assert.ok(
+    lines.some((l) => l.includes("Propose approaches")),
+    `newest workspace frame wins: ${lines}`,
+  );
+  assert.ok(!lines.some((l) => l.includes("Ask clarifying questions")), `stale frame discarded: ${lines}`);
+}
+
+// ---------- workspace: lock held -> list skipped ----------
+{
+  const ui = makeFakeUi();
+  const calls = [];
+  const controller = createMoleculeWidgetController({
+    exec: async (cmd, args) => {
+      calls.push([cmd, ...args]);
+      if (args[0] === "list")
+        return { code: 0, stdout: roots([{ id: "bd-mol-A", updated_at: "2026-01-01" }]), stderr: "" };
+      return { code: 0, stdout: RAW_A, stderr: "" };
+    },
+    subscribeChanges: () => () => {},
+  });
+  controller.bindSession({ ui, cwd: "/repo", workspaceKey: "k1" });
+  await tick();
+  calls.length = 0;
+  await controller.refresh();
+  assert.deepEqual(calls, [["bd", "mol", "current", "bd-mol-A", "--json"]], "locked refresh skips list");
+}
+
+// ---------- workspace: key change resets frame + lock ----------
+{
+  const ui = makeFakeUi();
+  const controller = createMoleculeWidgetController({
+    exec: async (cmd, args) => {
+      if (args[0] === "list") {
+        const isK2 = args.includes("ws:k2");
+        return {
+          code: 0,
+          stdout: roots([{ id: isK2 ? "bd-mol-B" : "bd-mol-A", updated_at: "2026-01-01" }]),
+          stderr: "",
+        };
+      }
+      return { code: 0, stdout: args[2] === "bd-mol-B" ? RAW_B : RAW_A, stderr: "" };
+    },
+    subscribeChanges: () => () => {},
+  });
+  controller.bindSession({ ui, cwd: "/repo", workspaceKey: "k1" });
+  await tick();
+  assert.ok(ui.lastLines()?.some((l) => l.includes("Ask clarifying questions")));
+  controller.setCwd("/repo2", { workspaceKey: "k2" });
+  await tick();
+  assert.ok(
+    ui.lastLines()?.some((l) => l.includes("Propose approaches")),
+    `key change re-resolves: ${ui.lastLines()}`,
+  );
+}
+
+// ---------- workspace: transient list error retains the finished frame ----------
+{
+  const warns = [];
+  const ui = makeFakeUi();
+  let listCall = 0;
+  const controller = createMoleculeWidgetController({
+    exec: async (cmd, args) => {
+      if (args[0] === "list") {
+        listCall += 1;
+        if (listCall === 1)
+          return { code: 0, stdout: roots([{ id: "bd-mol-A", updated_at: "2026-01-01" }]), stderr: "" };
+        return { code: 1, stdout: "", stderr: "connection refused" };
+      }
+      return { code: 0, stdout: rawFinished("bd-mol-A"), stderr: "" };
+    },
+    subscribeChanges: () => () => {},
+    warn: (...a) => warns.push(a),
+  });
+  controller.bindSession({ ui, cwd: "/repo", workspaceKey: "k1" });
+  await tick();
+  assert.ok(
+    ui.lastLines()?.some((l) => l.includes("finished")),
+    "finished frame seeded",
+  );
+  await controller.refresh(); // lock was dropped by the finished frame -> list runs
+  controller.render();
+  assert.ok(
+    ui.lastLines()?.some((l) => l.includes("finished")),
+    "transient list error keeps the prior frame",
+  );
+  assert.equal(warns.length, 1, "transient list error warns once");
+}
+
+// ---------- workspace: clean not-found list clears silently ----------
+{
+  const warns = [];
+  const ui = makeFakeUi();
+  const controller = createMoleculeWidgetController({
+    exec: async (cmd, args) =>
+      args[0] === "list"
+        ? { code: 1, stdout: "no beads database found", stderr: "" }
+        : { code: 0, stdout: RAW_A, stderr: "" },
+    subscribeChanges: () => () => {},
+    warn: (...a) => warns.push(a),
+  });
+  controller.bindSession({ ui, cwd: "/repo", workspaceKey: "k1" });
+  await tick();
+  assert.equal(ui.lastLines(), null, "clean not-found clears");
+  assert.equal(warns.length, 0, "clean not-found clears silently");
+}
+
 console.log("beads-molecule-widget-controller: all assertions passed");

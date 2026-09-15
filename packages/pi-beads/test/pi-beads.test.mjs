@@ -370,6 +370,12 @@ case "$1" in
   reopen)
     for a in "$@"; do [ "$a" = "crmback-fail" ] && { echo "boom" >&2; exit 1; }; done
     echo "ok"; exit 0 ;;
+  update)
+    if [ "$MODE" = "ws-fail" ]; then
+      for a in "$@"; do case "$a" in ws:*) echo "boom" >&2; exit 1 ;; esac; done
+    fi
+    echo "ok"; exit 0
+    ;;
   *) echo "ok"; exit 0 ;;
 esac
 `;
@@ -377,7 +383,7 @@ writeFileSync(join(binDir, "bd"), stub, { mode: 0o755 });
 process.env.PATH = `${binDir}${delimiter}${process.env.PATH}`;
 process.env.FAKE_BD_LOG = logFile;
 
-const { default: piBeadsLean, getBeadsRuntime } = await import("../src/index.ts");
+const { default: piBeadsLean, getBeadsRuntime, workspaceKey } = await import("../src/index.ts");
 const { DEP_LINK_TYPES, GATE_TYPES } = await import("../src/index.ts");
 
 // ---------------------------------------------------------------------------
@@ -1308,7 +1314,7 @@ test("single-repo: beads_mol_pour stamps step:<key> on every step and gate", asy
   for (const [id, lbl] of expect) findInvocation(["update", id, "--add-label", lbl]);
   assertNoInvocation(["update", "proj-m1", "--add-label", "step:superpowers-workflow"]);
   findInvocation(["mol", "pour", "superpowers-workflow", "--var", "topic=whatever", "--dry-run"]);
-  assert.equal(invocations().filter((inv) => inv[0] === "update").length, 15);
+  assert.equal(invocations().filter((inv) => inv[0] === "update").length, 16);
 });
 
 test("single-repo: beads_mol_pour fails loudly when the step map is incomplete", async () => {
@@ -1652,6 +1658,43 @@ test("single-repo: a temp-dir failure during dep wiring still runs afterWrite", 
   } finally {
     process.env.TMPDIR = prevTmp;
   }
+});
+
+test("workspaceKey matches the shared golden fixture (pi-beads)", () => {
+  const fx = JSON.parse(
+    readFileSync(new URL("../../../scripts/fixtures/workspace-key-vectors.json", import.meta.url), "utf8"),
+  );
+  for (const { path: p, key } of fx) assert.equal(workspaceKey(p), key, `key for ${p}`);
+  // trailing slash + surrounding whitespace normalise to the same key
+  assert.equal(workspaceKey("  /Users/me/repo/  "), "35696fd2bb77");
+});
+
+test("single-repo: beads_mol_pour stamps ws:<key> on the root only", async () => {
+  // Open in a cwd that differs from the owning repo dir (the `where` stub still
+  // resolves `workspace` to repoDir's .beads). This fails if the key were ever
+  // derived from `repo` instead of the session's activeCwd.
+  const s = await openSession("single-dashed", workspace);
+  resetLog();
+  const r = await s.byName.get("beads_mol_pour").execute("c", { proto: "superpowers-workflow", vars: "topic=x" });
+  assert.ok(okResult(r), JSON.stringify(r));
+  findInvocation(["update", "proj-m1", "--add-label", `ws:${workspaceKey(workspace)}`]);
+  assertNoInvocation(["update", "proj-m1", "--add-label", `ws:${workspaceKey(repoDir)}`]);
+  // ws: appears exactly once, and never on a step id
+  assert.equal(invocations().filter((inv) => inv.some((a) => a.startsWith("ws:"))).length, 1);
+  assert.equal(invocations().filter((inv) => inv[0] === "update").length, 16);
+});
+
+test("single-repo: beads_mol_pour still succeeds when the ws label write fails", async () => {
+  const s = await openSession("ws-fail", repoDir);
+  resetLog();
+  const r = await s.byName.get("beads_mol_pour").execute("c", { proto: "superpowers-workflow", vars: "topic=x" });
+  assert.ok(okResult(r), JSON.stringify(r));
+  assert.match(r.content[0].text, /ws label: FAILED/);
+  assert.equal(
+    invocations().filter((inv) => inv[0] === "update" && inv.some((a) => a.startsWith("step:"))).length,
+    15,
+    "step labels still applied",
+  );
 });
 
 // ---------------------------------------------------------------------------
