@@ -53,7 +53,7 @@ MODE="\${FAKE_BD_MODE:-single}"
 ${CONC_GUARD_SH}
 case "$1" in
   where)
-    if [ "$MODE" = "single-mol-only" ]; then
+    if [ "$MODE" = "single-mol-only" ] || [ "$MODE" = "multi-mol-dashed" ] || [ "$MODE" = "single-mol-dashless" ]; then
       echo "no beads root: $CWD" >&2; exit 1
     fi
     if [ "$MODE" = "umbrella-collision" ]; then
@@ -209,6 +209,10 @@ case "$1" in
       echo '[{"id": "pi-packages-1zth", "title": "sample"}]'
     elif [ "$MODE" = "single-mol-only" ]; then
       echo '[{"id": "pi-packages-mol-1", "title": "m"}]'
+    elif [ "$MODE" = "multi-mol-dashed" ]; then
+      echo '[{"id": "pi-packages-mol-1", "title": "m"}, {"id": "pi-packages-mol-2", "title": "m"}]'
+    elif [ "$MODE" = "single-mol-dashless" ]; then
+      echo '[{"id": "crmback-mol-1", "title": "m"}]'
     else
       echo '[{"id": "proj-1a2", "title": "sample"}]'
     fi
@@ -480,6 +484,15 @@ function depEdges() {
 test("dep-direction oracle pins from=dependent / to=blocker", () => {
   const good = expectedCreateListEdges("gate-1", ["t1"]);
   assert.deepEqual(good, [{ from: "t1", to: "gate-1", type: "blocks" }]);
+  // Hand-written 3-task golden pins the full chain (gate fan-in + i>0 chain)
+  // independently of the source's edge-construction loop.
+  assert.deepEqual(expectedCreateListEdges("g", ["t1", "t2", "t3"]), [
+    { from: "t1", to: "g", type: "blocks" },
+    { from: "t2", to: "g", type: "blocks" },
+    { from: "t2", to: "t1", type: "blocks" },
+    { from: "t3", to: "g", type: "blocks" },
+    { from: "t3", to: "t2", type: "blocks" },
+  ]);
   const inverted = good.map((e) => ({ from: e.to, to: e.from, type: e.type }));
   assert.notDeepEqual(inverted, good, "an inverted edge set must not equal the oracle's");
 });
@@ -602,6 +615,24 @@ test("single-mol-only: conservative prefix derivation refuses a bogus dashed pre
   // minted suffix, so no prefix may be invented and 'pi-...' must not route.
   assert.equal(rt.dirForPrefix("pi-packages-1zth"), null);
   assert.equal(rt.dirForPrefix("pi-1a2"), null);
+});
+
+test("multi-mol-dashed: two dashed-prefix molecule roots keep the full dashed prefix", async () => {
+  await openSession("multi-mol-dashed", repoDir);
+  const rt = getBeadsRuntime();
+  // sampled ids 'pi-packages-mol-1' / '-mol-2' both normalize to 'pi-packages';
+  // the >=2-id LCP equals the full dashed prefix and must be kept intact, not
+  // truncated to the bogus 'pi' prefix (which would misroute 'pi-*' ids).
+  assert.equal(rt.dirForPrefix("pi-packages-1zth"), repoDir);
+  assert.equal(rt.dirForPrefix("pi-1a2"), null, "the truncated 'pi' prefix must not be registered");
+});
+
+test("single-mol-dashless: a dashless molecule-root sample still routes", async () => {
+  await openSession("single-mol-dashless", repoDir);
+  const rt = getBeadsRuntime();
+  // sampled id 'crmback-mol-1' strips to the dashless 'crmback'; the whole string
+  // is the prefix (no hyphen to truncate at), so 'crmback-*' ids must route.
+  assert.equal(rt.dirForPrefix("crmback-1a2"), repoDir);
 });
 
 test("samplePrefixOf multi-id LCP strips molecule suffixes (matches single-id path)", async () => {
