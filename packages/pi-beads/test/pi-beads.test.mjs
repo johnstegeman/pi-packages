@@ -54,6 +54,13 @@ case "$1" in
     if [ "$MODE" = "single-mol-only" ]; then
       echo "no beads root: $CWD" >&2; exit 1
     fi
+    if [ "$MODE" = "umbrella-collision" ]; then
+      case "$CWD" in
+        ${shellQuote(workspace)}*|${shellQuote(umbrella)}|${shellQuote(backendDir)}*)
+          printf '  %s\\n  prefix: pi-packages\\n' ${shellQuote(join(umbrella, ".beads"))}; exit 0 ;;
+        *) echo "no beads root: $CWD" >&2; exit 1 ;;
+      esac
+    fi
     if [ "$MODE" = "umbrella-dashed" ]; then
       case "$CWD" in
         ${shellQuote(workspace)}*|${shellQuote(umbrella)})
@@ -84,7 +91,7 @@ case "$1" in
   repo)
     if [ "$2" = "list" ]; then
       case "$MODE" in
-        umbrella|umbrella-dashed)
+        umbrella|umbrella-dashed|umbrella-collision)
           printf '  - %s\\n' ${shellQuote(backendDir)} ;;
       esac
     fi
@@ -188,7 +195,7 @@ case "$1" in
         *2*) printf '{"issues":[{"id":"proj-m2-imp","title":"Implement T2","status":"open","priority":2,"labels":["step:implement"]}],"meta":{"count":1}}' ;;
         *)   printf '{"issues":[{"id":"proj-m1-imp","title":"Implement T1","status":"open","priority":2,"labels":["step:implement"]},{"id":"proj-m1-done","title":"Explore done","status":"closed","priority":2,"labels":["step:implement"]}],"meta":{"count":2}}' ;;
       esac
-    elif [ "$MODE" = "umbrella" ] || [ "$MODE" = "umbrella-dashed" ]; then
+    elif [ "$MODE" = "umbrella" ] || [ "$MODE" = "umbrella-dashed" ] || [ "$MODE" = "umbrella-collision" ]; then
       if [ "$CWD" = ${shellQuote(backendDir)} ]; then
         # backend's samplePrefixOf call: two MOLECULE ids so the multi-id LCP path
         # is exercised (suffix stripping must yield the bare 'crmback' prefix).
@@ -562,6 +569,13 @@ test("umbrella-dashed: dirForPrefix routes the umbrella's dashed native prefix",
   assert.equal(rt.dirForPrefix("pi-packages-mol-0vre.2"), umbrella);
   assert.equal(rt.dirForPrefix("crmback-1"), backendDir);
   assert.equal(rt.dirForPrefix("nosuch-1"), null);
+});
+
+test("umbrella-collision: member resolving upward does not steal the umbrella prefix", async () => {
+  await openSession("umbrella-collision", projDir);
+  const rt = getBeadsRuntime();
+  assert.equal(rt.dirForPrefix("pi-packages-1zth"), umbrella, "umbrella keeps its dashed prefix");
+  assert.equal(rt.dirForPrefix("crmback-1a2"), backendDir, "member keeps its own prefix");
 });
 
 test("single-dashed: dirForPrefix routes the repo's dashed native prefix (nativePrefixOf probe)", async () => {

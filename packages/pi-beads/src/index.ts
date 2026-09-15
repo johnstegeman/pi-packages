@@ -264,14 +264,19 @@ export default function piBeadsLean(pi: any) {
       umbrella = root;
       isUmbrella = true;
       const repos = await additionalRepos(umbrella);
-      const np = await nativePrefixOf(umbrella);
-      if (np) prefixToDir.set(np, umbrella);
+      const umbrellaPrefix = await nativePrefixOf(umbrella);
       basenameToDir.set(path.basename(umbrella), umbrella);
+      // Members claim prefixes FIRST: a member's `bd where` can resolve upward to
+      // the umbrella, which would otherwise let it steal the umbrella's prefix and
+      // misroute umbrella writes. When a member reports the umbrella's own prefix,
+      // fall back to sampling the member's DB. First claim wins (no overwrite).
       for (const dir of repos) {
         basenameToDir.set(path.basename(dir), dir);
-        const pfx = (await nativePrefixOf(dir)) || (await samplePrefixOf(dir));
-        if (pfx) prefixToDir.set(pfx, dir);
+        const np = await nativePrefixOf(dir);
+        const pfx = np && np !== umbrellaPrefix ? np : await samplePrefixOf(dir);
+        if (pfx && !prefixToDir.has(pfx)) prefixToDir.set(pfx, dir);
       }
+      if (umbrellaPrefix && !prefixToDir.has(umbrellaPrefix)) prefixToDir.set(umbrellaPrefix, umbrella);
       const ar = await repoRootOf(activeCwd);
       defaultRepoDir = ar && ar !== umbrella ? ar : null;
     } else {
