@@ -82,7 +82,7 @@ Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ### Removed
 
 - **Removed the bundled `subagent` and `plan_tracker` extensions entirely** (`extensions/` directory, `agents/` bundled definitions, and `tests/`). These are replaced by two companion packages the user installs separately: [`@tintinweb/pi-subagents`](https://github.com/tintinweb/pi-subagents) (in-process subagent dispatch via `createAgentSession` — no subprocess, no stdout parsing, no hand-rolled inactivity watchdog) and [`@tintinweb/pi-tasks`](https://github.com/tintinweb/pi-tasks) (dependency-graph task tracking with `TaskCreate`/`TaskUpdate`/`TaskList`). This eliminates the inactivity-timeout bug class by construction (no subprocess lifecycle left in this repo) and brings UX upgrades the bundled tools lacked: a persistent widget, FleetView, mid-run steering, session resume, background/scheduled dispatch, and bidirectional task dependencies. **Breaking change:** skills now reference `Agent(...)` / `TaskCreate(...)` / `TaskUpdate(...)` directly with no fallback path — both prerequisite packages must be installed. See the README Prerequisites section for install commands.
-- **Removed `lsp` from agent template `tools:` frontmatter** — it was a silent no-op (not a real pi built-in tool in either the old system or `pi-subagents`). A real LSP extension is a fast-follow, tracked as `pi-packages-egut`.
+- **Removed `lsp` from agent template `tools:` frontmatter** — it was a silent no-op (not a real pi built-in tool in either the old system or `pi-subagents`). A real LSP extension is deliberately out of scope for this package (see `pi-packages-egut`); if built, it belongs as its own standalone extension, not a superpowers follow-up.
 
 ### Added
 
