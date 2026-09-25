@@ -6,7 +6,14 @@
 // bounded backoff and the "never throw on persistent lock" contract.
 import assert from "node:assert/strict";
 
-const { isDoltLockError, withDoltLockRetry } = await import("../src/lock-retry.ts");
+const {
+  isDoltLockError,
+  isTransientCancellation,
+  classifyBdFailure,
+  formatBdTimeout,
+  withTransientRetry,
+  withDoltLockRetry,
+} = await import("../src/lock-retry.ts");
 
 let failures = 0;
 async function test(name, fn) {
@@ -103,6 +110,62 @@ await test("default attempts/delaysMs: persistent lock retries 5 times, sleeps [
   assert.equal(value, "locked");
   assert.equal(calls.length, 5);
   assert.deepEqual(sleeps, [50, 150, 400, 900]);
+});
+
+await test("isTransientCancellation: killed flag and cancellation text, not lock text", () => {
+  assert.equal(isTransientCancellation("", true), true, "killed flag alone");
+  assert.equal(isTransientCancellation("load custom types: context canceled", false), true);
+  assert.equal(isTransientCancellation("context deadline exceeded", false), true);
+  assert.equal(isTransientCancellation("database is locked", false), false);
+  assert.equal(isTransientCancellation("not a git repository", false), false);
+  assert.equal(isTransientCancellation(undefined, false), false);
+});
+
+await test("classifyBdFailure: lock precedence, cancel, null", () => {
+  assert.equal(classifyBdFailure("database is locked"), "lock");
+  assert.equal(classifyBdFailure("database is locked", { killed: true }), "lock", "lock text wins over killed");
+  assert.equal(classifyBdFailure("", { killed: true }), "cancel", "killed alone");
+  assert.equal(classifyBdFailure("context canceled"), "cancel");
+  assert.equal(classifyBdFailure("context deadline exceeded"), "cancel");
+  assert.equal(classifyBdFailure("not a git repository"), null);
+  assert.equal(classifyBdFailure(""), null);
+});
+
+await test("formatBdTimeout: concise, raw-text-free", () => {
+  assert.equal(formatBdTimeout(2, 15000), "bd timed out after 2 attempts (timeout 15000ms)");
+});
+
+await test("withTransientRetry: cancel budget = 2 attempts, one 250ms sleep", async () => {
+  const sleeps = [];
+  const calls = [];
+  const value = await withTransientRetry(
+    async (n) => { calls.push(n); return { value: `c${n}`, class: "cancel" }; },
+    { sleep: async (ms) => sleeps.push(ms) },
+  );
+  assert.equal(value, "c1");
+  assert.deepEqual(calls, [0, 1]);
+  assert.deepEqual(sleeps, [250]);
+});
+
+await test("withTransientRetry: cancel clears on retry", async () => {
+  const sleeps = [];
+  const calls = [];
+  const value = await withTransientRetry(
+    async (n) => { calls.push(n); return n === 0 ? { value: "cancelled", class: "cancel" } : { value: "done", class: null }; },
+    { sleep: async (ms) => sleeps.push(ms) },
+  );
+  assert.equal(value, "done");
+  assert.deepEqual(calls, [0, 1]);
+  assert.deepEqual(sleeps, [250]);
+});
+
+await test("withTransientRetry: null class returns immediately, no sleep", async () => {
+  const sleeps = [];
+  let calls = 0;
+  const value = await withTransientRetry(async () => { calls++; return { value: "ok", class: null }; }, { sleep: async (ms) => sleeps.push(ms) });
+  assert.equal(value, "ok");
+  assert.equal(calls, 1);
+  assert.deepEqual(sleeps, []);
 });
 
 if (failures > 0) {
