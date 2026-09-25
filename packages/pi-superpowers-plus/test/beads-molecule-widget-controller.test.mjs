@@ -802,6 +802,7 @@ const roots = (entries) => JSON.stringify(entries.map((e) => ({ issue_type: "mol
   controller.bindSession({ ui, cwd: "/repo", workspaceKey: "k1" });
   await tick();
   assert.equal(listCalls, 2, "persistent lock gets exactly one quick retry");
+  assert.equal(warns.length, 0, "a contention episode is silent");
 }
 
 // ---------- dolt lock: a non-lock throw is never retried, warns once ----------
