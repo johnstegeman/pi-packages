@@ -131,11 +131,11 @@ export function runGate(name, { packagesDir = PACKAGES_DIR } = {}) {
   return { name, status: 'PASS', gate, ms: Date.now() - started };
 }
 
-export function main(argv, { out = console.log, err = console.error, packagesDir = PACKAGES_DIR } = {}) {
+export function main(argv, { out = console.log, err = console.error, packagesDir = PACKAGES_DIR, quarantined = QUARANTINED } = {}) {
   const flags = new Set(argv.filter((arg) => arg.startsWith('--')));
   const names = argv.filter((arg) => !arg.startsWith('--'));
   const gated = discoverGated(packagesDir);
-  const { runnable, skipped, rotWarnings } = planRun(gated);
+  const { runnable, skipped, rotWarnings } = planRun(gated, quarantined);
   const isSkipped = (name) => skipped.some((entry) => entry.name === name);
 
   if (flags.has('--list')) {

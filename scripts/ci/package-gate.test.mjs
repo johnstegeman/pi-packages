@@ -5,7 +5,7 @@ import { execFileSync } from 'node:child_process';
 import { cpSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
-import { PACKAGES_DIR, covers, discoverGated, isGated, planRun, selectGate, summarize } from './package-gate.mjs';
+import { PACKAGES_DIR, covers, discoverGated, isGated, main, planRun, selectGate, summarize } from './package-gate.mjs';
 
 // ---------- isGated ----------
 test('isGated: only a non-empty test script counts', () => {
@@ -253,4 +253,97 @@ test('the module never invokes npx in code', () => {
     .filter((line) => !line.trim().startsWith('//'))
     .join('\n');
   assert.ok(!/\bnpx\b/.test(code), 'package-gate.mjs must not invoke npx in code (the header comment may explain why not)');
+});
+
+// ---------- direct-call seam: injected quarantine map covers the SKIPPED paths ----------
+// `main` takes a `quarantined` map (defaulting to QUARANTINED). QUARANTINED is empty and a
+// scratch-repo copy of the script can never populate it, so the one exclusion mechanism
+// has no other regression protection. Drive main directly with an injected map instead.
+function capture() {
+  const out = [];
+  const err = [];
+  return { out, err, outFn: (line) => out.push(String(line)), errFn: (line) => err.push(String(line)) };
+}
+
+function gatedPackages(pkgs) {
+  const dir = mkdtempSync(join(tmpdir(), 'pkg-gate-inject-'));
+  for (const [name, testScript] of Object.entries(pkgs)) {
+    const pkgDir = join(dir, name);
+    mkdirSync(pkgDir, { recursive: true });
+    writeFileSync(join(pkgDir, 'package.json'), JSON.stringify({ name, version: '1.0.0', scripts: { test: testScript } }));
+    writeFileSync(join(pkgDir, 'package-lock.json'), minimalLock(name));
+  }
+  return dir;
+}
+
+test('main --list: a quarantined package prints SKIPPED with its reason and no runnable line', () => {
+  const dir = gatedPackages({ alpha: 'node -e "process.exit(0)"', beta: 'node -e "process.exit(0)"' });
+  const cap = capture();
+  try {
+    const code = main(['--list'], {
+      out: cap.outFn,
+      err: cap.errFn,
+      packagesDir: dir,
+      quarantined: { beta: 'known red - bead: pi-packages-zzz' },
+    });
+    assert.equal(code, 0);
+    assert.ok(cap.out.some((line) => /^SKIPPED beta\s+known red - bead: pi-packages-zzz$/.test(line)), cap.out.join('\n'));
+    assert.ok(cap.out.some((line) => /^alpha\s/.test(line)), 'the healthy package still prints its gate');
+    assert.ok(!cap.out.some((line) => /^beta\s/.test(line)), 'beta must not appear as a runnable line');
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('main --list --json: the quarantined name is omitted from the runnable array', () => {
+  const dir = gatedPackages({ alpha: 'node -e "process.exit(0)"', beta: 'node -e "process.exit(0)"' });
+  const cap = capture();
+  try {
+    const code = main(['--list', '--json'], {
+      out: cap.outFn,
+      err: cap.errFn,
+      packagesDir: dir,
+      quarantined: { beta: 'known red - bead: pi-packages-zzz' },
+    });
+    assert.equal(code, 0);
+    assert.deepEqual(JSON.parse(cap.out[0]), ['alpha']);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('main --all: a quarantined package is a SKIPPED row, the healthy one still runs, exit 0', () => {
+  const dir = gatedPackages({ alpha: 'node -e "process.exit(0)"', beta: 'node -e "process.exit(0)"' });
+  const cap = capture();
+  try {
+    const code = main(['--all'], {
+      out: cap.outFn,
+      err: cap.errFn,
+      packagesDir: dir,
+      quarantined: { beta: 'known red - bead: pi-packages-zzz' },
+    });
+    assert.equal(code, 0);
+    assert.ok(cap.out.some((line) => /^PASS\s+alpha/.test(line)), cap.out.join('\n'));
+    assert.ok(cap.out.some((line) => /^SKIPPED\s+beta/.test(line)), cap.out.join('\n'));
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('main: a stale quarantine key names no gated package and produces a rot WARNING on stderr', () => {
+  const dir = gatedPackages({ alpha: 'node -e "process.exit(0)"' });
+  const cap = capture();
+  try {
+    const code = main(['--list'], {
+      out: cap.outFn,
+      err: cap.errFn,
+      packagesDir: dir,
+      quarantined: { ghost: 'stale - bead: pi-packages-yyy' },
+    });
+    assert.equal(code, 0);
+    assert.ok(cap.err.some((line) => /^WARNING:.*ghost/.test(line)), cap.err.join('\n'));
+    assert.equal(cap.out.length, 1, 'the healthy package is still listed');
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
 });
