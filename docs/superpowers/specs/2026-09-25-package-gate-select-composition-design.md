@@ -184,8 +184,15 @@ cases above, where each case asserts **two independent things**:
 
 1. **the exact selected string** — pins behaviour, so an intentional change is visible in the diff;
 2. **the invariant** — for every declared script, that it appears in the output (with the documented
-   transitive exception for `typecheck`). This is the assertion that would catch a twelfth
-   combination nobody anticipated.
+   transitive exception for `typecheck`).
+
+Be precise about what the invariant does and does not buy, because it is easy to over-claim: the
+loop iterates only the eleven enumerated cases, so it **cannot** discover a case the table omits.
+What it does buy is protection against a *table edit* that weakens an expectation while the rule
+still produces the string, and — historically — it fires on the exact pre-fix bug: case 7 before the
+fix selected `npm run typecheck && npm test`, which the invariant rejects because the declared
+`check` is missing. The task review for this change confirmed both properties and confirmed the
+invariant is not vacuous on any case.
 
 Plus one contract assertion across every non-null case: `gateSteps(selected)` yields argv arrays
 whose first element is `npm`, so the rule and the runner cannot drift apart (the runner splits on
