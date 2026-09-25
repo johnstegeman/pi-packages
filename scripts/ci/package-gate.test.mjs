@@ -1,7 +1,8 @@
 // scripts/ci/package-gate.test.mjs
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { execFileSync } from 'node:child_process';
+import { cpSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { PACKAGES_DIR, covers, discoverGated, isGated, planRun, selectGate, summarize } from './package-gate.mjs';
@@ -130,4 +131,126 @@ test('summarize: renders every status and counts only FAIL as failed', () => {
 test('summarize: a clean run is all-pass with failed = 0', () => {
   const { failed } = summarize([{ name: 'alpha', status: 'PASS', gate: 'npm test', ms: 1 }]);
   assert.equal(failed, 0);
+});
+
+
+// ---------- process-level: the real script executed in a scratch repo ----------
+// House pattern (see check-deps-mirror.test.mjs): the script resolves the repo root from
+// its own location, so copy it into a scratch skeleton and run it with cwd = scratch.
+const SCRIPT_SRC = new URL('./package-gate.mjs', import.meta.url);
+
+// A dependency-free fixture installs with no network. `npm ci` needs a lockfile that
+// matches package.json; this minimal v3 lock does. If npm ever rejects it, replace the
+// writeFileSync with:
+//   execFileSync('npm', ['install', '--package-lock-only', '--ignore-scripts'], { cwd: pkgDir })
+const minimalLock = (name) =>
+  JSON.stringify({ name, version: '1.0.0', lockfileVersion: 3, requires: true, packages: { '': { name, version: '1.0.0' } } });
+
+function scratchRepo(pkgs) {
+  const dir = mkdtempSync(join(tmpdir(), 'pkg-gate-repo-'));
+  mkdirSync(join(dir, 'scripts/ci'), { recursive: true });
+  cpSync(SCRIPT_SRC, join(dir, 'scripts/ci/package-gate.mjs'));
+  for (const [name, testScript] of Object.entries(pkgs)) {
+    const pkgDir = join(dir, 'packages', name);
+    mkdirSync(pkgDir, { recursive: true });
+    if (testScript === null) {
+      writeFileSync(join(pkgDir, 'package.json'), JSON.stringify({ name, version: '1.0.0' }));
+      continue;
+    }
+    writeFileSync(
+      join(pkgDir, 'package.json'),
+      JSON.stringify({ name, version: '1.0.0', dependencies: {}, scripts: { test: testScript } }),
+    );
+    writeFileSync(join(pkgDir, 'package-lock.json'), minimalLock(name));
+  }
+  return dir;
+}
+
+function runCli(dir, args) {
+  let out = '';
+  let code = 0;
+  try {
+    out = execFileSync('node', ['scripts/ci/package-gate.mjs', ...args], { cwd: dir, encoding: 'utf8' });
+  } catch (err) {
+    code = err.status ?? 1;
+    out = `${err.stdout ?? ''}\n${err.stderr ?? ''}`;
+  }
+  return { code, out };
+}
+
+test('cli --all: a passing package exits 0 and prints PASS', () => {
+  const dir = scratchRepo({ alpha: 'node -e "process.exit(0)"' });
+  try {
+    const { code, out } = runCli(dir, ['--all']);
+    assert.equal(code, 0);
+    assert.match(out, /PASS\s+alpha/);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('cli --all: a failing package exits 1, prints FAIL and the output tail', () => {
+  const dir = scratchRepo({ alpha: 'node -e "console.error(\'boom-marker\'); process.exit(3)"' });
+  try {
+    const { code, out } = runCli(dir, ['--all']);
+    assert.equal(code, 1);
+    assert.match(out, /FAIL\s+alpha/);
+    assert.match(out, /boom-marker/);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('cli --all: a package with no lockfile fails rather than being skipped', () => {
+  const dir = scratchRepo({ alpha: 'node -e "process.exit(0)"' });
+  rmSync(join(dir, 'packages/alpha/package-lock.json'));
+  try {
+    const { code, out } = runCli(dir, ['--all']);
+    assert.equal(code, 1);
+    assert.match(out, /FAIL\s+alpha/);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('cli --list --json: emits only the runnable names, as JSON', () => {
+  const dir = scratchRepo({ alpha: 'node -e "process.exit(0)"', beta: 'node -e "process.exit(0)"', gamma: null });
+  try {
+    const { code, out } = runCli(dir, ['--list', '--json']);
+    assert.equal(code, 0);
+    assert.deepEqual(JSON.parse(out.trim()), ['alpha', 'beta']);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('cli: an unknown package exits 2', () => {
+  const dir = scratchRepo({ alpha: 'node -e "process.exit(0)"' });
+  try {
+    const { code, out } = runCli(dir, ['nope']);
+    assert.equal(code, 2);
+    assert.match(out, /unknown package/);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('cli: no arguments exits 2 with usage', () => {
+  const dir = scratchRepo({ alpha: 'node -e "process.exit(0)"' });
+  try {
+    const { code, out } = runCli(dir, []);
+    assert.equal(code, 2);
+    assert.match(out, /usage/);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('the module never invokes npx in code', () => {
+  const src = readFileSync(new URL('./package-gate.mjs', import.meta.url), 'utf8');
+  const code = src
+    .split('\n')
+    .filter((line) => !line.trim().startsWith('//'))
+    .join('\n');
+  assert.ok(!/\bnpx\b/.test(code), 'package-gate.mjs must not invoke npx in code (the header comment may explain why not)');
 });

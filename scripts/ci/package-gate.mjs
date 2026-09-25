@@ -10,9 +10,10 @@
 // Runs only through `npm ci` / `npm run` / `npm test`. Never `npx`: `npx biome`
 // resolves a stale cached binary from ~/.npm/_npx instead of the package's pinned
 // one and reports a false green.
+import { execFileSync } from 'node:child_process';
 import { existsSync, readFileSync, readdirSync } from 'node:fs';
 import { join } from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 
 export const REPO_ROOT = fileURLToPath(new URL('../..', import.meta.url));
 export const PACKAGES_DIR = join(REPO_ROOT, 'packages');
@@ -92,3 +93,88 @@ export function summarize(results) {
   const failed = results.filter((result) => result.status === 'FAIL').length;
   return { lines, failed };
 }
+
+const TAIL_LINES = 25;
+
+// Split a gate string produced by selectGate into argv arrays. The vocabulary is fixed
+// ('npm test', 'npm run <script>'), so splitting is sufficient and avoids a shell.
+export function gateSteps(gate) {
+  return String(gate)
+    .split(' && ')
+    .map((step) => step.trim().split(/\s+/))
+    .filter((argv) => argv.length > 0 && argv[0] !== '');
+}
+
+function tail(text) {
+  return String(text ?? '').trim().split('\n').slice(-TAIL_LINES).join('\n');
+}
+
+// `npm ci` from the committed lockfile, then the selected gate. Any non-zero exit is a
+// failure with its output tail attached — an install failure is never a skip.
+export function runGate(name, { packagesDir = PACKAGES_DIR } = {}) {
+  const dir = join(packagesDir, name);
+  const gated = discoverGated(packagesDir).find((pkg) => pkg.name === name);
+  const gate = gated ? gated.gate : null;
+  const started = Date.now();
+  const steps = [
+    ['npm', ['ci', '--no-audit', '--no-fund']],
+    ...gateSteps(gate ?? '').map((argv) => [argv[0], argv.slice(1)]),
+  ];
+  for (const [cmd, args] of steps) {
+    try {
+      execFileSync(cmd, args, { cwd: dir, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] });
+    } catch (err) {
+      const output = tail(`${err.stdout ?? ''}\n${err.stderr ?? ''}`);
+      return { name, status: 'FAIL', gate, ms: Date.now() - started, output };
+    }
+  }
+  return { name, status: 'PASS', gate, ms: Date.now() - started };
+}
+
+export function main(argv, { out = console.log, err = console.error, packagesDir = PACKAGES_DIR } = {}) {
+  const flags = new Set(argv.filter((arg) => arg.startsWith('--')));
+  const names = argv.filter((arg) => !arg.startsWith('--'));
+  const gated = discoverGated(packagesDir);
+  const { runnable, skipped, rotWarnings } = planRun(gated);
+  const isSkipped = (name) => skipped.some((entry) => entry.name === name);
+
+  if (flags.has('--list')) {
+    if (flags.has('--json')) out(JSON.stringify(runnable));
+    else
+      for (const pkg of gated) {
+        const skip = skipped.find((entry) => entry.name === pkg.name);
+        out(skip ? `SKIPPED ${pkg.name}  ${skip.reason}` : `${pkg.name}  ${pkg.gate}`);
+      }
+    for (const warning of rotWarnings) err(`WARNING: ${warning}`);
+    return 0;
+  }
+
+  const all = flags.has('--all');
+  if (!all && names.length === 0) {
+    err('usage: package-gate.mjs <package> | --all | --list [--json]');
+    return 2;
+  }
+  for (const name of names) {
+    if (gated.some((pkg) => pkg.name === name) || isSkipped(name)) continue;
+    err(`unknown package: ${name}`);
+    return 2;
+  }
+
+  const targets = all ? runnable : names;
+  const results = targets.map((name) =>
+    isSkipped(name)
+      ? { name, status: 'SKIPPED', reason: skipped.find((entry) => entry.name === name).reason }
+      : runGate(name, { packagesDir }),
+  );
+  if (all) for (const entry of skipped) results.push({ name: entry.name, status: 'SKIPPED', reason: entry.reason });
+
+  const { lines, failed } = summarize(results);
+  for (const line of lines) out(line);
+  for (const result of results.filter((entry) => entry.status === 'FAIL'))
+    err(`\n--- ${result.name} output tail ---\n${result.output}`);
+  for (const warning of rotWarnings) err(`WARNING: ${warning}`);
+  return failed > 0 ? 1 : 0;
+}
+
+const isMain = process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href;
+if (isMain) process.exit(main(process.argv.slice(2)));
