@@ -2,6 +2,7 @@
   "name": "pi-packages",
   "version": "0.1.0",
   "description": "Personal collection of pi extensions and themes",
+  "scripts": { "test": "node scripts/ci/package-gate.mjs --all" },
   "keywords": ["pi-package"],
   "license": "MIT",
   "peerDependencies": {

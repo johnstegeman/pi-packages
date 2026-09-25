@@ -1,5 +1,6 @@
 node_modules/
 package-lock.json
+!packages/*/package-lock.json
 *.js.map
 dist/
 .DS_Store

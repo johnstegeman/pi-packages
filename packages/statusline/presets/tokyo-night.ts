@@ -23,13 +23,7 @@ const TOKYO_NIGHT_COLORS = {
 	extensionSeparator: "#394260",
 } as const satisfies Record<string, string | BlockColors>;
 
-const TOKYO_NIGHT_BLOCK_ORDER: BlockName[] = [
-	"header",
-	"directory",
-	"git",
-	"runtime",
-	"meter",
-];
+const TOKYO_NIGHT_BLOCK_ORDER: BlockName[] = ["header", "directory", "git", "runtime", "meter"];
 
 export function renderTokyoNightStatusline(width: number, segments: RenderSegment[]): string {
 	return truncateToWidth(renderTokyoNightSegments(segments), width, "");

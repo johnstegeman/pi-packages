@@ -23,13 +23,7 @@ const AYU_COLORS = {
 	extensionSeparator: "#212b3d",
 } as const satisfies Record<string, string | BlockColors>;
 
-const AYU_BLOCK_ORDER: BlockName[] = [
-	"header",
-	"directory",
-	"git",
-	"runtime",
-	"meter",
-];
+const AYU_BLOCK_ORDER: BlockName[] = ["header", "directory", "git", "runtime", "meter"];
 
 export function renderAyuStatusline(width: number, segments: RenderSegment[]): string {
 	return truncateToWidth(renderAyuSegments(segments), width, "");

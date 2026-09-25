@@ -11,11 +11,11 @@ import { renderAyuSegments } from "../presets/ayu.js";
 import { renderClassicSegments } from "../presets/classic.js";
 import { renderTokyoNightSegments } from "../presets/tokyo-night.js";
 import type {
+	BlockName,
 	PaletteName,
 	RenderSegment,
 	SegmentName,
 	StatuslineConfig,
-	BlockName,
 } from "../presets/types.js";
 import {
 	type ExtensionStatusRuntime,

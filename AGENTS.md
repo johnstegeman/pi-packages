@@ -23,14 +23,50 @@ script exists.
 
 ## Running tests
 
-- Per-package tests: `cd packages/<name> && npm test`
-- Statusline tests: `cd packages/statusline && npm test`
-- Langfuse tests: `cd packages/langfuse && npm install` once for runtime dependencies, then `npm test`; the root workspace does not install those dependencies.
-- pi-beads: `cd packages/pi-beads && npm test` runs the tool suite, the cost-tracking suite, and the tool-surface doc-drift guard.
+- **Everything, the way CI runs it:** `npm test` at the repo root. It runs
+  `scripts/ci/package-gate.mjs --all`, the same script the `package-gates` CI job runs per
+  package.
+- **One package:** `node scripts/ci/package-gate.mjs <package>` (e.g. `... pi-beads`).
+- **The inventory:** `node scripts/ci/package-gate.mjs --list` shows which gate each package
+  runs; `--list --json` is what CI uses to build its matrix.
+
+For each package the gate picks the **strongest script it declares** — `check` when it covers
+both the tests and the typecheck, otherwise `typecheck && test`, otherwise `test`. So
+`pi-superpowers-plus` runs `npm test` (its `check` is lint-only and would skip 16 suites),
+while `hashline-edit`, `statusline` and `pi-subagents` run `npm run check`.
+
+Installs are deterministic: every package has a committed `package-lock.json` and the gate
+installs with `npm ci`, never a floating `npm install`. Add `npm ci` after changing a
+package's dependencies and commit the updated lockfile.
+
+The repo pins **node 22** in `mise.toml`, matching every CI job that installs a toolchain. If your
+default `node` differs, run the gate under the pin (`mise exec node@22 -- npm test`) — node 20 in
+particular cannot strip TypeScript or satisfy the installed `undici`, and fails five of the seven
+suites for reasons that have nothing to do with the change you are testing.
+
+A package that cannot pass yet is listed in the `QUARANTINED` constant in
+`scripts/ci/package-gate.mjs` with a reason and a bead id. It then reports as `SKIPPED` in
+every run and drops out of the CI matrix. There is no other exclusion mechanism, and nothing
+is skipped silently.
+
+### Never run `npx biome`
+
+Use the package's installed binary — `./node_modules/.bin/biome`, `npm run check`, or
+`npm test`. `npx biome` does **not** use the pinned devDependency: with no local
+`node_modules` it resolves whatever cached copy is in `~/.npm/_npx/`, and several stale
+versions sit there (`2.3.15`, `2.5.11`, `2.5.12` were all present at once). Those versions
+disagree with the pinned one about formatting *and* rule severity.
+
+This is not theoretical: on PR #62 a branch was reported as lint-clean by **four separate
+task reviews plus the session controller**, all of which ran `npx biome check .`. The repo's
+real gate — `biome check .` from the installed `node_modules`, as `npm test` runs it —
+reported 4 errors (3 formatting, plus `noAssignInExpressions`) that had already been pushed.
+Run `npm test` at the root, or install first and use the local binary.
 
 ### Sync-loop + dep-mirror checks (root)
 
-The sync simulation and dep-mirror gate are root-level scripts, not package tests. There is no root npm script; run them directly:
+The sync simulation and dep-mirror gate are root-level scripts. `npm test` (above) covers the
+packages; these are separate and still run directly (they are also CI jobs):
 
 ```bash
 npm install --no-save semver@^7 --prefix /tmp/depsmirror --silent

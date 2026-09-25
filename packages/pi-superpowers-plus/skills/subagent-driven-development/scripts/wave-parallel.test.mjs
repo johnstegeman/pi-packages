@@ -5,10 +5,11 @@
 // gate-conditional, the non-done short-circuit, the fail-closed shape guard
 // (invalid-args), the quoted file-scoped review package build (HEAD resolved
 // by the child), the envelope, the sandbox-forbidden globals — plus a live
-// review-package scoping check against the spec commits in history.
+// review-package scoping check against a self-contained fixture repo.
 import assert from "node:assert/strict";
-import { spawnSync } from "node:child_process";
-import { readFileSync, rmSync } from "node:fs";
+import { execFileSync, spawnSync } from "node:child_process";
+import { cpSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import { Script } from "node:vm";
@@ -127,27 +128,54 @@ test("script parses as valid JS (vm: runtime wrapper compile)", () => {
 
 const reviewPackagePath = join(dirname(fileURLToPath(import.meta.url)), "review-package");
 
-test("review-package scoping check: literal pathspecs keep the diff file-scoped; '--' with no paths fails loud", () => {
-  // The two spec commits (ffc7028..2b263e2) are in history on this branch and
-  // touch only the wave-parallel design doc, so a file-scoped diff must contain
-  // exactly one '^diff --git' line. Pathspecs resolve against the cwd, so run
-  // review-package from the repo root (5 levels up from this test file),
-  // mirroring how the review child invokes it (bash from the repo root).
-  const repoRoot = join(dirname(fileURLToPath(import.meta.url)), "..", "..", "..", "..", "..");
-  const scopedOut = "/tmp/wpscoped.diff";
-  const emptyOut = "/tmp/wpscoped.empty.diff";
+// review-package reads the commit range from git in its cwd and resolves the repo
+// root from its own file location, so it is exercised against a self-contained
+// fixture repo rather than this repository's history — CI checks out shallow
+// (depth 1), where ancestor commits do not exist. The head commit changes a
+// second file so a scoped diff is genuinely narrowed: an unscoped diff would
+// contain two '^diff --git' lines, the literal pathspec one.
+function initReviewPackageFixture() {
+  const dir = mkdtempSync(join(tmpdir(), "wave-parallel-"));
+  const specPath = "docs/superpowers/specs/2026-09-10-wave-parallel-implementation-design.md";
+  const otherPath = "roadmap.md";
+  const git = (...args) =>
+    execFileSync("git", ["-c", "user.email=fixture@example.com", "-c", "user.name=fixture", ...args], { cwd: dir, encoding: "utf8" });
+  git("init", "-q");
+  mkdirSync(join(dir, "docs/superpowers/specs"), { recursive: true });
+  mkdirSync(join(dir, "scripts"), { recursive: true });
+  writeFileSync(join(dir, specPath), "# Wave-parallel implementation design\n\nfirst\n");
+  writeFileSync(join(dir, otherPath), "first\n");
+  git("add", "-A");
+  git("commit", "-q", "-m", "spec: initial design doc");
+  const base = git("rev-parse", "HEAD").trim();
+  writeFileSync(join(dir, specPath), "# Wave-parallel implementation design\n\nfirst\nsecond\n");
+  writeFileSync(join(dir, otherPath), "first\nsecond\n");
+  git("add", "-A");
+  git("commit", "-q", "-m", "spec: extend design doc");
+  const head = git("rev-parse", "HEAD").trim();
+  cpSync(reviewPackagePath, join(dir, "scripts", "review-package"));
+  return { dir, base, head, specPath };
+}
+
+test("review-package scoping check: literal pathspecs keep the diff file-scoped; '--' with no paths and a bad BASE fail loud", () => {
+  const { dir, base, head, specPath } = initReviewPackageFixture();
+  const script = join(dir, "scripts", "review-package");
   try {
-    const scoped = spawnSync("bash", [reviewPackagePath, "slug", "ffc7028", "2b263e2", scopedOut, "--", "docs/superpowers/specs/2026-09-10-wave-parallel-implementation-design.md"], { encoding: "utf8", cwd: repoRoot });
+    const scopedOut = join(dir, "scoped.diff");
+    const scoped = spawnSync("bash", [script, "slug", base, head, scopedOut, "--", specPath], { encoding: "utf8", cwd: dir });
     assert.equal(scoped.status, 0, "scoped review-package must exit 0: " + scoped.stdout + scoped.stderr);
     const scopedText = readFileSync(scopedOut, "utf8");
-    assert.equal((scopedText.match(/^diff --git/gm) ?? []).length, 1, "scoped diff must contain exactly one '^diff --git' line (the design doc)");
+    assert.equal((scopedText.match(/^diff --git/gm) ?? []).length, 1, "scoped diff must contain exactly one '^diff --git' line (only the spec doc, not the other file changed by the same commit)");
 
-    const empty = spawnSync("bash", [reviewPackagePath, "slug", "ffc7028", "2b263e2", emptyOut, "--"], { encoding: "utf8", cwd: repoRoot });
+    const empty = spawnSync("bash", [script, "slug", base, head, join(dir, "empty.diff"), "--"], { encoding: "utf8", cwd: dir });
     assert.notEqual(empty.status, 0, "'--' with no paths must exit non-zero");
     assert.match(empty.stderr, /'--' given with no paths/);
+
+    const badBase = spawnSync("bash", [script, "slug", "not-a-commit", head, join(dir, "bad.diff")], { encoding: "utf8", cwd: dir });
+    assert.notEqual(badBase.status, 0, "a bad BASE must exit non-zero");
+    assert.match(badBase.stderr, /bad BASE: not-a-commit/);
   } finally {
-    rmSync(scopedOut, { force: true });
-    rmSync(emptyOut, { force: true });
+    rmSync(dir, { recursive: true, force: true });
   }
 });
 
