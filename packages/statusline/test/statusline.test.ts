@@ -984,22 +984,21 @@ test("ayu preset renders the ░▒▓ lead,  powerline joins, and block text in
 	// Directory block bg is Ayu blue (#39bae6). ansiStyle combines fg+bg into a single
 	// escape ("\u001b[38;2;R;G;B;48;2;R;G;Bm"), so the bg code is embedded after a `;`
 	// rather than immediately following `\u001b[`.
-	assert.ok(
-		rendered.includes(";48;2;57;186;230m"),
-		"directory block bg uses Ayu blue #39bae6",
-	);
+	assert.ok(rendered.includes(";48;2;57;186;230m"), "directory block bg uses Ayu blue #39bae6");
 
 	// Line finishes with the rounded powerline cap (mirrors tokyo-night's finish).
-	assert.ok(
-		rendered.endsWith("\ue0b4\u001b[0m"),
-		"line ends with the rounded powerline cap glyph",
-	);
+	assert.ok(rendered.endsWith("\ue0b4\u001b[0m"), "line ends with the rounded powerline cap glyph");
 });
 
 test("ayu render truncates to the requested width", () => {
 	const segments: RenderSegment[] = [
 		{ name: "brand", text: "π", color: "accent", block: "header", emphasis: true },
-		{ name: "model", text: "🤖 a-very-long-model-name-that-exceeds-width", color: "accent", block: "header" },
+		{
+			name: "model",
+			text: "🤖 a-very-long-model-name-that-exceeds-width",
+			color: "accent",
+			block: "header",
+		},
 	];
 
 	const rendered = renderAyuStatusline(20, segments);
@@ -1012,10 +1011,7 @@ test("ayuExtensionSeparator returns • colored with the Ayu border hex", () => 
 
 	assert.ok(sep.includes(" • "), "separator text is • surrounded by spaces");
 	// #212b3d -> RGB 33,43,61 -> ANSI truecolor fg code 38;2;33;43;61
-	assert.ok(
-		sep.includes("\u001b[38;2;33;43;61m"),
-		"separator color is Ayu border #212b3d",
-	);
+	assert.ok(sep.includes("\u001b[38;2;33;43;61m"), "separator color is Ayu border #212b3d");
 });
 
 test("preset selection honors PI_STATUSLINE_PRESET and defaults to ayu", async () => {
