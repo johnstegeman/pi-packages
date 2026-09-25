@@ -323,6 +323,7 @@ function formatDuration(ms: number): string {
 
 export function shortenModel(model: string): string {
 	return model
+		.replace(/^.*\//, "")
 		.replace(/^claude-/, "")
 		.replace(/^gpt-/, "gpt ")
 		.replace(/-20\d{6}$/, "")
