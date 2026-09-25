@@ -1,5 +1,5 @@
 // scripts/ci/package-gate.mjs
-// Package gate: run each package's strongest available gate with its installed
+// Package gate: run each package's composed gate with its installed
 // dependencies, so a pull request cannot merge with an unrun lint/typecheck/test suite.
 //
 // Exit codes:
@@ -37,7 +37,18 @@ export function covers(scriptText, target) {
   return new RegExp(`\\bnpm\\s+(?:run\\s+)?${escaped}(?![\\w:-])`).test(scriptText);
 }
 
-// Select the gate that runs every check a package declares, at least once.
+// Select the gate that runs each declared `check` / `typecheck` / `test` script at least once.
+//
+// Order is typecheck -> lint/check -> tests: cheapest and most fundamental first, so a type
+// error fails before the suite runs. Each of those three declared scripts is composed in, and
+// running one twice is acceptable and deliberate — the gate errs toward repeating a step rather
+// than skipping one. The rule only knows these three script names, and it decides coverage by
+// matching script text: a standalone script that nothing references is not run, and a script that
+// merely mentions an invocation can suppress a step. Both are documented limitations — see
+// "Residual limitation" in
+// docs/superpowers/specs/2026-09-25-package-gate-select-composition-design.md. The single
+// transitive exception: `typecheck` is not added when `check` or `test` already invokes it
+// (matched by script text).
 //
 // Order is typecheck -> lint/check -> tests: cheapest and most fundamental first, so a type
 // error fails before the suite runs. A declared script is never dropped, and running one twice

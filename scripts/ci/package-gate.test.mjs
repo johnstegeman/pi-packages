@@ -27,7 +27,7 @@ test('covers: matches npm invocations, not other words or extended script names'
   assert.equal(covers(undefined, 'test'), false);
 });
 
-// ---------- selectGate: the recorded shapes of the seven real packages ----------
+// ---------- selectGate: the recorded composed-gate shapes of the seven real packages ----------
 const SHAPES = [
   ['pi-superpowers-plus', { check: 'biome check .', test: 'biome check . && node test/a.test.mjs' }, 'npm run check && npm test'],
   ['hashline-edit', { check: 'biome check . && npm run typecheck && npm test', typecheck: 'tsc --noEmit', test: 'node --import tsx --test test/*.test.ts' }, 'npm run check'],
@@ -158,6 +158,16 @@ for (const { n, label, scripts, expected } of GATE_CASES) {
   });
 }
 
+// Known limitation, documented in the spec's "Residual limitation": coverage is inferred from
+// script TEXT, so a script that merely mentions `npm test` counts as running it. This pins the
+// current (accepted) behaviour so a change to it is deliberate rather than accidental.
+test('selectGate: a textual false positive suppresses a step (known, documented limitation)', () => {
+  assert.equal(
+    selectGate({ check: 'echo npm test && biome check .', test: 'node --test' }),
+    'npm run check',
+  );
+});
+
 test('gateSteps: splits npm-only gates into argv arrays, one per step', () => {
   assert.deepEqual(gateSteps('npm test'), [['npm', 'test']]);
   assert.deepEqual(gateSteps('npm run check'), [['npm', 'run', 'check']]);
@@ -171,7 +181,7 @@ test('gateSteps: splits npm-only gates into argv arrays, one per step', () => {
 });
 
 // Guard against manifest drift: assert the real packages/*, not a frozen copy.
-test('selectGate: the real package manifests select the recorded strongest gate', () => {
+test('selectGate: the real package manifests select the recorded composed gate', () => {
   const gates = Object.fromEntries(discoverGated(PACKAGES_DIR).map((pkg) => [pkg.name, pkg.gate]));
   assert.deepEqual(gates, {
     bifrost: 'npm test',
