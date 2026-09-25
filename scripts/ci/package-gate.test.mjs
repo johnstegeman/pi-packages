@@ -29,7 +29,7 @@ test('covers: matches npm invocations, not other words or extended script names'
 
 // ---------- selectGate: the recorded shapes of the seven real packages ----------
 const SHAPES = [
-  ['pi-superpowers-plus', { check: 'biome check .', test: 'biome check . && node test/a.test.mjs' }, 'npm test'],
+  ['pi-superpowers-plus', { check: 'biome check .', test: 'biome check . && node test/a.test.mjs' }, 'npm run check && npm test'],
   ['hashline-edit', { check: 'biome check . && npm run typecheck && npm test', typecheck: 'tsc --noEmit', test: 'node --import tsx --test test/*.test.ts' }, 'npm run check'],
   ['statusline', { check: 'biome check . && npm run typecheck && npm test', typecheck: 'tsc --noEmit', test: 'node --import tsx --test test/statusline.test.ts' }, 'npm run check'],
   ['pi-subagents', { check: 'npm run lint && npm run typecheck && npm run test', lint: 'biome check src/ test/', typecheck: 'tsc --noEmit', test: 'vitest run' }, 'npm run check'],
@@ -65,6 +65,99 @@ test('selectGate: not gated -> null', () => {
   assert.equal(selectGate({ build: 'tsc' }), null);
 });
 
+// ---------- selectGate: exhaustive at-least-once property over the input space ----------
+// The rule's whole input space is small enough to enumerate, so the invariant is proven rather
+// than spot-checked. Each case asserts two independent things: the exact selected string, and
+// the invariant that every declared script appears in it at least once.
+const CHECK_FIXTURES = {
+  'test+tc': 'npm run typecheck && npm test', // invokes the test script AND the typecheck script
+  testOnly: 'npm test', // invokes the test script only
+  tcOnly: 'npm run typecheck', // invokes the typecheck script only
+  neither: 'biome check .', // invokes neither
+};
+
+const GATE_CASES = [
+  { n: 1, label: 'no check, no typecheck', scripts: { test: 'node --test' }, expected: 'npm test' },
+  {
+    n: 2,
+    label: 'no check, typecheck declared',
+    scripts: { typecheck: 'tsc --noEmit', test: 'node --test' },
+    expected: 'npm run typecheck && npm test',
+  },
+  {
+    n: 3,
+    label: 'check covers test+typecheck, typecheck declared',
+    scripts: { check: CHECK_FIXTURES['test+tc'], typecheck: 'tsc --noEmit', test: 'node --test' },
+    expected: 'npm run check',
+  },
+  {
+    n: 4,
+    label: 'check covers test+typecheck, no typecheck script',
+    scripts: { check: CHECK_FIXTURES['test+tc'], test: 'node --test' },
+    expected: 'npm run check',
+  },
+  {
+    n: 5,
+    label: 'check covers test only, typecheck declared',
+    scripts: { check: CHECK_FIXTURES.testOnly, typecheck: 'tsc --noEmit', test: 'node --test' },
+    expected: 'npm run typecheck && npm run check',
+  },
+  {
+    n: 6,
+    label: 'check covers test only, no typecheck script',
+    scripts: { check: CHECK_FIXTURES.testOnly, test: 'node --test' },
+    expected: 'npm run check',
+  },
+  {
+    n: 7,
+    label: 'check covers typecheck only, typecheck declared',
+    scripts: { check: CHECK_FIXTURES.tcOnly, typecheck: 'tsc --noEmit', test: 'node --test' },
+    expected: 'npm run check && npm test',
+  },
+  {
+    n: 8,
+    label: 'check covers neither, typecheck declared',
+    scripts: { check: CHECK_FIXTURES.neither, typecheck: 'tsc --noEmit', test: 'node --test' },
+    expected: 'npm run typecheck && npm run check && npm test',
+  },
+  {
+    n: 9,
+    label: 'check covers neither, no typecheck script',
+    scripts: { check: CHECK_FIXTURES.neither, test: 'node --test' },
+    expected: 'npm run check && npm test',
+  },
+  { n: 10, label: 'not gated', scripts: { build: 'tsc' }, expected: null },
+  {
+    n: 11,
+    label: 'typecheck already invoked by the test script',
+    scripts: { typecheck: 'tsc --noEmit', test: 'npm run typecheck && node --test' },
+    expected: 'npm test',
+  },
+];
+
+for (const { n, label, scripts, expected } of GATE_CASES) {
+  test(`selectGate case ${n}: ${label}`, () => {
+    const selected = selectGate(scripts);
+    assert.equal(selected, expected, `case ${n} selected gate`);
+    if (selected === null) return;
+
+    // the invariant, asserted independently of the exact string above
+    const { check, typecheck, test: testScript } = scripts;
+    if (check) assert.ok(selected.includes('npm run check'), `case ${n}: declared check must run`);
+    else assert.ok(selected.includes('npm test'), `case ${n}: the test script must run`);
+
+    const typecheckCovered = (check && covers(check, 'typecheck')) || covers(testScript, 'typecheck');
+    if (typecheck && !typecheckCovered) {
+      assert.ok(selected.includes('npm run typecheck'), `case ${n}: declared typecheck must run`);
+    }
+
+    // the runner splits on ' && ' into npm-rooted argv; the rule must stay inside that vocabulary
+    for (const argv of gateSteps(selected)) {
+      assert.equal(argv[0], 'npm', `case ${n}: every step must be an npm invocation`);
+    }
+  });
+}
+
 test('gateSteps: splits npm-only gates into argv arrays, one per step', () => {
   assert.deepEqual(gateSteps('npm test'), [['npm', 'test']]);
   assert.deepEqual(gateSteps('npm run check'), [['npm', 'run', 'check']]);
@@ -86,7 +179,7 @@ test('selectGate: the real package manifests select the recorded strongest gate'
     langfuse: 'npm run typecheck && npm test',
     'pi-beads': 'npm test',
     'pi-subagents': 'npm run check',
-    'pi-superpowers-plus': 'npm test',
+    'pi-superpowers-plus': 'npm run check && npm test',
     statusline: 'npm run check',
   });
 });

@@ -37,23 +37,28 @@ export function covers(scriptText, target) {
   return new RegExp(`\\bnpm\\s+(?:run\\s+)?${escaped}(?![\\w:-])`).test(scriptText);
 }
 
-// The strongest gate a package offers:
-//   `check` when it covers test (prefixed with `typecheck` if `check` itself does not
-//   invoke the typecheck script) > `typecheck && test` > `test`. Nothing declared is
-//   dropped: a selected gate always composes, never replaces, a declared script.
-// The coverage clause is load-bearing: pi-superpowers-plus's `check` is `biome check .`
-// (lint only), so using it would silently stop running its 16 suites.
+// Select the gate that runs every check a package declares, at least once.
+//
+// Order is typecheck -> lint/check -> tests: cheapest and most fundamental first, so a type
+// error fails before the suite runs. A declared script is never dropped, and running one twice
+// is acceptable and deliberate — the gate errs toward repeating a step rather than skipping one.
+// The single transitive exception: `typecheck` is not added when `check` or `test` already
+// invokes it (matched by script text).
+//
+// The coverage clause is load-bearing: pi-superpowers-plus's `check` is `biome check .` (lint
+// only), so its gate is `npm run check && npm test` — the lint runs twice because that package's
+// `test` also lints, which is harmless.
 export function selectGate(scripts) {
   if (!isGated(scripts)) return null;
-  const { check, typecheck } = scripts;
-  if (check && covers(check, 'test')) {
-    // `check` runs the tests; compose rather than replace so a typecheck script that
-    // `check` does not already invoke is added without dropping the rest of `check`.
-    if (!typecheck || covers(check, 'typecheck')) return 'npm run check';
-    return 'npm run typecheck && npm run check';
+  const { check, typecheck, test } = scripts;
+  const checkRunsTests = Boolean(check) && covers(check, 'test');
+  const steps = [];
+  if (typecheck && !(check && covers(check, 'typecheck')) && !covers(test, 'typecheck')) {
+    steps.push('npm run typecheck');
   }
-  if (typecheck) return 'npm run typecheck && npm test';
-  return 'npm test';
+  if (check && !checkRunsTests) steps.push('npm run check');
+  steps.push(checkRunsTests ? 'npm run check' : 'npm test');
+  return steps.join(' && ');
 }
 
 // Auto-discovery: a package is gated iff it declares a non-empty `test` script, so the
