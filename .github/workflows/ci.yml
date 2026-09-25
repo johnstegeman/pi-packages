@@ -104,3 +104,33 @@ jobs:
           sudo mv actionlint /usr/local/bin/
       - name: Lint workflows
         run: actionlint .github/workflows/*.yml
+
+  gates-list:
+    name: Package gate inventory
+    runs-on: ubuntu-latest
+    outputs:
+      packages: ${{ steps.list.outputs.packages }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - id: list
+        run: echo "packages=$(node scripts/ci/package-gate.mjs --list --json)" >> "$GITHUB_OUTPUT"
+
+  package-gates:
+    name: Package gate (${{ matrix.package }})
+    needs: gates-list
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        package: ${{ fromJSON(needs.gates-list.outputs.packages) }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: packages/${{ matrix.package }}/package-lock.json
+      - run: node scripts/ci/package-gate.mjs ${{ matrix.package }}
