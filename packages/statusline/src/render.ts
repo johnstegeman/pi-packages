@@ -329,5 +329,3 @@ export function shortenModel(model: string): string {
 		.replace(/-20\d{6}$/, "")
 		.replace(/-latest$/, "");
 }
-
-const __deliberate_format_break =   1;
