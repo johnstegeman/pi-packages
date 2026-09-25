@@ -77,7 +77,10 @@ Other facts that shape the design:
   package lockfiles at any depth. The two tracked lockfiles survive only because gitignore does not
   apply to already-tracked files — they were committed in the original vendoring commits.
 - Installs are heavy: `packages/pi-subagents/node_modules` is **357 MB**, `pi-superpowers-plus` is **233 MB**.
-- `packages/pi-beads`'s suite declares no dependencies and passes with no install at all.
+- `packages/pi-beads`'s suite declares no `dependencies` — but it **does** declare
+  `peerDependencies: { "@earendil-works/pi-coding-agent": "*" }`, which npm 7+ auto-installs, so its
+  lockfile is large rather than empty. (This plan originally claimed otherwise; corrected after the
+  measurement — see “Measurement”.).
 - `packages/pi-subagents` is an upstream git subtree — AGENTS.md: **do not hand-edit**.
 
 ## Goals / non-goals
@@ -93,7 +96,9 @@ Other facts that shape the design:
 
 **Non-goals**
 
-- Retrofitting `setup-node` onto the four older CI jobs (unrelated drift).
+- Reworking the four older jobs that never call `setup-node` (`manifest`, `deps-mirror`, `sim`,
+  `workflow-lint`). `subtree-smoke` **does** change in this plan: node 20 → 22, so every job that
+  installs a node toolchain agrees on one version.
 - Unifying the three declared biome versions across packages.
 - Generating a lockfile or gate for `ayu` (theme only: no tests, no dependencies).
 - Any edit inside `packages/pi-subagents/` (upstream subtree, synced nightly).
@@ -110,7 +115,9 @@ Other facts that shape the design:
 4. **Per-package gate:** the **strongest gate each package offers** — `check` › `typecheck && test` › `test`.
 5. **Shape:** a matrix CI job plus a shared, tested selection script (Approach C).
 6. **Matrix source:** dynamic — derived from the script's `--list --json`, so the list cannot drift.
-7. **Local/CI parity:** add a `mise.toml` pinning node 20 (what CI uses), and document it.
+7. **Local/CI parity:** add a `mise.toml` pinning the CI node version, and document it. Originally
+   node 20 (matching the then-current `subtree-smoke`); **corrected to node 22** by the measurement —
+   see “Measurement”.
 
 ## Design
 
@@ -207,7 +214,7 @@ out to `npm` is thin. Nothing in the module calls `npx`.
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
-          node-version: 20
+          node-version: 22
       - id: list
         run: echo "packages=$(node scripts/ci/package-gate.mjs --list --json)" >> "$GITHUB_OUTPUT"
 
@@ -223,7 +230,7 @@ out to `npm` is thin. Nothing in the module calls `npx`.
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
-          node-version: 20
+          node-version: 22
           cache: npm
           cache-dependency-path: packages/${{ matrix.package }}/package-lock.json
       - run: node scripts/ci/package-gate.mjs ${{ matrix.package }}
@@ -233,14 +240,18 @@ out to `npm` is thin. Nothing in the module calls `npx`.
 - Each package is its own check in the PR UI — the failure signal a single serial job cannot give.
 - The matrix derives from the script, so CI cannot run a different set than the script's inventory and
   quarantined packages never enter the matrix (the `gates-list` log shows why).
-- `node-version: 20`, matching the existing `subtree-smoke` job. The four older jobs are left alone.
+- `node-version: 22`. Every suite was measured under 22 (see “Measurement”); node 20 cannot strip
+  TypeScript or satisfy the installed `undici`, and fails 5 of 7 suites. `subtree-smoke` moves from 20
+  to 22 as well so the workflow pins a single version.
 
 ### 3. Lockfiles — five new files
 
 `npm install --package-lock-only` in `bifrost`, `hashline-edit`, `langfuse`, `pi-beads`, `statusline`
 (resolves and pins the tree **without** materialising a 200 MB `node_modules`), then commit each.
-`pi-beads` declares no dependencies, so its lockfile is empty by design — it still gets one so
-`npm ci` behaves uniformly. `pi-subagents`'s lockfile is upstream's and is **not** touched.
+`pi-beads` declares no `dependencies` but does declare a `peerDependencies` entry, which npm 7+
+auto-installs, so its lockfile resolves the whole `pi-coding-agent` tree rather than being empty — it
+still gets one so `npm ci` behaves uniformly. `pi-subagents`'s lockfile is upstream's and is **not**
+touched.
 
 ### 4. `.gitignore`
 
@@ -267,14 +278,16 @@ matches CI.
 
 ```toml
 [tools]
-node = "20"
+node = "22"
 ```
 
-CI pins node 20; this machine runs node 26, and the suites have only ever been exercised on 26. Without
-this, a local pass is not evidence for the CI job. CI is unaffected (it uses `actions/setup-node`).
-*This is the one item added on the strength of a conditional offer — it pins the dev node version for
-the whole repo, so veto it here if you'd rather keep node 26 locally and rely on the first CI run as
-the measurement.*
+CI pins a node version and this machine's default differs, so without this a local pass is not
+evidence for the CI job. The pinned version is **22** — the version under which every suite measured
+green (see “Measurement”) — and `subtree-smoke` was moved to 22 at the same time. CI is otherwise
+unaffected (it uses `actions/setup-node`).
+*This item was originally offered conditionally ("if we need node-20 we can add a mise.toml"); the
+measurement then showed node 20 was the wrong pin, so it ships as **22** — with the same bump applied to
+`subtree-smoke` so every node-installing job agrees.*
 
 ### 7. `AGENTS.md`
 
@@ -288,14 +301,48 @@ are committed and `npm ci` is expected in each package.
 ## Measurement and staged enforcement
 
 The first deliverable after the code lands is a real `--all` run producing the inventory for all seven,
-**under node 20** so the result predicts CI. Then per package:
+**under the CI node version (22)** so the result predicts CI. Then per package:
 
 - **green** → enforced;
 - **red** → fixed in this change, **or** added to `QUARANTINED` with a reason and a filed bead.
 
-No third option and no silent omission. If node 20 cannot be provisioned locally, the plan records
-that explicitly and the first CI run is the measurement for any suite that differs — a node-26 pass is
-never presented as evidence for a node-20 job.
+No third option and no silent omission. If the CI node version cannot be provisioned locally, the plan
+records that explicitly and the first CI run is the measurement for any suite that differs — a pass on
+a different node version is never presented as evidence for the CI job.
+
+### Measurement — result, and the two corrections it forced
+
+The staged measurement (task 5) ran `--all` under the pinned node and produced exactly the outcome
+that justified staging it: **2 of 7 suites pass on node 20**, and the five failures decompose into two
+completely different things.
+
+| suite | node 20 | node 22 |
+|---|---|---|
+| `bifrost` | pass | pass |
+| `langfuse` | pass | pass |
+| `hashline-edit` | `ERR_UNKNOWN_FILE_EXTENSION ".ts"` | pass |
+| `pi-beads` | `ERR_UNKNOWN_FILE_EXTENSION ".ts"` | pass |
+| `pi-superpowers-plus` | `ERR_UNKNOWN_FILE_EXTENSION ".ts"` | pass |
+| `pi-subagents` | vitest: `undici webidl.util.markAsUncloneable is not a function` | pass (2129 tests) |
+| `statusline` | 4 biome errors | the **same** 4 biome errors |
+
+1. **Four failures were a defect in this plan, not in any package.** The plan pinned the gate to node
+   20 by reasoning "match `subtree-smoke`" — but that job only runs `typecheck`, never these suites,
+   which is exactly why nobody had noticed they need a newer node (native TypeScript stripping; a
+   newer `undici`). One version bump fixes all four. **Action:** node 20 → **22** in `mise.toml`, both
+   new jobs, and `subtree-smoke` (so the workflow pins one version).
+2. **`statusline` is genuinely red and node-independent** — 3 `format` errors plus 1
+   `assist/source/organizeImports`, all `FIXABLE`. This is the same defect class as the bug this plan
+   exists to fix: an unenforced lint gate that had been failing unnoticed. **Action:** fix it in this
+   change with the package's own pinned biome, so `QUARANTINED` stays empty and all seven suites are
+   enforced.
+3. **The plan's `pi-beads` premise was wrong** — it declares a `peerDependencies` entry, not nothing
+   (corrected above). The implementer reported the disagreement rather than forcing the predicted empty
+   lockfile; that is why the lockfile is large.
+
+Both corrections are recorded as plan amendments in the execution ledger. `QUARANTINED` is expected to
+remain `{}`.
+
 
 ## Tests
 
@@ -353,7 +400,7 @@ Additional criteria this design adds beyond the original AC (they follow from de
 - `.github/workflows/ci.yml` (`gates-list` + `package-gates` jobs)
 - `.gitignore` (lockfile negation)
 - `package.json` (root `scripts.test`)
-- `mise.toml` (new — node 20)
+- `mise.toml` (new — node 22)
 - `AGENTS.md` (Running tests)
 - `packages/{bifrost,hashline-edit,langfuse,pi-beads,statusline}/package-lock.json` (new)
 - possibly `QUARANTINED` entries + filed beads, if the measurement finds a red suite
