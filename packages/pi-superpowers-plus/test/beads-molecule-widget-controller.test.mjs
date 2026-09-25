@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { createMoleculeWidgetController } from "../extensions/beads-molecule-widget-controller.mjs";
+import { createMoleculeWidgetController, resolveBdTimeout } from "../extensions/beads-molecule-widget-controller.mjs";
 
 const raw = (id, current, impl) =>
   JSON.stringify([
@@ -828,6 +828,130 @@ const roots = (entries) => JSON.stringify(entries.map((e) => ({ issue_type: "mol
     String(warns[0][0]).includes("molecule refresh failed"),
     `non-lock throw warns via the refresh-failed path: ${warns[0]}`,
   );
+}
+
+// ---------- resolveBdTimeout: override wins, derive from bd readiness, floor ----------
+{
+  assert.equal(resolveBdTimeout({}), 30_000, "default 30s");
+  assert.equal(resolveBdTimeout({ BEADS_DOLT_READY_TIMEOUT: "60" }), 80_000, "scales with bd readiness");
+  assert.equal(resolveBdTimeout({ PI_BEADS_MOLECULE_TIMEOUT_MS: "45000" }), 45_000, "override wins");
+  assert.equal(
+    resolveBdTimeout({ PI_BEADS_MOLECULE_TIMEOUT_MS: "45000", BEADS_DOLT_READY_TIMEOUT: "60" }),
+    45_000,
+    "override beats derivation",
+  );
+  assert.equal(resolveBdTimeout({ PI_BEADS_MOLECULE_TIMEOUT_MS: "0" }), 30_000, "non-positive override ignored");
+  assert.equal(
+    resolveBdTimeout({ PI_BEADS_MOLECULE_TIMEOUT_MS: "abc", BEADS_DOLT_READY_TIMEOUT: "-5" }),
+    30_000,
+    "invalid ignored",
+  );
+}
+
+// ---------- injected timeoutMs reaches exec opts ----------
+{
+  const seen = [];
+  const controller = createMoleculeWidgetController({
+    exec: async (_cmd, _args, opts) => {
+      seen.push(opts);
+      return { code: 0, stdout: RAW_A, stderr: "" };
+    },
+    subscribeChanges: () => () => {},
+    timeoutMs: 12_345,
+  });
+  controller.bindSession({ ui: makeFakeUi(), cwd: "/repo" });
+  await tick();
+  assert.equal(seen.at(-1)?.timeout, 12_345, "timeoutMs is passed to exec");
+}
+
+const immediateTimers = {
+  setTimeout: (cb) => {
+    cb();
+    return {};
+  },
+  clearTimeout: () => {},
+};
+
+// ---------- cancellation: happy retry is silent and paints ----------
+{
+  const warns = [];
+  const ui = makeFakeUi();
+  let call = 0;
+  const controller = createMoleculeWidgetController({
+    exec: async () => {
+      call += 1;
+      return call === 1
+        ? { code: 1, stdout: "", stderr: "context canceled", killed: true }
+        : { code: 0, stdout: RAW_A, stderr: "" };
+    },
+    subscribeChanges: () => () => {},
+    warn: (...a) => warns.push(a),
+    timers: immediateTimers,
+  });
+  controller.bindSession({ ui, cwd: "/repo" });
+  await tick();
+  assert.equal(call, 2, "cancelled attempt is retried once");
+  assert.equal(warns.length, 0, "happy retry emits no warning");
+  assert.ok(
+    ui.lastLines()?.some((l) => l.includes("Ask clarifying questions")),
+    "frame painted after retry",
+  );
+}
+
+// ---------- cancellation exhausted: one concise warn, prior frame kept ----------
+{
+  const warns = [];
+  const ui = makeFakeUi();
+  let call = 0;
+  const controller = createMoleculeWidgetController({
+    exec: async () => {
+      call += 1;
+      return call === 1
+        ? { code: 0, stdout: RAW_A, stderr: "" }
+        : { code: 1, stdout: "", stderr: "context canceled", killed: true };
+    },
+    subscribeChanges: () => () => {},
+    warn: (...a) => warns.push(a),
+    timers: immediateTimers,
+  });
+  controller.bindSession({ ui, cwd: "/repo" });
+  await tick();
+  assert.ok(
+    ui.lastLines()?.some((l) => l.includes("Ask clarifying questions")),
+    "seeded frame",
+  );
+  const before = call;
+  await controller.refresh();
+  assert.equal(call - before, 2, "cancellation retried once (2 attempts) then gave up");
+  assert.equal(warns.length, 1, "exactly one warning on exhaustion");
+  assert.match(String(warns[0].join(" ")), /molecule refresh timed out after/, "concise distinct warning");
+  assert.ok(
+    ui.lastLines()?.some((l) => l.includes("Ask clarifying questions")),
+    "prior frame kept",
+  );
+}
+
+// ---------- lock errors keep the existing warn path (regression guard) ----------
+{
+  const warns = [];
+  const ui = makeFakeUi();
+  let call = 0;
+  const controller = createMoleculeWidgetController({
+    exec: async () => {
+      call += 1;
+      return call === 1
+        ? { code: 0, stdout: RAW_A, stderr: "" }
+        : { code: 1, stdout: "", stderr: "database is locked by another dolt process" };
+    },
+    subscribeChanges: () => () => {},
+    warn: (...a) => warns.push(a),
+    timers: immediateTimers,
+  });
+  controller.bindSession({ ui, cwd: "/repo" });
+  await tick();
+  await controller.refresh();
+  assert.equal(warns.length, 1, "lock exhaustion warns once via the existing path");
+  assert.match(String(warns[0].join(" ")), /molecule refresh error:/, "existing lock warn preserved");
 }
 
 console.log("beads-molecule-widget-controller: all assertions passed");
