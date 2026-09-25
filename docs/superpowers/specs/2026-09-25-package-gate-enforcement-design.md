@@ -65,6 +65,16 @@ pi-superpowers-plus  check = biome check .        <-- lint only, does NOT run te
                      test  = biome check . && <16 node suites>
 ```
 
+> **Correction (2026-09-25).** The guarantee implied above — and stated in decision 4 — was **not**
+> true. The rule as shipped dropped a declared `check` in two shapes: when `check` did not cover
+> `test` and a `typecheck` existed (it returned `typecheck && test`), and when `check` did not cover
+> `test` and no `typecheck` existed (it returned `test`). The `pi-superpowers-plus` row above is
+> therefore wrong: it ran `npm test` and its `check` (`biome check .`) never ran — the lint happened
+> only because that package's `test` script also lints. Fixed by replacing the rule with an
+> at-least-once composition and an exhaustive property test; see
+> [`2026-09-25-package-gate-select-composition-design.md`](2026-09-25-package-gate-select-composition-design.md).
+> `pi-superpowers-plus` now runs `npm run check && npm test`.
+
 Note: **every package that declares `@biomejs/biome` actually uses it** (`hashline-edit` and
 `statusline` via `check`, `pi-subagents` via `lint`, `pi-superpowers-plus` via `test`). There is no
 dead biome dependency to remove; the versions are declared at three different levels (2.5.3,
