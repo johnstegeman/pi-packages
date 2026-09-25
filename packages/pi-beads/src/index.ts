@@ -33,7 +33,7 @@ import { tmpdir } from "node:os";
 import { promisify } from "node:util";
 import * as path from "node:path";
 import { fileURLToPath } from "node:url";
-import { isDoltLockError, withDoltLockRetry } from "./lock-retry.ts";
+import { classifyBdFailure, formatBdTimeout, withTransientRetry } from "./lock-retry.ts";
 
 const pexec = promisify(execFile);
 
@@ -127,30 +127,39 @@ export default function piBeadsLean(pi: any) {
   const RESOLVE_RETRY_MS = 5000; // failure throttle
 
   // ---- bd runner (execFile = no shell injection); cwd selects which DB bd resolves ----
-  // Every bd call is wrapped in withDoltLockRetry: a transient embedded-dolt lock
-  // (surfaced as non-zero exit + lock text) is retried with bounded backoff, while
-  // any other failure is returned immediately unchanged via the same { ok, out, err }.
+  // Every bd call is wrapped in withTransientRetry: a transient embedded-dolt
+  // lock (non-zero exit + lock text) OR a timeout/cancellation kill is retried
+  // with bounded backoff, while any other failure is returned immediately
+  // unchanged via the same { ok, out, err }. An exhausted cancellation returns a
+  // concise formatted timeout message instead of the raw `context canceled`.
   async function bd(
     args: string[],
     cwd: string = umbrella,
     timeout = 15000,
   ): Promise<{ ok: boolean; out: string; err: string }> {
-    return withDoltLockRetry(async () => {
+    let lastClass: "lock" | "cancel" | null = null;
+    let attempts = 0;
+    const value = await withTransientRetry<{ ok: boolean; out: string; err: string }>(async () => {
+      attempts += 1;
       try {
         const { stdout } = await pexec("bd", args, {
           cwd: cwd || process.cwd(),
           maxBuffer: 8 * 1024 * 1024,
           timeout,
         });
-        return { value: { ok: true, out: stdout ?? "", err: "" }, lock: false };
+        lastClass = null;
+        return { value: { ok: true, out: stdout ?? "", err: "" }, class: null as "lock" | "cancel" | null };
       } catch (e: any) {
         const err = (e?.stderr || e?.message || "bd failed").toString().trim();
-        return {
-          value: { ok: false, out: e?.stdout ?? "", err },
-          lock: isDoltLockError(err),
-        };
+        const cls = classifyBdFailure(err, { killed: e?.killed === true });
+        lastClass = cls;
+        return { value: { ok: false, out: e?.stdout ?? "", err }, class: cls };
       }
     });
+    if (lastClass === "cancel") {
+      return { ok: false, out: "", err: formatBdTimeout(attempts, timeout) };
+    }
+    return value;
   }
 
   // ---- workspace label helpers (multi-worktree disambiguation) ----

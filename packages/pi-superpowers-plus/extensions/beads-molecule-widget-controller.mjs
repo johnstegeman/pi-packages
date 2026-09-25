@@ -11,9 +11,27 @@ import {
   parseMoleculeRoots,
   pickWorkspaceMolecule,
 } from "./beads-molecule-widget.mjs";
-import { isDoltLockError, withDoltLockRetry } from "./dolt-lock-retry.mjs";
+import { classifyBdFailure, withTransientRetry } from "./dolt-lock-retry.mjs";
 
 const MAX_LOG_TEXT = 200;
+const DEFAULT_READY_TIMEOUT_MS = 10_000;
+const READINESS_MARGIN_MS = 20_000;
+const MIN_TIMEOUT_MS = 30_000;
+
+/**
+ * Resolve the per-bd-query timeout. `PI_BEADS_MOLECULE_TIMEOUT_MS` (positive
+ * integer ms) wins outright; otherwise derive from bd's own embedded-Dolt
+ * readiness wait (`BEADS_DOLT_READY_TIMEOUT`, positive integer seconds,
+ * default 10) plus a margin, floored at 30 s so the widget can never fire
+ * before bd itself would give up.
+ */
+export function resolveBdTimeout(env = process.env) {
+  const override = Number.parseInt(env?.PI_BEADS_MOLECULE_TIMEOUT_MS ?? "", 10);
+  if (Number.isInteger(override) && override > 0) return override;
+  const readySecs = Number.parseInt(env?.BEADS_DOLT_READY_TIMEOUT ?? "", 10);
+  const readyMs = Number.isInteger(readySecs) && readySecs >= 1 ? readySecs * 1000 : DEFAULT_READY_TIMEOUT_MS;
+  return Math.max(MIN_TIMEOUT_MS, readyMs + READINESS_MARGIN_MS);
+}
 
 /**
  * Bounded, sanitized log fragment: replaces control characters (including ANSI
@@ -42,6 +60,7 @@ export function createMoleculeWidgetController({
   warn = console.warn,
   windowMs = 10000,
   timers,
+  timeoutMs = resolveBdTimeout(),
 }) {
   let ui = null;
   let cwd = null;
@@ -72,26 +91,60 @@ export function createMoleculeWidgetController({
   }
 
   async function safeExec(args, gen) {
-    // Retry only embedded-dolt lock failures; every other outcome is
-    // returned/rethrown unchanged so the existing warn paths stay intact.
-    const timeout = timers?.setTimeout ?? setTimeout;
+    // Retry transient failures (dolt lock; timeout/cancellation kill) with a
+    // per-class budget. Cancellation exhaustion logs exactly one concise line
+    // and returns null, so callers keep the prior frame without their own
+    // raw-text warns. Lock exhaustion and genuine errors are returned/rethrown
+    // unchanged so the existing warn paths stay intact.
+    const timeoutFn = timers?.setTimeout ?? setTimeout;
+    let lastClass = null;
+    let attempts = 0;
     try {
-      return await withDoltLockRetry(
+      const r = await withTransientRetry(
         async () => {
+          attempts += 1;
+          let res;
+          let killed = false;
+          let text;
           try {
-            const r = await exec("bd", args, { cwd, timeout: 5000 });
-            return {
-              value: r,
-              lock: r.code !== 0 && isDoltLockError(`${r.stdout ?? ""}\n${r.stderr ?? ""}`),
-            };
+            res = await exec("bd", args, { cwd, timeout: timeoutMs });
+            killed = res?.killed === true;
+            text = `${res?.stdout ?? ""}\n${res?.stderr ?? ""}`;
           } catch (err) {
-            const text = String(err?.message ?? err);
-            if (isDoltLockError(text)) return { value: { code: -1, stdout: "", stderr: text }, lock: true };
-            throw err;
+            killed = err?.killed === true;
+            text = String(err?.stderr || err?.message || err);
+            const cls = classifyBdFailure(text, { killed });
+            // Genuine (unclassified) throws keep their original semantics: they
+            // propagate to the outer catch so `molecule refresh failed:` stays.
+            if (!cls) throw err;
+            lastClass = cls;
+            return { value: { code: -1, stdout: "", stderr: text }, class: cls };
           }
+          if (res?.code !== 0 || res?.killed === true) {
+            const cls = classifyBdFailure(text, { killed });
+            lastClass = cls;
+            return { value: res, class: cls };
+          }
+          // A successful bd run is never classified: its output may contain
+          // lock/cancel-ish text without the run itself being a transient
+          // failure, and downgrading it would discard a valid result.
+          lastClass = null;
+          return { value: res, class: null };
         },
-        { sleep: (ms) => new Promise((resolve) => timeout(resolve, ms)) },
+        { sleep: (ms) => new Promise((resolve) => timeoutFn(resolve, ms)) },
       );
+      if (lastClass === "cancel") {
+        if (gen === refreshGen)
+          warn(
+            "[pi-superpowers-plus] molecule refresh timed out after",
+            attempts,
+            "attempts (timeout",
+            timeoutMs,
+            "ms)",
+          );
+        return null;
+      }
+      return r;
     } catch (err) {
       if (gen === refreshGen)
         warn("[pi-superpowers-plus] molecule refresh failed:", sanitizeLogText(err?.message ?? err));

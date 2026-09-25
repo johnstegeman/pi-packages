@@ -1,0 +1,195 @@
+// pi-superpowers-plus transient-retry helper test suite — node:assert, no framework.
+//
+// Pure-module tests: helpers take injectable `attempt`, `budgets`, and `sleep`,
+// so no real timers run here. A fake `sleep` records requested delays.
+import assert from "node:assert/strict";
+
+const { isDoltLockError, isTransientCancellation, classifyBdFailure, withTransientRetry, withDoltLockRetry } =
+  await import("../extensions/dolt-lock-retry.mjs");
+
+let failures = 0;
+async function test(name, fn) {
+  try {
+    await fn();
+    console.log(`ok - ${name}`);
+  } catch (err) {
+    failures++;
+    console.error(`not ok - ${name}`);
+    console.error(err?.stack ?? err);
+  }
+}
+
+await test("isDoltLockError matches embedded-dolt lock text, rejects unrelated", () => {
+  const yes = ["database is locked", "locked by another dolt process", "embeddeddolt: init lock held", "EMBEDDEDDOLT"];
+  const no = ["context canceled", "not a git repository", "", "permission denied"];
+  for (const s of yes) assert.equal(isDoltLockError(s), true, `expected true: ${s}`);
+  for (const s of no) assert.equal(isDoltLockError(s), false, `expected false: ${s}`);
+  assert.equal(isDoltLockError(undefined), false);
+});
+
+await test("isTransientCancellation: killed flag and cancellation text, not lock text", () => {
+  assert.equal(isTransientCancellation("", true), true, "killed flag alone");
+  assert.equal(isTransientCancellation("context canceled", false), true);
+  assert.equal(isTransientCancellation("load custom types: context canceled", false), true);
+  assert.equal(isTransientCancellation("context deadline exceeded", false), true);
+  assert.equal(isTransientCancellation("database is locked", false), false);
+  assert.equal(isTransientCancellation("not a git repository", false), false);
+  assert.equal(isTransientCancellation(undefined, false), false);
+});
+
+await test("classifyBdFailure: lock precedence, cancel, null", () => {
+  assert.equal(classifyBdFailure("database is locked"), "lock");
+  assert.equal(classifyBdFailure("embeddeddolt: init lock held"), "lock");
+  assert.equal(classifyBdFailure("database is locked", { killed: true }), "lock", "lock text wins over killed");
+  assert.equal(classifyBdFailure("", { killed: true }), "cancel", "killed alone");
+  assert.equal(classifyBdFailure("context canceled"), "cancel");
+  assert.equal(classifyBdFailure("context deadline exceeded"), "cancel");
+  assert.equal(classifyBdFailure("not a git repository"), null);
+  assert.equal(classifyBdFailure(""), null);
+});
+
+await test("withTransientRetry: null class returns immediately, no sleep", async () => {
+  const sleeps = [];
+  let calls = 0;
+  const value = await withTransientRetry(
+    async () => {
+      calls++;
+      return { value: "ok", class: null };
+    },
+    { sleep: async (ms) => sleeps.push(ms) },
+  );
+  assert.equal(value, "ok");
+  assert.equal(calls, 1);
+  assert.deepEqual(sleeps, []);
+});
+
+await test("withTransientRetry: cancel budget = 2 attempts, one 250ms sleep", async () => {
+  const sleeps = [];
+  const calls = [];
+  const value = await withTransientRetry(
+    async (n) => {
+      calls.push(n);
+      return { value: `c${n}`, class: "cancel" };
+    },
+    { sleep: async (ms) => sleeps.push(ms) },
+  );
+  assert.equal(value, "c1");
+  assert.deepEqual(calls, [0, 1]);
+  assert.deepEqual(sleeps, [250]);
+});
+
+await test("withTransientRetry: cancel clears on retry", async () => {
+  const sleeps = [];
+  const calls = [];
+  const value = await withTransientRetry(
+    async (n) => {
+      calls.push(n);
+      return n === 0 ? { value: "cancelled", class: "cancel" } : { value: "done", class: null };
+    },
+    { sleep: async (ms) => sleeps.push(ms) },
+  );
+  assert.equal(value, "done");
+  assert.deepEqual(calls, [0, 1]);
+  assert.deepEqual(sleeps, [250]);
+});
+
+await test("withTransientRetry: lock budget unchanged (5 attempts, [50,150,400,900])", async () => {
+  const sleeps = [];
+  const calls = [];
+  const value = await withTransientRetry(
+    async (n) => {
+      calls.push(n);
+      return { value: "locked", class: "lock" };
+    },
+    { sleep: async (ms) => sleeps.push(ms) },
+  );
+  assert.equal(value, "locked");
+  assert.equal(calls.length, 5);
+  assert.deepEqual(sleeps, [50, 150, 400, 900]);
+});
+
+await test("withDoltLockRetry: locked once then succeeds -> one sleep with delaysMs[0]", async () => {
+  const sleeps = [];
+  const calls = [];
+  const value = await withDoltLockRetry(
+    async (n) => {
+      calls.push(n);
+      return n === 0 ? { value: "locked", lock: true } : { value: "done", lock: false };
+    },
+    { attempts: 5, delaysMs: [7, 11, 13], sleep: async (ms) => sleeps.push(ms) },
+  );
+  assert.equal(value, "done");
+  assert.deepEqual(calls, [0, 1]);
+  assert.deepEqual(sleeps, [7]);
+});
+
+await test("withDoltLockRetry: always locked -> attempts calls, attempts-1 sleeps, returns final", async () => {
+  const sleeps = [];
+  const calls = [];
+  const value = await withDoltLockRetry(
+    async (n) => {
+      calls.push(n);
+      return { value: `locked-${n}`, lock: true };
+    },
+    { attempts: 4, delaysMs: [1, 2, 3, 4], sleep: async (ms) => sleeps.push(ms) },
+  );
+  assert.equal(value, "locked-3");
+  assert.deepEqual(calls, [0, 1, 2, 3]);
+  assert.deepEqual(sleeps, [1, 2, 3]);
+});
+
+await test("withDoltLockRetry: non-lock throw propagates immediately, one call", async () => {
+  const sleeps = [];
+  const calls = [];
+  const boom = new Error("not a git repository");
+  await assert.rejects(
+    () =>
+      withDoltLockRetry(
+        async (n) => {
+          calls.push(n);
+          throw boom;
+        },
+        { attempts: 5, delaysMs: [1, 2], sleep: async (ms) => sleeps.push(ms) },
+      ),
+    (err) => err === boom,
+  );
+  assert.deepEqual(calls, [0]);
+  assert.deepEqual(sleeps, []);
+});
+
+await test("withDoltLockRetry: defaults retry 5 times, sleeps [50,150,400,900]", async () => {
+  const sleeps = [];
+  const calls = [];
+  const value = await withDoltLockRetry(
+    async (n) => {
+      calls.push(n);
+      return { value: "locked", lock: true };
+    },
+    { sleep: async (ms) => sleeps.push(ms) },
+  );
+  assert.equal(value, "locked");
+  assert.equal(calls.length, 5);
+  assert.deepEqual(sleeps, [50, 150, 400, 900]);
+});
+
+await test("withTransientRetry: mixed lock/cancel run is bounded by per-class budgets", async () => {
+  const sleeps = [];
+  const calls = [];
+  const classes = ["lock", "cancel", "lock", "lock", "lock", "lock"];
+  const value = await withTransientRetry(
+    async (n) => {
+      calls.push(n);
+      return { value: `v${n}`, class: classes[n] ?? null };
+    },
+    { sleep: async (ms) => sleeps.push(ms) },
+  );
+  assert.equal(value, "v5", "terminates on the final classified value");
+  assert.deepEqual(calls, [0, 1, 2, 3, 4, 5], "bounded to 6 attempts (worst case lock 5 + cancel 2 = 7)");
+  assert.deepEqual(sleeps, [50, 250, 150, 400, 900], "per-class delays interleave with independent budgets");
+});
+
+if (failures > 0) {
+  console.error(`\n${failures} test(s) failed`);
+  process.exit(1);
+}
+console.log("\ndolt-lock-retry: all tests passed");
