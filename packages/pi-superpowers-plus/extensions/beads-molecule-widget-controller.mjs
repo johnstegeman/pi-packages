@@ -112,7 +112,7 @@ export function createMoleculeWidgetController({
             text = `${res?.stdout ?? ""}\n${res?.stderr ?? ""}`;
           } catch (err) {
             killed = err?.killed === true;
-            text = String(err?.stderr ?? err?.message ?? err);
+            text = String(err?.stderr || err?.message || err);
             const cls = classifyBdFailure(text, { killed });
             // Genuine (unclassified) throws keep their original semantics: they
             // propagate to the outer catch so `molecule refresh failed:` stays.
@@ -120,9 +120,16 @@ export function createMoleculeWidgetController({
             lastClass = cls;
             return { value: { code: -1, stdout: "", stderr: text }, class: cls };
           }
-          const cls = classifyBdFailure(text, { killed });
-          lastClass = cls;
-          return { value: res, class: cls };
+          if (res?.code !== 0 || res?.killed === true) {
+            const cls = classifyBdFailure(text, { killed });
+            lastClass = cls;
+            return { value: res, class: cls };
+          }
+          // A successful bd run is never classified: its output may contain
+          // lock/cancel-ish text without the run itself being a transient
+          // failure, and downgrading it would discard a valid result.
+          lastClass = null;
+          return { value: res, class: null };
         },
         { sleep: (ms) => new Promise((resolve) => timeoutFn(resolve, ms)) },
       );

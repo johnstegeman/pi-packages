@@ -872,6 +872,59 @@ const immediateTimers = {
   clearTimeout: () => {},
 };
 
+// ---------- success containing lock-ish text is never retried ----------
+{
+  const warns = [];
+  const ui = makeFakeUi();
+  let calls = 0;
+  const successWithLockText = RAW_A.replace("superpowers-workflow", "superpowers-workflow embeddeddolt");
+  const controller = createMoleculeWidgetController({
+    exec: async () => {
+      calls += 1;
+      return { code: 0, stdout: successWithLockText, stderr: "" };
+    },
+    subscribeChanges: () => () => {},
+    warn: (...a) => warns.push(a),
+    timers: immediateTimers,
+  });
+  controller.bindSession({ ui, cwd: "/repo" });
+  await tick();
+  controller.render();
+  assert.equal(calls, 1, "a code-0 result containing lock text is never retried");
+  assert.equal(warns.length, 0, "a code-0 result emits no warning");
+  assert.ok(
+    ui.lastLines()?.some((l) => l.includes("Ask clarifying questions")),
+    "a code-0 result still paints the frame",
+  );
+}
+
+// ---------- cancellation throw with empty stderr falls back to message ----------
+{
+  const warns = [];
+  const ui = makeFakeUi();
+  let calls = 0;
+  const controller = createMoleculeWidgetController({
+    exec: async () => {
+      calls += 1;
+      const e = new Error("context deadline exceeded");
+      e.stderr = ""; // Node exec attaches an empty stderr on non-flagged variants
+      throw e;
+    },
+    subscribeChanges: () => () => {},
+    warn: (...a) => warns.push(a),
+    timers: immediateTimers,
+  });
+  controller.bindSession({ ui, cwd: "/repo" });
+  await tick();
+  assert.equal(calls, 2, "empty-stderr cancellation throw is classified via message (2 attempts)");
+  assert.equal(warns.length, 1, "cancellation exhaustion warns once");
+  assert.match(
+    String(warns[0].join(" ")),
+    /molecule refresh timed out after/,
+    "classified as cancel, not the raw refresh-failed path",
+  );
+}
+
 // ---------- cancellation: happy retry is silent and paints ----------
 {
   const warns = [];

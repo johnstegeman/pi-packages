@@ -168,6 +168,22 @@ await test("withTransientRetry: null class returns immediately, no sleep", async
   assert.deepEqual(sleeps, []);
 });
 
+await test("withTransientRetry: mixed lock/cancel run is bounded by per-class budgets", async () => {
+  const sleeps = [];
+  const calls = [];
+  const classes = ["lock", "cancel", "lock", "lock", "lock", "lock"];
+  const value = await withTransientRetry(
+    async (n) => {
+      calls.push(n);
+      return { value: `v${n}`, class: classes[n] ?? null };
+    },
+    { sleep: async (ms) => sleeps.push(ms) },
+  );
+  assert.equal(value, "v5", "terminates on the final classified value");
+  assert.deepEqual(calls, [0, 1, 2, 3, 4, 5], "bounded to 6 attempts (worst case lock 5 + cancel 2 = 7)");
+  assert.deepEqual(sleeps, [50, 250, 150, 400, 900], "per-class delays interleave with independent budgets");
+});
+
 if (failures > 0) {
   console.error(`\n${failures} test(s) failed`);
   process.exit(1);
