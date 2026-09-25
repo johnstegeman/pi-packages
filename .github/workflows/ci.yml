@@ -115,8 +115,12 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 22
-      - id: list
-        run: echo "packages=$(node scripts/ci/package-gate.mjs --list --json)" >> "$GITHUB_OUTPUT"
+      - name: List gated packages
+        id: list
+        run: |
+          set -euo pipefail
+          packages="$(node scripts/ci/package-gate.mjs --list --json)"
+          echo "packages=$packages" >> "$GITHUB_OUTPUT"
 
   package-gates:
     name: Package gate (${{ matrix.package }})
@@ -133,4 +137,5 @@ jobs:
           node-version: 22
           cache: npm
           cache-dependency-path: packages/${{ matrix.package }}/package-lock.json
-      - run: node scripts/ci/package-gate.mjs ${{ matrix.package }}
+      - name: Gate ${{ matrix.package }}
+        run: node scripts/ci/package-gate.mjs "${{ matrix.package }}"

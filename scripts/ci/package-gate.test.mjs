@@ -5,7 +5,7 @@ import { execFileSync } from 'node:child_process';
 import { cpSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
-import { PACKAGES_DIR, covers, discoverGated, isGated, main, planRun, selectGate, summarize } from './package-gate.mjs';
+import { PACKAGES_DIR, covers, discoverGated, gateSteps, isGated, main, planRun, runGate, selectGate, summarize } from './package-gate.mjs';
 
 // ---------- isGated ----------
 test('isGated: only a non-empty test script counts', () => {
@@ -44,8 +44,17 @@ for (const [name, scripts, expected] of SHAPES) {
   });
 }
 
-test('selectGate: check that skips the typecheck is not used when typecheck exists', () => {
-  assert.equal(selectGate({ check: 'npm test', typecheck: 'tsc --noEmit', test: 'x' }), 'npm run typecheck && npm test');
+test('selectGate: a check that covers test but not typecheck is composed, not replaced', () => {
+  assert.equal(
+    selectGate({ check: 'npm test', typecheck: 'tsc --noEmit', test: 'x' }),
+    'npm run typecheck && npm run check',
+  );
+});
+
+test('selectGate: composing keeps steps a check performs beyond test', () => {
+  const gate = selectGate({ check: 'biome check . && npm test', typecheck: 'tsc --noEmit', test: 'x' });
+  assert.equal(gate, 'npm run typecheck && npm run check');
+  assert.match(gate, /check/, 'the lint-bearing check script must still run');
 });
 
 test('selectGate: check that covers test with no typecheck script is used as-is', () => {
@@ -54,6 +63,44 @@ test('selectGate: check that covers test with no typecheck script is used as-is'
 
 test('selectGate: not gated -> null', () => {
   assert.equal(selectGate({ build: 'tsc' }), null);
+});
+
+test('gateSteps: splits npm-only gates into argv arrays, one per step', () => {
+  assert.deepEqual(gateSteps('npm test'), [['npm', 'test']]);
+  assert.deepEqual(gateSteps('npm run check'), [['npm', 'run', 'check']]);
+  assert.deepEqual(gateSteps('npm run typecheck && npm run check'), [
+    ['npm', 'run', 'typecheck'],
+    ['npm', 'run', 'check'],
+  ]);
+  for (const gate of ['npm test', 'npm run check', 'npm run typecheck && npm run check']) {
+    assert.equal(gateSteps(gate)[0][0], 'npm');
+  }
+});
+
+// Guard against manifest drift: assert the real packages/*, not a frozen copy.
+test('selectGate: the real package manifests select the recorded strongest gate', () => {
+  const gates = Object.fromEntries(discoverGated(PACKAGES_DIR).map((pkg) => [pkg.name, pkg.gate]));
+  assert.deepEqual(gates, {
+    bifrost: 'npm test',
+    'hashline-edit': 'npm run check',
+    langfuse: 'npm run typecheck && npm test',
+    'pi-beads': 'npm test',
+    'pi-subagents': 'npm run check',
+    'pi-superpowers-plus': 'npm test',
+    statusline: 'npm run check',
+  });
+});
+
+// ---------- runGate: no gate is a failure, never a false PASS ----------
+test('runGate: an un-gated package fails without running anything', () => {
+  const dir = scratchPackages({ alpha: { scripts: { test: 'node -e "process.exit(0)"' } } });
+  try {
+    const result = runGate('ghost', { packagesDir: dir });
+    assert.equal(result.status, 'FAIL');
+    assert.match(result.output, /ghost/);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
 });
 
 // ---------- discoverGated ----------

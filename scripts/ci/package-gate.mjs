@@ -2,7 +2,7 @@
 // Package gate: run each package's strongest available gate with its installed
 // dependencies, so a pull request cannot merge with an unrun lint/typecheck/test suite.
 //
-// Exit codes (CLI, added in Task 2):
+// Exit codes:
 //   0 = every runnable package passed
 //   1 = at least one package failed
 //   2 = usage or configuration error
@@ -33,19 +33,26 @@ export function isGated(scripts) {
 // lookahead keeps `npm run test:coverage` from counting as a `test` invocation.
 export function covers(scriptText, target) {
   if (typeof scriptText !== 'string') return false;
-  return new RegExp(`\\bnpm\\s+(?:run\\s+)?${target}(?![\\w:-])`).test(scriptText);
+  const escaped = String(target).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  return new RegExp(`\\bnpm\\s+(?:run\\s+)?${escaped}(?![\\w:-])`).test(scriptText);
 }
 
 // The strongest gate a package offers:
-//   `check` (when it covers test, and typecheck whenever a typecheck script exists)
-//   > `typecheck && test` > `test`.
+//   `check` when it covers test (prefixed with `typecheck` if `check` itself does not
+//   invoke the typecheck script) > `typecheck && test` > `test`. Nothing declared is
+//   dropped: a selected gate always composes, never replaces, a declared script.
 // The coverage clause is load-bearing: pi-superpowers-plus's `check` is `biome check .`
 // (lint only), so using it would silently stop running its 16 suites.
 export function selectGate(scripts) {
   if (!isGated(scripts)) return null;
-  const check = scripts.check;
-  if (check && covers(check, 'test') && (!scripts.typecheck || covers(check, 'typecheck'))) return 'npm run check';
-  if (scripts.typecheck) return 'npm run typecheck && npm test';
+  const { check, typecheck } = scripts;
+  if (check && covers(check, 'test')) {
+    // `check` runs the tests; compose rather than replace so a typecheck script that
+    // `check` does not already invoke is added without dropping the rest of `check`.
+    if (!typecheck || covers(check, 'typecheck')) return 'npm run check';
+    return 'npm run typecheck && npm run check';
+  }
+  if (typecheck) return 'npm run typecheck && npm test';
   return 'npm test';
 }
 
@@ -114,15 +121,23 @@ function tail(text) {
 export function runGate(name, { packagesDir = PACKAGES_DIR } = {}) {
   const dir = join(packagesDir, name);
   const gated = discoverGated(packagesDir).find((pkg) => pkg.name === name);
-  const gate = gated ? gated.gate : null;
+  if (!gated) {
+    return { name, status: 'FAIL', gate: null, ms: 0, output: `no gate for package: ${name}` };
+  }
+  const gate = gated.gate;
   const started = Date.now();
   const steps = [
     ['npm', ['ci', '--no-audit', '--no-fund']],
-    ...gateSteps(gate ?? '').map((argv) => [argv[0], argv.slice(1)]),
+    ...gateSteps(gate).map((argv) => [argv[0], argv.slice(1)]),
   ];
   for (const [cmd, args] of steps) {
     try {
-      execFileSync(cmd, args, { cwd: dir, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] });
+      execFileSync(cmd, args, {
+        cwd: dir,
+        encoding: 'utf8',
+        stdio: ['ignore', 'pipe', 'pipe'],
+        maxBuffer: 64 * 1024 * 1024,
+      });
     } catch (err) {
       const output = tail(`${err.stdout ?? ''}\n${err.stderr ?? ''}`);
       return { name, status: 'FAIL', gate, ms: Date.now() - started, output };
