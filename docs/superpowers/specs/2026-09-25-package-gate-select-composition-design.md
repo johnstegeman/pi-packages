@@ -195,13 +195,18 @@ whose first element is `npm`, so the rule and the runner cannot drift apart (the
 cases 7, 8 and 9 failing. Without that, the test proves only that it passes, not that it detects the
 bug.
 
-**One existing expectation moves, and one obsolete case is replaced:**
+**Two existing pins are updated, and the new cases add coverage that did not exist before:**
 
-- `SHAPES` and the real-manifest test: `pi-superpowers-plus` → `npm run check && npm test`; the other
-  six unchanged. The real-manifest test keeps reading the actual `packages/*/package.json` files —
-  it is the drift guard, and it is the reason this delta cannot happen silently.
-- The old unit case asserting `npm test` for a `check` that does not cover `test` is **replaced** by
-  cases 7–9. Leaving it would either fail or pin the bug.
+- The six packages other than `pi-superpowers-plus` keep their recorded gate, and the
+  real-manifest test keeps reading the actual `packages/*/package.json` files — it is the drift
+  guard, and it is the reason this delta cannot happen silently.
+- The **two** pins encoding the old result — the `SHAPES` entry for `pi-superpowers-plus`
+  (`package-gate.test.mjs:32`) and its expectation in the real-manifest test (`:89`) — are **updated**
+  to `npm run check && npm test`. They are the only two places asserting the old behaviour, and
+  leaving either would fail. (They are updates, not replacements: cases 7–9 add coverage that simply
+  did not exist before, which is why this class survived two previous rounds of tests.)
+- The four standalone `selectGate` cases at `:47-66` (covers-test-not-typecheck; composing keeps
+  steps; covers-test-no-typecheck; not-gated) stay valid unchanged.
 
 **Untouched:** the process-level tests (`runGate`, `main`, quarantine, CLI) and every package's own
 tests.
