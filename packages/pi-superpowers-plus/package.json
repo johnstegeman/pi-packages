@@ -6,7 +6,7 @@
     "pi-package"
   ],
   "scripts": {
-    "test": "biome check . && node test/beads-molecule-widget.test.mjs && node test/beads-molecule-widget-controller.test.mjs && node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON test/beads-molecule-widget-adapter.test.mjs && node test/phase-commands.test.mjs && node test/set-phase.test.mjs && node test/subagent-models.test.mjs && node test/formula-seed.test.mjs && node test/agent-dispatch-guard.test.mjs && node test/agent-templates.test.mjs && node test/skills-contract.test.mjs && node skills/subagent-driven-development/scripts/final-review.test.mjs && node skills/subagent-driven-development/scripts/fix-loop.test.mjs && node skills/subagent-driven-development/scripts/wave-parallel.test.mjs && node skills/subagent-driven-development/scripts/named-agents.test.mjs",
+    "test": "biome check . && node test/dolt-lock-retry.test.mjs && node test/beads-molecule-widget.test.mjs && node test/beads-molecule-widget-controller.test.mjs && node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON test/beads-molecule-widget-adapter.test.mjs && node test/phase-commands.test.mjs && node test/set-phase.test.mjs && node test/subagent-models.test.mjs && node test/formula-seed.test.mjs && node test/agent-dispatch-guard.test.mjs && node test/agent-templates.test.mjs && node test/skills-contract.test.mjs && node skills/subagent-driven-development/scripts/final-review.test.mjs && node skills/subagent-driven-development/scripts/fix-loop.test.mjs && node skills/subagent-driven-development/scripts/wave-parallel.test.mjs && node skills/subagent-driven-development/scripts/named-agents.test.mjs",
     "lint": "biome check .",
     "check": "biome check ."
   },
