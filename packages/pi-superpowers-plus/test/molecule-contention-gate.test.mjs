@@ -304,4 +304,66 @@ const okResult = (stdout = "[]") => ({ code: 0, stdout, stderr: "" });
   assert.deepEqual(delays, [150]);
 }
 
+// ---------- injectable options: the cooldown ramp and retry delay honor overrides ----------
+{
+  const clock = makeClock();
+  const { delays, sleep } = makeSleep();
+  const gate = createContentionGate({
+    exec: async () => lockResult(),
+    now: clock.now,
+    sleep,
+    retryDelayMs: 40,
+    initialCooldownMs: 1000,
+    maxCooldownMs: 3000,
+  });
+  const seen = [];
+  for (let i = 0; i < 4; i += 1) {
+    const r = await gate.run(["list"], {});
+    seen.push(r.retryAfterMs);
+    clock.advance(r.retryAfterMs);
+  }
+  assert.deepEqual(
+    seen,
+    [1000, 2000, 3000, 3000],
+    "the ramp starts at the injected initialCooldownMs and caps at maxCooldownMs",
+  );
+  assert.deepEqual(delays, [40, 40, 40, 40], "the retry sleep is the injected retryDelayMs");
+}
+
+// ---------- injectable classify overrides the default verdicts ----------
+{
+  const clock = makeClock();
+  const { sleep } = makeSleep();
+  // Rejects the default lock class and recognizes only its own marker.
+  const custom = (text) => {
+    const t = String(text ?? "");
+    if (/custom-transient/.test(t)) return "custom";
+    return null;
+  };
+  let mode = "lock";
+  let calls = 0;
+  const gate = createContentionGate({
+    exec: async () => {
+      calls += 1;
+      return mode === "lock"
+        ? lockResult() // default classifier: transient
+        : { code: 1, stdout: "", stderr: "custom-transient" };
+    },
+    now: clock.now,
+    sleep,
+    classify: custom,
+  });
+  const genuine = await gate.run(["list"], {});
+  assert.equal(genuine.status, "ok", "the injected classifier decides, not the default");
+  assert.equal(genuine.result.code, 1, "a lock the injected classifier rejects is passed through");
+  assert.equal(calls, 1, "no retry when the injected classifier says genuine");
+  assert.equal(gate.isCoolingDown(), false, "no cooldown for a classifier-rejected lock");
+
+  mode = "custom";
+  calls = 0;
+  const transient = await gate.run(["list"], {});
+  assert.equal(transient.status, "contended", "text the injected classifier marks transient is retried");
+  assert.equal(calls, 2, "one quick retry");
+}
+
 console.log("molecule-contention-gate: all assertions passed");

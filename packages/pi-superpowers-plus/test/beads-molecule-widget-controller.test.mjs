@@ -803,6 +803,9 @@ const roots = (entries) => JSON.stringify(entries.map((e) => ({ issue_type: "mol
   await tick();
   assert.equal(listCalls, 2, "persistent lock gets exactly one quick retry");
   assert.equal(warns.length, 0, "a contention episode is silent");
+  const frozen = listCalls;
+  await controller.refresh();
+  assert.equal(listCalls, frozen, "a subsequent refresh issues zero bd calls: the cooldown engaged");
 }
 
 // ---------- dolt lock: a non-lock throw is never retried, warns once ----------
@@ -1103,6 +1106,11 @@ const immediateTimers = {
   await tick();
   assert.equal(calls.length - before, 1, "the bypass probe is a single attempt (no retry)");
   assert.equal(warns.length, 0, "the bypass probe is silent");
+  controller.render();
+  assert.ok(
+    ui.lastLines()?.some((l) => l.includes("Ask clarifying questions")),
+    "prior frame is still displayed while the cooldown is active",
+  );
 
   clock.advance(2500);
   const beforeCooldown = calls.length;
@@ -1116,6 +1124,67 @@ const immediateTimers = {
   assert.ok(
     ui.lastLines()?.some((l) => l.includes("Ask clarifying questions")),
     "frame painted after resuming",
+  );
+}
+
+// ---------- contention: agent_start forced probe is a one-shot grant per refresh ----------
+{
+  const warns = [];
+  const ui = makeFakeUi();
+  const clock = makeClock();
+  const calls = [];
+  let phase = "seed";
+  const controller = createMoleculeWidgetController({
+    exec: async (cmd, args) => {
+      calls.push([cmd, ...args]);
+      if (args[0] === "list") {
+        if (phase === "seed")
+          return { code: 0, stdout: roots([{ id: "bd-mol-A", updated_at: "2026-01-01" }]), stderr: "" };
+        if (phase === "cooldown")
+          return { code: 1, stdout: "", stderr: "database is locked by another dolt process" };
+        return {
+          code: 0,
+          stdout: roots([
+            { id: "bd-mol-A", updated_at: "2026-02-01" },
+            { id: "bd-mol-B", updated_at: "2026-01-01" },
+          ]),
+          stderr: "",
+        };
+      }
+      if (phase === "seed") return { code: 0, stdout: rawFinished("bd-mol-A"), stderr: "" };
+      return { code: 1, stdout: "", stderr: "database is locked by another dolt process" };
+    },
+    subscribeChanges: () => () => {},
+    warn: (...a) => warns.push(a),
+    timers: immediateTimers,
+    now: clock.now,
+  });
+  controller.bindSession({ ui, cwd: "/repo", workspaceKey: "k1" });
+  await tick();
+  assert.ok(
+    ui.lastLines()?.some((l) => l.includes("finished")),
+    `finished frame seeded (lock released): ${ui.lastLines()}`,
+  );
+
+  phase = "cooldown";
+  await controller.refresh(); // 2 attempts -> contended -> 2500ms cooldown
+  assert.equal(warns.length, 0, "the contention episode is silent");
+
+  phase = "storm";
+  calls.length = 0;
+  await controller.setCwd("/repo", { workspaceKey: "k1" }); // agent_start: one force grant
+  await tick();
+
+  assert.equal(
+    calls.length,
+    3,
+    `one forced list probe + root 1's one-retry path, root 2 suppressed: ${JSON.stringify(calls)}`,
+  );
+  assert.equal(warns.length, 0, "the forced-probe refresh stays silent");
+  controller.render();
+  assert.ok(
+    ui.lastLines()?.some((l) => l.includes("finished")),
+    `prior frame kept through the forced-probe refresh: ${ui.lastLines()}`,
   );
 }
 

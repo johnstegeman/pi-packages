@@ -88,7 +88,7 @@ bd dolt killall  # kill orphan dolt sql-server processes for this repo's data di
 ```
 
 Reverting to the default is a re-init of the workspace against the embedded engine; back up
-first (`bd backup`) if the database holds work you care about.
+first (`bd backup init <path>` then `bd backup sync`) if the database holds work you care about.
 
 ## Trade-offs
 

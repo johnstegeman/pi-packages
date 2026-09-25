@@ -64,9 +64,12 @@ export function createContentionGate({
   }
 
   async function run(args, execOpts = {}, { force = false } = {}) {
-    const cooling = now() < cooldownUntil;
+    // Read the clock once so the suppression decision and the reported
+    // retryAfterMs are derived from the same instant.
+    const nowMs = now();
+    const cooling = nowMs < cooldownUntil;
     if (cooling && !force) {
-      return { status: "contended", retryAfterMs: cooldownUntil - now() };
+      return { status: "contended", retryAfterMs: cooldownUntil - nowMs };
     }
 
     if (cooling && force) {

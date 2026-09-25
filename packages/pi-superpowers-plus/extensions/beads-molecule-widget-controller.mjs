@@ -149,14 +149,17 @@ export function createMoleculeWidgetController({
     lockedMoleculeId = null;
   }
 
-  async function refreshWorkspace(gen, { force = false } = {}) {
+  async function refreshWorkspace(gen, grantForce) {
     const listR = await safeExec(
       ["list", "--type", "molecule", "--label", `ws:${activeWorkspaceKey}`, "--json"],
       gen,
-      { force },
+      { force: grantForce() },
     );
     if (gen !== refreshGen) return;
-    if (!listR) return; // exec threw; safeExec warned, keep the prior frame
+    // null has two sources: a silent "contended" suppression (gate cooling, no
+    // warn) or a generation-guarded "error" (safeExec warned). Either way the
+    // prior frame is kept.
+    if (!listR) return;
     if (listR.code !== 0) {
       if (isCleanNotFound(listR)) clearFrame();
       else
@@ -175,7 +178,7 @@ export function createMoleculeWidgetController({
       const anyWs = await safeExec(
         ["list", "--type", "molecule", "--label-pattern", "ws:*", "--json"],
         gen,
-        { force },
+        { force: grantForce() },
       );
       if (gen !== refreshGen) return;
       if (!anyWs || anyWs.code !== 0) return; // can't confirm; keep prior frame, never adopt unscoped global
@@ -183,7 +186,7 @@ export function createMoleculeWidgetController({
         clearFrame();
         return;
       }
-      const gR = await safeExec(["mol", "current", "--json"], gen, { force });
+      const gR = await safeExec(["mol", "current", "--json"], gen, { force: grantForce() });
       if (gen !== refreshGen || !gR) return;
       if (gR.code !== 0) {
         if (isCleanNotFound(gR)) clearFrame();
@@ -203,7 +206,7 @@ export function createMoleculeWidgetController({
     const candidates = [];
     let sawError = false;
     for (const root of found) {
-      const r = await safeExec(["mol", "current", root.id, "--json"], gen, { force });
+      const r = await safeExec(["mol", "current", root.id, "--json"], gen, { force: grantForce() });
       if (gen !== refreshGen) return;
       if (!r) {
         sawError = true;
@@ -234,22 +237,28 @@ export function createMoleculeWidgetController({
   async function refresh({ force = false } = {}) {
     if (!cwd) return;
     const gen = ++refreshGen;
+    // agent_start hands us a one-probe bypass, but it must be a one-shot grant
+    // per refresh: only the first bd call may consume it. Later calls in the
+    // same refresh see force=false and stay suppressed while cooling, so an
+    // N-root workspace cannot re-take the lock N times in one turn.
+    let forceLeft = force ? 1 : 0;
+    const grantForce = () => (forceLeft > 0 ? (forceLeft -= 1, true) : false);
 
     if (hasLockedMolecule(lockedMoleculeId)) {
-      const r = await safeExec(nextRefreshArgs(lockedMoleculeId), gen, { force });
+      const r = await safeExec(nextRefreshArgs(lockedMoleculeId), gen, { force: grantForce() });
       if (gen !== refreshGen) return;
       applySingleResult(r, true);
       return;
     }
 
     if (!activeWorkspaceKey) {
-      const r = await safeExec(nextRefreshArgs(null), gen, { force });
+      const r = await safeExec(nextRefreshArgs(null), gen, { force: grantForce() });
       if (gen !== refreshGen) return;
       applySingleResult(r, false);
       return;
     }
 
-    await refreshWorkspace(gen, { force });
+    await refreshWorkspace(gen, grantForce);
   }
 
   function refreshAndRender({ force = false } = {}) {
