@@ -126,6 +126,10 @@ export function selectGate(scripts) {
   return steps.join(' && ');
 }
 ```
+> Note: the header **as shipped** qualifies the "never dropped" guarantee for the two documented
+> limitations in §Residual limitation below — the text inference cannot see a standalone script that
+> nothing references, and a script that merely *mentions* an invocation can suppress a step. The
+> residual error mode errs toward duplication rather than omission.
 
 **The invariant**, which the property test asserts independently of the expected strings:
 

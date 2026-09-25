@@ -50,12 +50,6 @@ export function covers(scriptText, target) {
 // transitive exception: `typecheck` is not added when `check` or `test` already invokes it
 // (matched by script text).
 //
-// Order is typecheck -> lint/check -> tests: cheapest and most fundamental first, so a type
-// error fails before the suite runs. A declared script is never dropped, and running one twice
-// is acceptable and deliberate — the gate errs toward repeating a step rather than skipping one.
-// The single transitive exception: `typecheck` is not added when `check` or `test` already
-// invokes it (matched by script text).
-//
 // The coverage clause is load-bearing: pi-superpowers-plus's `check` is `biome check .` (lint
 // only), so its gate is `npm run check && npm test` — the lint runs twice because that package's
 // `test` also lints, which is harmless.
