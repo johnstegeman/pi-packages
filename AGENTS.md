@@ -30,10 +30,15 @@ script exists.
 - **The inventory:** `node scripts/ci/package-gate.mjs --list` shows which gate each package
   runs; `--list --json` is what CI uses to build its matrix.
 
-For each package the gate picks the **strongest script it declares** — `check` when it covers
-both the tests and the typecheck, otherwise `typecheck && test`, otherwise `test`. So
-`pi-superpowers-plus` runs `npm test` (its `check` is lint-only and would skip 16 suites),
-while `hashline-edit`, `statusline` and `pi-subagents` run `npm run check`.
+For each package the gate composes **each declared `check` / `typecheck` / `test` script, at
+least once** — in the order `typecheck`, then lint/`check`, then tests. So a step can run twice: the
+gate deliberately errs toward repeating a step rather than skipping one. The rule only knows those
+three script names and infers coverage from script text, so it misses a standalone script nothing
+references and can be fooled by a script that merely mentions an invocation (see the gate spec's
+"Residual limitation"). Concretely,
+`pi-superpowers-plus` runs `npm run check && npm test` (its `check` is lint-only, and its `test`
+also lints — the lint runs twice, which is harmless), while `hashline-edit`, `statusline` and
+`pi-subagents` run `npm run check`.
 
 Installs are deterministic: every package has a committed `package-lock.json` and the gate
 installs with `npm ci`, never a floating `npm install`. Add `npm ci` after changing a

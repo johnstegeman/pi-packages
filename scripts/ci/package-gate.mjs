@@ -1,5 +1,5 @@
 // scripts/ci/package-gate.mjs
-// Package gate: run each package's strongest available gate with its installed
+// Package gate: run each package's composed gate with its installed
 // dependencies, so a pull request cannot merge with an unrun lint/typecheck/test suite.
 //
 // Exit codes:
@@ -37,23 +37,33 @@ export function covers(scriptText, target) {
   return new RegExp(`\\bnpm\\s+(?:run\\s+)?${escaped}(?![\\w:-])`).test(scriptText);
 }
 
-// The strongest gate a package offers:
-//   `check` when it covers test (prefixed with `typecheck` if `check` itself does not
-//   invoke the typecheck script) > `typecheck && test` > `test`. Nothing declared is
-//   dropped: a selected gate always composes, never replaces, a declared script.
-// The coverage clause is load-bearing: pi-superpowers-plus's `check` is `biome check .`
-// (lint only), so using it would silently stop running its 16 suites.
+// Select the gate that runs each declared `check` / `typecheck` / `test` script at least once.
+//
+// Order is typecheck -> lint/check -> tests: cheapest and most fundamental first, so a type
+// error fails before the suite runs. Each of those three declared scripts is composed in, and
+// running one twice is acceptable and deliberate — the gate errs toward repeating a step rather
+// than skipping one. The rule only knows these three script names, and it decides coverage by
+// matching script text: a standalone script that nothing references is not run, and a script that
+// merely mentions an invocation can suppress a step. Both are documented limitations — see
+// "Residual limitation" in
+// docs/superpowers/specs/2026-09-25-package-gate-select-composition-design.md. The single
+// transitive exception: `typecheck` is not added when `check` or `test` already invokes it
+// (matched by script text).
+//
+// The coverage clause is load-bearing: pi-superpowers-plus's `check` is `biome check .` (lint
+// only), so its gate is `npm run check && npm test` — the lint runs twice because that package's
+// `test` also lints, which is harmless.
 export function selectGate(scripts) {
   if (!isGated(scripts)) return null;
-  const { check, typecheck } = scripts;
-  if (check && covers(check, 'test')) {
-    // `check` runs the tests; compose rather than replace so a typecheck script that
-    // `check` does not already invoke is added without dropping the rest of `check`.
-    if (!typecheck || covers(check, 'typecheck')) return 'npm run check';
-    return 'npm run typecheck && npm run check';
+  const { check, typecheck, test } = scripts;
+  const checkRunsTests = Boolean(check) && covers(check, 'test');
+  const steps = [];
+  if (typecheck && !(check && covers(check, 'typecheck')) && !covers(test, 'typecheck')) {
+    steps.push('npm run typecheck');
   }
-  if (typecheck) return 'npm run typecheck && npm test';
-  return 'npm test';
+  if (check && !checkRunsTests) steps.push('npm run check');
+  steps.push(checkRunsTests ? 'npm run check' : 'npm test');
+  return steps.join(' && ');
 }
 
 // Auto-discovery: a package is gated iff it declares a non-empty `test` script, so the
