@@ -11,7 +11,7 @@ import {
   parseMoleculeRoots,
   pickWorkspaceMolecule,
 } from "./beads-molecule-widget.mjs";
-import { classifyBdFailure, withTransientRetry } from "./dolt-lock-retry.mjs";
+import { createContentionGate } from "./molecule-contention-gate.mjs";
 
 const MAX_LOG_TEXT = 200;
 const DEFAULT_READY_TIMEOUT_MS = 10_000;
@@ -61,6 +61,8 @@ export function createMoleculeWidgetController({
   windowMs = 10000,
   timers,
   timeoutMs = resolveBdTimeout(),
+  contentionGate = null,
+  now = () => Date.now(),
 }) {
   let ui = null;
   let cwd = null;
@@ -90,66 +92,30 @@ export function createMoleculeWidgetController({
     }
   }
 
+  // All bd calls cross this gate, so a contention cooldown suppresses the whole
+  // refresh (workspace probe + per-root loop) instead of re-taking the lock.
+  const gate =
+    contentionGate ??
+    createContentionGate({
+      exec,
+      now,
+      sleep: (ms) => new Promise((resolve) => (timers?.setTimeout ?? setTimeout)(resolve, ms)),
+    });
+
   async function safeExec(args, gen) {
-    // Retry transient failures (dolt lock; timeout/cancellation kill) with a
-    // per-class budget. Cancellation exhaustion logs exactly one concise line
-    // and returns null, so callers keep the prior frame without their own
-    // raw-text warns. Lock exhaustion and genuine errors are returned/rethrown
-    // unchanged so the existing warn paths stay intact.
-    const timeoutFn = timers?.setTimeout ?? setTimeout;
-    let lastClass = null;
-    let attempts = 0;
-    try {
-      const r = await withTransientRetry(
-        async () => {
-          attempts += 1;
-          let res;
-          let killed = false;
-          let text;
-          try {
-            res = await exec("bd", args, { cwd, timeout: timeoutMs });
-            killed = res?.killed === true;
-            text = `${res?.stdout ?? ""}\n${res?.stderr ?? ""}`;
-          } catch (err) {
-            killed = err?.killed === true;
-            text = String(err?.stderr || err?.message || err);
-            const cls = classifyBdFailure(text, { killed });
-            // Genuine (unclassified) throws keep their original semantics: they
-            // propagate to the outer catch so `molecule refresh failed:` stays.
-            if (!cls) throw err;
-            lastClass = cls;
-            return { value: { code: -1, stdout: "", stderr: text }, class: cls };
-          }
-          if (res?.code !== 0 || res?.killed === true) {
-            const cls = classifyBdFailure(text, { killed });
-            lastClass = cls;
-            return { value: res, class: cls };
-          }
-          // A successful bd run is never classified: its output may contain
-          // lock/cancel-ish text without the run itself being a transient
-          // failure, and downgrading it would discard a valid result.
-          lastClass = null;
-          return { value: res, class: null };
-        },
-        { sleep: (ms) => new Promise((resolve) => timeoutFn(resolve, ms)) },
-      );
-      if (lastClass === "cancel") {
-        if (gen === refreshGen)
-          warn(
-            "[pi-superpowers-plus] molecule refresh timed out after",
-            attempts,
-            "attempts (timeout",
-            timeoutMs,
-            "ms)",
-          );
-        return null;
-      }
-      return r;
-    } catch (err) {
+    // "contended" maps onto the existing null sentinel: callers keep the prior
+    // frame with no warn. Genuine errors keep their warn paths.
+    const r = await gate.run(args, { cwd, timeout: timeoutMs });
+    if (r.status === "contended") return null;
+    if (r.status === "error") {
       if (gen === refreshGen)
-        warn("[pi-superpowers-plus] molecule refresh failed:", sanitizeLogText(err?.message ?? err));
+        warn(
+          "[pi-superpowers-plus] molecule refresh failed:",
+          sanitizeLogText(r.error?.message ?? r.error),
+        );
       return null;
     }
+    return r.result;
   }
 
   function applySingleResult(r, queriedById) {
