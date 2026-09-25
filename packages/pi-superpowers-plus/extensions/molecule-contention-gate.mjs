@@ -39,8 +39,7 @@ export function createContentionGate({
   }
 
   function enterCooldown() {
-    currentCooldownMs =
-      currentCooldownMs > 0 ? Math.min(currentCooldownMs * 2, maxCooldownMs) : initialCooldownMs;
+    currentCooldownMs = currentCooldownMs > 0 ? Math.min(currentCooldownMs * 2, maxCooldownMs) : initialCooldownMs;
     cooldownUntil = now() + currentCooldownMs;
     return currentCooldownMs;
   }

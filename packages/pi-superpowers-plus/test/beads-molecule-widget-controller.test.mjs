@@ -1074,7 +1074,6 @@ const immediateTimers = {
   assert.equal(calls.length, 2, "one list probe + one by-id mol current, no retries");
 }
 
-
 // ---------- contention: agent_start gets one silent probe per turn ----------
 {
   const warns = [];
@@ -1140,8 +1139,7 @@ const immediateTimers = {
       if (args[0] === "list") {
         if (phase === "seed")
           return { code: 0, stdout: roots([{ id: "bd-mol-A", updated_at: "2026-01-01" }]), stderr: "" };
-        if (phase === "cooldown")
-          return { code: 1, stdout: "", stderr: "database is locked by another dolt process" };
+        if (phase === "cooldown") return { code: 1, stdout: "", stderr: "database is locked by another dolt process" };
         return {
           code: 0,
           stdout: roots([

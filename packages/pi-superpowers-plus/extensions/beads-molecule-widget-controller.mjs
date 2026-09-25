@@ -109,10 +109,7 @@ export function createMoleculeWidgetController({
     if (r.status === "contended") return null;
     if (r.status === "error") {
       if (gen === refreshGen)
-        warn(
-          "[pi-superpowers-plus] molecule refresh failed:",
-          sanitizeLogText(r.error?.message ?? r.error),
-        );
+        warn("[pi-superpowers-plus] molecule refresh failed:", sanitizeLogText(r.error?.message ?? r.error));
       return null;
     }
     return r.result;
@@ -150,11 +147,9 @@ export function createMoleculeWidgetController({
   }
 
   async function refreshWorkspace(gen, grantForce) {
-    const listR = await safeExec(
-      ["list", "--type", "molecule", "--label", `ws:${activeWorkspaceKey}`, "--json"],
-      gen,
-      { force: grantForce() },
-    );
+    const listR = await safeExec(["list", "--type", "molecule", "--label", `ws:${activeWorkspaceKey}`, "--json"], gen, {
+      force: grantForce(),
+    });
     if (gen !== refreshGen) return;
     // null has two sources: a silent "contended" suppression (gate cooling, no
     // warn) or a generation-guarded "error" (safeExec warned). Either way the
@@ -175,11 +170,9 @@ export function createMoleculeWidgetController({
       // Multi-worktree guard: if any ws:-stamped open molecule exists and none is
       // ours (found.length === 0), another worktree owns an active cycle — never
       // adopt an unscoped global candidate in that case.
-      const anyWs = await safeExec(
-        ["list", "--type", "molecule", "--label-pattern", "ws:*", "--json"],
-        gen,
-        { force: grantForce() },
-      );
+      const anyWs = await safeExec(["list", "--type", "molecule", "--label-pattern", "ws:*", "--json"], gen, {
+        force: grantForce(),
+      });
       if (gen !== refreshGen) return;
       if (!anyWs || anyWs.code !== 0) return; // can't confirm; keep prior frame, never adopt unscoped global
       if (parseMoleculeRoots(anyWs.stdout).length > 0) {
@@ -242,7 +235,11 @@ export function createMoleculeWidgetController({
     // same refresh see force=false and stay suppressed while cooling, so an
     // N-root workspace cannot re-take the lock N times in one turn.
     let forceLeft = force ? 1 : 0;
-    const grantForce = () => (forceLeft > 0 ? (forceLeft -= 1, true) : false);
+    const grantForce = () => {
+      if (forceLeft <= 0) return false;
+      forceLeft -= 1;
+      return true;
+    };
 
     if (hasLockedMolecule(lockedMoleculeId)) {
       const r = await safeExec(nextRefreshArgs(lockedMoleculeId), gen, { force: grantForce() });
@@ -301,7 +298,8 @@ export function createMoleculeWidgetController({
   function setCwd(nextCwd, { refresh: doRefresh = true, workspaceKey: nextKey } = {}) {
     applyWorkspaceKey(nextKey);
     cwd = nextCwd ?? cwd;
-    if (doRefresh) refreshAndRender({ force: true }); // agent_start: one probe per turn
+    if (doRefresh)
+      refreshAndRender({ force: true }); // agent_start: one probe per turn
     else render();
   }
 
