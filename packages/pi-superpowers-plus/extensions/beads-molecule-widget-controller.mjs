@@ -11,7 +11,7 @@ import {
   parseMoleculeRoots,
   pickWorkspaceMolecule,
 } from "./beads-molecule-widget.mjs";
-import { classifyBdFailure, withTransientRetry } from "./dolt-lock-retry.mjs";
+import { createContentionGate } from "./molecule-contention-gate.mjs";
 
 const MAX_LOG_TEXT = 200;
 const DEFAULT_READY_TIMEOUT_MS = 10_000;
@@ -61,6 +61,8 @@ export function createMoleculeWidgetController({
   windowMs = 10000,
   timers,
   timeoutMs = resolveBdTimeout(),
+  contentionGate = null,
+  now = () => Date.now(),
 }) {
   let ui = null;
   let cwd = null;
@@ -90,66 +92,27 @@ export function createMoleculeWidgetController({
     }
   }
 
-  async function safeExec(args, gen) {
-    // Retry transient failures (dolt lock; timeout/cancellation kill) with a
-    // per-class budget. Cancellation exhaustion logs exactly one concise line
-    // and returns null, so callers keep the prior frame without their own
-    // raw-text warns. Lock exhaustion and genuine errors are returned/rethrown
-    // unchanged so the existing warn paths stay intact.
-    const timeoutFn = timers?.setTimeout ?? setTimeout;
-    let lastClass = null;
-    let attempts = 0;
-    try {
-      const r = await withTransientRetry(
-        async () => {
-          attempts += 1;
-          let res;
-          let killed = false;
-          let text;
-          try {
-            res = await exec("bd", args, { cwd, timeout: timeoutMs });
-            killed = res?.killed === true;
-            text = `${res?.stdout ?? ""}\n${res?.stderr ?? ""}`;
-          } catch (err) {
-            killed = err?.killed === true;
-            text = String(err?.stderr || err?.message || err);
-            const cls = classifyBdFailure(text, { killed });
-            // Genuine (unclassified) throws keep their original semantics: they
-            // propagate to the outer catch so `molecule refresh failed:` stays.
-            if (!cls) throw err;
-            lastClass = cls;
-            return { value: { code: -1, stdout: "", stderr: text }, class: cls };
-          }
-          if (res?.code !== 0 || res?.killed === true) {
-            const cls = classifyBdFailure(text, { killed });
-            lastClass = cls;
-            return { value: res, class: cls };
-          }
-          // A successful bd run is never classified: its output may contain
-          // lock/cancel-ish text without the run itself being a transient
-          // failure, and downgrading it would discard a valid result.
-          lastClass = null;
-          return { value: res, class: null };
-        },
-        { sleep: (ms) => new Promise((resolve) => timeoutFn(resolve, ms)) },
-      );
-      if (lastClass === "cancel") {
-        if (gen === refreshGen)
-          warn(
-            "[pi-superpowers-plus] molecule refresh timed out after",
-            attempts,
-            "attempts (timeout",
-            timeoutMs,
-            "ms)",
-          );
-        return null;
-      }
-      return r;
-    } catch (err) {
+  // All bd calls cross this gate, so a contention cooldown suppresses the whole
+  // refresh (workspace probe + per-root loop) instead of re-taking the lock.
+  const gate =
+    contentionGate ??
+    createContentionGate({
+      exec,
+      now,
+      sleep: (ms) => new Promise((resolve) => (timers?.setTimeout ?? setTimeout)(resolve, ms)),
+    });
+
+  async function safeExec(args, gen, { force = false } = {}) {
+    // "contended" maps onto the existing null sentinel: callers keep the prior
+    // frame with no warn. Genuine errors keep their warn paths.
+    const r = await gate.run(args, { cwd, timeout: timeoutMs }, { force });
+    if (r.status === "contended") return null;
+    if (r.status === "error") {
       if (gen === refreshGen)
-        warn("[pi-superpowers-plus] molecule refresh failed:", sanitizeLogText(err?.message ?? err));
+        warn("[pi-superpowers-plus] molecule refresh failed:", sanitizeLogText(r.error?.message ?? r.error));
       return null;
     }
+    return r.result;
   }
 
   function applySingleResult(r, queriedById) {
@@ -183,10 +146,15 @@ export function createMoleculeWidgetController({
     lockedMoleculeId = null;
   }
 
-  async function refreshWorkspace(gen) {
-    const listR = await safeExec(["list", "--type", "molecule", "--label", `ws:${activeWorkspaceKey}`, "--json"], gen);
+  async function refreshWorkspace(gen, grantForce) {
+    const listR = await safeExec(["list", "--type", "molecule", "--label", `ws:${activeWorkspaceKey}`, "--json"], gen, {
+      force: grantForce(),
+    });
     if (gen !== refreshGen) return;
-    if (!listR) return; // exec threw; safeExec warned, keep the prior frame
+    // null has two sources: a silent "contended" suppression (gate cooling, no
+    // warn) or a generation-guarded "error" (safeExec warned). Either way the
+    // prior frame is kept.
+    if (!listR) return;
     if (listR.code !== 0) {
       if (isCleanNotFound(listR)) clearFrame();
       else
@@ -202,14 +170,16 @@ export function createMoleculeWidgetController({
       // Multi-worktree guard: if any ws:-stamped open molecule exists and none is
       // ours (found.length === 0), another worktree owns an active cycle — never
       // adopt an unscoped global candidate in that case.
-      const anyWs = await safeExec(["list", "--type", "molecule", "--label-pattern", "ws:*", "--json"], gen);
+      const anyWs = await safeExec(["list", "--type", "molecule", "--label-pattern", "ws:*", "--json"], gen, {
+        force: grantForce(),
+      });
       if (gen !== refreshGen) return;
       if (!anyWs || anyWs.code !== 0) return; // can't confirm; keep prior frame, never adopt unscoped global
       if (parseMoleculeRoots(anyWs.stdout).length > 0) {
         clearFrame();
         return;
       }
-      const gR = await safeExec(["mol", "current", "--json"], gen);
+      const gR = await safeExec(["mol", "current", "--json"], gen, { force: grantForce() });
       if (gen !== refreshGen || !gR) return;
       if (gR.code !== 0) {
         if (isCleanNotFound(gR)) clearFrame();
@@ -229,7 +199,7 @@ export function createMoleculeWidgetController({
     const candidates = [];
     let sawError = false;
     for (const root of found) {
-      const r = await safeExec(["mol", "current", root.id, "--json"], gen);
+      const r = await safeExec(["mol", "current", root.id, "--json"], gen, { force: grantForce() });
       if (gen !== refreshGen) return;
       if (!r) {
         sawError = true;
@@ -257,29 +227,39 @@ export function createMoleculeWidgetController({
     } else clearFrame();
   }
 
-  async function refresh() {
+  async function refresh({ force = false } = {}) {
     if (!cwd) return;
     const gen = ++refreshGen;
+    // agent_start hands us a one-probe bypass, but it must be a one-shot grant
+    // per refresh: only the first bd call may consume it. Later calls in the
+    // same refresh see force=false and stay suppressed while cooling, so an
+    // N-root workspace cannot re-take the lock N times in one turn.
+    let forceLeft = force ? 1 : 0;
+    const grantForce = () => {
+      if (forceLeft <= 0) return false;
+      forceLeft -= 1;
+      return true;
+    };
 
     if (hasLockedMolecule(lockedMoleculeId)) {
-      const r = await safeExec(nextRefreshArgs(lockedMoleculeId), gen);
+      const r = await safeExec(nextRefreshArgs(lockedMoleculeId), gen, { force: grantForce() });
       if (gen !== refreshGen) return;
       applySingleResult(r, true);
       return;
     }
 
     if (!activeWorkspaceKey) {
-      const r = await safeExec(nextRefreshArgs(null), gen);
+      const r = await safeExec(nextRefreshArgs(null), gen, { force: grantForce() });
       if (gen !== refreshGen) return;
       applySingleResult(r, false);
       return;
     }
 
-    await refreshWorkspace(gen);
+    await refreshWorkspace(gen, grantForce);
   }
 
-  function refreshAndRender() {
-    void refresh().then(render, render);
+  function refreshAndRender({ force = false } = {}) {
+    void refresh({ force }).then(render, render);
   }
 
   function triggerChange() {
@@ -318,7 +298,8 @@ export function createMoleculeWidgetController({
   function setCwd(nextCwd, { refresh: doRefresh = true, workspaceKey: nextKey } = {}) {
     applyWorkspaceKey(nextKey);
     cwd = nextCwd ?? cwd;
-    if (doRefresh) refreshAndRender();
+    if (doRefresh)
+      refreshAndRender({ force: true }); // agent_start: one probe per turn
     else render();
   }
 
