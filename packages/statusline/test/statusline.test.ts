@@ -948,6 +948,11 @@ test("statusline compact formatting helpers", () => {
 	assert.equal(formatCount(1_200_000), "1.2m");
 	assert.equal(shortenModel("claude-sonnet-20241022"), "sonnet");
 	assert.equal(shortenModel("gpt-5.3-codex-latest"), "gpt 5.3-codex");
+	assert.equal(
+		shortenModel("fireworks/accounts/fireworks/models/deepseek-v4p1-flash"),
+		"deepseek-v4p1-flash",
+	);
+	assert.equal(shortenModel("anthropic/claude-sonnet-20241022"), "sonnet");
 	assert.equal(npmPackageName("npm:@narumitw/pi-goal@0.4.1"), "@narumitw/pi-goal");
 	assert.equal(npmPackageName("npm:typescript@latest"), "typescript");
 });
