@@ -1072,4 +1072,51 @@ const immediateTimers = {
 }
 
 
+// ---------- contention: agent_start gets one silent probe per turn ----------
+{
+  const warns = [];
+  const ui = makeFakeUi();
+  const clock = makeClock();
+  const calls = [];
+  let mode = "ok";
+  const controller = createMoleculeWidgetController({
+    exec: async (cmd, args) => {
+      calls.push([cmd, ...args]);
+      if (mode === "lock") return { code: 1, stdout: "", stderr: "database is locked by another dolt process" };
+      return args[0] === "list"
+        ? { code: 0, stdout: roots([{ id: "bd-mol-A", updated_at: "2026-01-01" }]), stderr: "" }
+        : { code: 0, stdout: RAW_A, stderr: "" };
+    },
+    subscribeChanges: () => () => {},
+    warn: (...a) => warns.push(a),
+    timers: immediateTimers,
+    now: clock.now,
+  });
+  controller.bindSession({ ui, cwd: "/repo", workspaceKey: "k1" });
+  await tick();
+  mode = "lock";
+  await controller.refresh(); // enters a 2500ms cooldown
+  assert.equal(warns.length, 0, "the episode is silent");
+
+  const before = calls.length;
+  await controller.setCwd("/repo", { workspaceKey: "k1" }); // agent_start
+  await tick();
+  assert.equal(calls.length - before, 1, "the bypass probe is a single attempt (no retry)");
+  assert.equal(warns.length, 0, "the bypass probe is silent");
+
+  clock.advance(2500);
+  const beforeCooldown = calls.length;
+  await controller.refresh();
+  assert.equal(calls.length, beforeCooldown, "2500ms is not enough: the cooldown doubled to 5000ms");
+
+  clock.advance(2500);
+  mode = "ok";
+  await controller.refresh();
+  assert.ok(calls.length > beforeCooldown, "resumes after the doubled cooldown expires");
+  assert.ok(
+    ui.lastLines()?.some((l) => l.includes("Ask clarifying questions")),
+    "frame painted after resuming",
+  );
+}
+
 console.log("beads-molecule-widget-controller: all assertions passed");

@@ -102,10 +102,10 @@ export function createMoleculeWidgetController({
       sleep: (ms) => new Promise((resolve) => (timers?.setTimeout ?? setTimeout)(resolve, ms)),
     });
 
-  async function safeExec(args, gen) {
+  async function safeExec(args, gen, { force = false } = {}) {
     // "contended" maps onto the existing null sentinel: callers keep the prior
     // frame with no warn. Genuine errors keep their warn paths.
-    const r = await gate.run(args, { cwd, timeout: timeoutMs });
+    const r = await gate.run(args, { cwd, timeout: timeoutMs }, { force });
     if (r.status === "contended") return null;
     if (r.status === "error") {
       if (gen === refreshGen)
@@ -149,8 +149,12 @@ export function createMoleculeWidgetController({
     lockedMoleculeId = null;
   }
 
-  async function refreshWorkspace(gen) {
-    const listR = await safeExec(["list", "--type", "molecule", "--label", `ws:${activeWorkspaceKey}`, "--json"], gen);
+  async function refreshWorkspace(gen, { force = false } = {}) {
+    const listR = await safeExec(
+      ["list", "--type", "molecule", "--label", `ws:${activeWorkspaceKey}`, "--json"],
+      gen,
+      { force },
+    );
     if (gen !== refreshGen) return;
     if (!listR) return; // exec threw; safeExec warned, keep the prior frame
     if (listR.code !== 0) {
@@ -168,14 +172,18 @@ export function createMoleculeWidgetController({
       // Multi-worktree guard: if any ws:-stamped open molecule exists and none is
       // ours (found.length === 0), another worktree owns an active cycle — never
       // adopt an unscoped global candidate in that case.
-      const anyWs = await safeExec(["list", "--type", "molecule", "--label-pattern", "ws:*", "--json"], gen);
+      const anyWs = await safeExec(
+        ["list", "--type", "molecule", "--label-pattern", "ws:*", "--json"],
+        gen,
+        { force },
+      );
       if (gen !== refreshGen) return;
       if (!anyWs || anyWs.code !== 0) return; // can't confirm; keep prior frame, never adopt unscoped global
       if (parseMoleculeRoots(anyWs.stdout).length > 0) {
         clearFrame();
         return;
       }
-      const gR = await safeExec(["mol", "current", "--json"], gen);
+      const gR = await safeExec(["mol", "current", "--json"], gen, { force });
       if (gen !== refreshGen || !gR) return;
       if (gR.code !== 0) {
         if (isCleanNotFound(gR)) clearFrame();
@@ -195,7 +203,7 @@ export function createMoleculeWidgetController({
     const candidates = [];
     let sawError = false;
     for (const root of found) {
-      const r = await safeExec(["mol", "current", root.id, "--json"], gen);
+      const r = await safeExec(["mol", "current", root.id, "--json"], gen, { force });
       if (gen !== refreshGen) return;
       if (!r) {
         sawError = true;
@@ -223,29 +231,29 @@ export function createMoleculeWidgetController({
     } else clearFrame();
   }
 
-  async function refresh() {
+  async function refresh({ force = false } = {}) {
     if (!cwd) return;
     const gen = ++refreshGen;
 
     if (hasLockedMolecule(lockedMoleculeId)) {
-      const r = await safeExec(nextRefreshArgs(lockedMoleculeId), gen);
+      const r = await safeExec(nextRefreshArgs(lockedMoleculeId), gen, { force });
       if (gen !== refreshGen) return;
       applySingleResult(r, true);
       return;
     }
 
     if (!activeWorkspaceKey) {
-      const r = await safeExec(nextRefreshArgs(null), gen);
+      const r = await safeExec(nextRefreshArgs(null), gen, { force });
       if (gen !== refreshGen) return;
       applySingleResult(r, false);
       return;
     }
 
-    await refreshWorkspace(gen);
+    await refreshWorkspace(gen, { force });
   }
 
-  function refreshAndRender() {
-    void refresh().then(render, render);
+  function refreshAndRender({ force = false } = {}) {
+    void refresh({ force }).then(render, render);
   }
 
   function triggerChange() {
@@ -284,7 +292,7 @@ export function createMoleculeWidgetController({
   function setCwd(nextCwd, { refresh: doRefresh = true, workspaceKey: nextKey } = {}) {
     applyWorkspaceKey(nextKey);
     cwd = nextCwd ?? cwd;
-    if (doRefresh) refreshAndRender();
+    if (doRefresh) refreshAndRender({ force: true }); // agent_start: one probe per turn
     else render();
   }
 

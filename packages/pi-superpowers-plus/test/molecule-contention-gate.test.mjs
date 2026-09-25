@@ -243,4 +243,65 @@ const okResult = (stdout = "[]") => ({ code: 0, stdout, stderr: "" });
   assert.equal(calls, 1, "a code-0 result containing lock-ish text is never classified");
 }
 
+// ---------- force: one probe during cooldown, no retry ----------
+{
+  const clock = makeClock();
+  const { delays, sleep } = makeSleep();
+  let calls = 0;
+  const gate = createContentionGate({
+    exec: async () => {
+      calls += 1;
+      return lockResult();
+    },
+    now: clock.now,
+    sleep,
+  });
+  await gate.run(["list"], {}); // episode -> 2500ms cooldown
+  const frozen = calls;
+  const r = await gate.run(["list"], {}, { force: true });
+  assert.equal(r.status, "contended");
+  assert.equal(calls - frozen, 1, "a forced probe makes a single attempt, no retry");
+  assert.equal(r.retryAfterMs, 5000, "a failed forced probe re-arms at the next ramp step");
+  assert.deepEqual(delays, [150], "only the original episode slept");
+}
+
+// ---------- force: successful probe resets the ramp ----------
+{
+  const clock = makeClock();
+  const { sleep } = makeSleep();
+  let mode = "lock";
+  const gate = createContentionGate({
+    exec: async () => (mode === "lock" ? lockResult() : okResult()),
+    now: clock.now,
+    sleep,
+  });
+  await gate.run(["list"], {}); // episode -> 2500ms cooldown
+  mode = "ok";
+  const r = await gate.run(["list"], {}, { force: true });
+  assert.equal(r.status, "ok");
+  assert.equal(gate.isCoolingDown(), false, "a successful forced probe clears the cooldown");
+  mode = "lock";
+  const again = await gate.run(["list"], {});
+  assert.equal(again.retryAfterMs, 2500, "the ramp restarted after the clean probe");
+}
+
+// ---------- force is a no-op when not cooling down ----------
+{
+  const clock = makeClock();
+  const { delays, sleep } = makeSleep();
+  let calls = 0;
+  const gate = createContentionGate({
+    exec: async () => {
+      calls += 1;
+      return calls === 1 ? lockResult() : okResult();
+    },
+    now: clock.now,
+    sleep,
+  });
+  const r = await gate.run(["list"], {}, { force: true });
+  assert.equal(r.status, "ok");
+  assert.equal(calls, 2, "the normal one-retry path still applies when not cooling down");
+  assert.deepEqual(delays, [150]);
+}
+
 console.log("molecule-contention-gate: all assertions passed");

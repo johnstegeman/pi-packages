@@ -19,7 +19,7 @@ export const DEFAULT_GATE = {
 const defaultSleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
 /**
- * @returns {{ run(args: string[], execOpts?: object): Promise<object>, isCoolingDown(): boolean }}
+ * @returns {{ run(args: string[], execOpts?: object, opts?: { force?: boolean }): Promise<object>, isCoolingDown(): boolean }}
  */
 export function createContentionGate({
   exec,
@@ -63,9 +63,21 @@ export function createContentionGate({
     return cls ? { verdict: "transient" } : { verdict: "ok", result: res };
   }
 
-  async function run(args, execOpts = {}) {
-    if (now() < cooldownUntil) {
+  async function run(args, execOpts = {}, { force = false } = {}) {
+    const cooling = now() < cooldownUntil;
+    if (cooling && !force) {
       return { status: "contended", retryAfterMs: cooldownUntil - now() };
+    }
+
+    if (cooling && force) {
+      // New user turn: one probe only, so a persistent lock cannot stampede.
+      const only = await attempt(args, execOpts);
+      if (only.verdict === "ok") {
+        reset();
+        return { status: "ok", result: only.result };
+      }
+      if (only.verdict === "error") return { status: "error", error: only.error };
+      return { status: "contended", retryAfterMs: enterCooldown() };
     }
 
     const first = await attempt(args, execOpts);
