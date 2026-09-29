@@ -1495,6 +1495,8 @@ test("single-repo: beads_close batches one beads:changed per repo when claimNext
   const r = await s.byName.get("beads_close").execute("c", { ids: "proj-t9", reason: "done", claimNext: true });
   assert.ok(okResult(r), JSON.stringify(r));
   assert.equal(s.emitted.filter((e) => e === "beads:changed").length, 1, "one emit per repo");
+  assert.match(r.content[0].text, /claimed next: proj-1a2/);
+  findInvocation(["close", "proj-imp2"]); // the cascade really ran
 });
 
 test("umbrella: close cascade failure is not overwritten by a later repo failure", async () => {

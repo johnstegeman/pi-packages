@@ -1,7 +1,7 @@
 # Design: shared claim core + batched `beads_close` emit
 
 Date: 2026-09-29
-Status: approved (design review), pending implementation
+Status: implemented (commits 182c668..e11d071)
 Tracking: molecule `pi-packages-mol-wvdg`
 Follows: PR #65 and PR #66 (both merged) — template-proto filtering for `beads_ready`, the `/beads` board, and `beads_close` claimNext
 
@@ -95,6 +95,7 @@ afterWrite(dir)` sites in that block (after `bd close`, and inside the cascade l
 if (claimNext) {
   const rr = await bd(["ready", "--json", "--include-ephemeral", "-n", "50"], dir);
   if (!rr.ok) {
+    claimError = true;
     const msg = `bd ready failed: ${rr.err}`;
     failure = failure ? `${failure}; ${msg}` : msg;
   } else {
