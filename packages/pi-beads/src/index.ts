@@ -446,6 +446,23 @@ export default function piBeadsLean(pi: any) {
     return JSON.stringify(arr.filter((r: any) => r?.is_template !== true));
   }
 
+  // bd's own --claim-next selects from the same ready set that leaks template
+  // protos, and no bd flag can exclude them (the `template` label is on the
+  // molecule root only). Select client-side instead, over filtered rows.
+  async function claimNextReady(dir: string): Promise<{ id?: string; error?: string }> {
+    const rr = await bd(["ready", "--json", "--include-ephemeral"], dir);
+    if (!rr.ok) return { error: `bd ready failed: ${rr.err}` };
+    const parsed = jparse(stripTemplates(rr.out));
+    const arr = Array.isArray(parsed) ? parsed : parsed?.issues;
+    const head = Array.isArray(arr) ? arr[0] : null;
+    const id = head?.id ? String(head.id) : null;
+    if (!id) return {};
+    const c = await bd(["update", id, "--claim"], dir);
+    if (!c.ok) return { error: `claimed next ${id} but repo claim failed: ${c.err}` };
+    await afterWrite(dir);
+    return { id };
+  }
+
   function fmtRows(json: string): string {
     let arr: any[];
     try {
@@ -1283,7 +1300,7 @@ export default function piBeadsLean(pi: any) {
         reason: { type: "string", description: "Optional closing reason" },
         continue: { type: "boolean", description: "Auto-advance to the next molecule step (--continue)" },
         suggestNext: { type: "boolean", description: "Show newly unblocked issues after closing (--suggest-next)" },
-        claimNext: { type: "boolean", description: "Claim the next highest-priority issue (--claim-next)" },
+        claimNext: { type: "boolean", description: "After closing, claim the next highest-priority ready issue; selected client-side so template protos are skipped" },
         noAuto: { type: "boolean", description: "With --continue, show the next step but don't claim it (--no-auto)" },
       },
       required: ["ids"],
@@ -1306,12 +1323,13 @@ export default function piBeadsLean(pi: any) {
       }
       const closedIds: string[] = [];
       let failure: string | null = null;
+      const claimNext = params?.claimNext === true || params?.claimNext === "true";
+      const claimedNext: string[] = [];
       for (const [dir, rids] of byRepo) {
         const args = ["close", ...rids];
         if (params.reason) args.push("-r", String(params.reason));
         if (params?.continue === true || params?.continue === "true") args.push("--continue");
         if (params?.suggestNext === true || params?.suggestNext === "true") args.push("--suggest-next");
-        if (params?.claimNext === true || params?.claimNext === "true") args.push("--claim-next");
         if (params?.noAuto === true || params?.noAuto === "true") args.push("--no-auto");
         const r = await bd(args, dir);
         if (!r.ok) {
@@ -1348,12 +1366,22 @@ export default function piBeadsLean(pi: any) {
             nxt = await parentStepToClose(prev, dir);
           }
         }
+        if (claimNext) {
+          const cn = await claimNextReady(dir);
+          if (cn.id) claimedNext.push(cn.id);
+          if (cn.error) failure = failure ? `${failure}; ${cn.error}` : cn.error;
+        }
       }
+      const claimNote = claimNext
+        ? claimedNext.length
+          ? `; claimed next: ${claimedNext.join(", ")}`
+          : "; no claimable next issue"
+        : "";
       if (failure) {
-        const done = closedIds.length ? `closed ${closedIds.join(", ")}\nwarning: ${failure}` : failure;
+        const done = closedIds.length ? `closed ${closedIds.join(", ")}${claimNote}\nwarning: ${failure}` : failure;
         return textResult(done);
       }
-      return textResult(`closed ${closedIds.join(", ")}`);
+      return textResult(`closed ${closedIds.join(", ")}${claimNote}`);
     },
   });
 

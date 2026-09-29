@@ -133,7 +133,7 @@ MCP transport, and what comes back is a digest rather than raw JSON.
 | `beads_create` | Create an issue in the right repository (`repo` is a folder name or a prefix), return its id; optional `acceptance` maps to `bd create --acceptance` |
 | `beads_create_list` | Create an optional gate bead + its human gate, then the task beads sequentially under one parent in declared (plan) order, then wire the blocks-chain; each task may carry `acceptance` (`--acceptance`); returns `gate:`/`human-gate:` ids and `t1:..tN:` in plan order |
 | `beads_update` | Status, priority, title, parent, notes, labels; plus `claim`, `setMetadata` (`key=value,...`), `description` (replaces the body); routed by id prefix |
-| `beads_close` | Close one or more ids, with a reason; optional `continue`, `suggestNext`, `claimNext`, `noAuto` map to the matching `bd close` flags |
+| `beads_close` | Close one or more ids, with a reason; optional `continue`, `suggestNext`, `noAuto` map to the matching `bd close` flags, and `claimNext` claims the next ready issue **client-side, with template protos excluded** |
 | `beads_reopen` | Reopen one or more closed ids, with an optional reason |
 | `beads_dep` | Add a dependency (blocker blocks issue) within one repository; `type` is `blocks\|tracks\|related\|parent-child\|discovered-from` |
 | `beads_undep` | Remove a dependency |
