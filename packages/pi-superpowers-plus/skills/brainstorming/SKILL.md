@@ -43,7 +43,6 @@ molecule and put the widget on screen:
   before any exploration begins.
 
 Step 0 is **not complete until the widget is actually visible** — calling `beads_mol_pour` alone is not enough. **Do not begin Step 1 until Step 0 is complete.**
-`beads_mol_pour` alone is not enough. **Do not begin Step 1 until Step 0 is complete.**
 </HARD-GATE>
 
 <HARD-GATE>

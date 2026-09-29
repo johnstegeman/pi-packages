@@ -24,7 +24,7 @@ There is **no fallback** if the tools aren't present (they ship in the monorepo 
   (`bd mol pour`), not tracked via ad hoc wisps. Skills advance it with the
   beads_* tools (`beads_mol_current`, `beads_mol_ready`, `beads_list({ label: "step:<key>", mol: "<root-id>" })`,
   `beads_gate_resolve`,
-  `beads_close`, `beads_update`); bare `bd` is only for raw/read `bd` where no tool
+  `beads_close`, `beads_update`); bare `bd` is only for raw/read-only `bd` where no tool
   exists, and pouring the workflow from the bundled formula by name is the path —
   see `docs/superpowers/specs/2026-09-02-beads-as-persistence-layer-design.md` for the
   full step graph.
