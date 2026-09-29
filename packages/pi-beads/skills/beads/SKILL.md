@@ -33,7 +33,7 @@ High-frequency subset — see the pi-beads README for the full reference (all 23
 ### Read — always span ALL repos (from the aggregate by default)
 | tool | use |
 |---|---|
-| `beads_ready({ limit?, repo?, label?, labelAny?, claim? })` | ready issues (open + unblocked, **wisps/ephemeral included** so a brainstorming batch stays visible). Optional `repo` narrows to one project; `label` / `labelAny` filter by labels; `claim: true` atomically claims the first match (`bd ready --claim`) |
+| `beads_ready({ limit?, repo?, label?, labelAny?, claim? })` | ready issues (open + unblocked, **wisps/ephemeral included** so a brainstorming batch stays visible; **template protos are excluded**). Optional `repo` narrows to one project; `label` / `labelAny` filter by labels; `claim: true` claims the first non-template match |
 | `beads_list({ status?, limit?, repo?, label?, labelAny? })` | list issues across every repo; `status` = `open,in_progress,blocked,deferred,closed`; optional project/label filters |
 | `beads_show({ id })` | full details of one issue: status, **blocker ids** (`blocked_by:` + `BLOCKED` marker), and for epics **children + progress** (`children: done/total`) |
 | `beads_deps({ ids, direction? })` | dependency view: ONE id → the blocker/dependent **tree**; SEVERAL ids → one compact line each. `direction` = `blockers` (default) or `dependents` |

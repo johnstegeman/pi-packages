@@ -142,21 +142,36 @@ case "$1" in
         *empty*)
           printf '{"molecule_id":"%s-m0","molecule_title":"Empty Mol","ready_steps":0,"total_steps":3,"steps":null}\n' "$MOLP" ;;
         *)
-          printf '{"molecule_id":"%s-m0","molecule_title":"Demo Mol","ready_steps":2,"total_steps":4,"steps":[{"parallel_info":{"is_ready":true,"step_id":"%s-t1"},"issue":{"id":"%s-t1","priority":1,"status":"open","title":"Task one"}},{"parallel_info":{"is_ready":true,"step_id":"%s-t2"},"issue":{"id":"%s-t2","priority":2,"status":"open","title":"Task two"}}]}\n' "$MOLP" "$MOLP" "$MOLP" "$MOLP" "$MOLP" ;;
+          printf '{"molecule_id":"%s-m0","molecule_title":"Demo Mol","ready_steps":2,"total_steps":4,"steps":[{"parallel_info":{"is_ready":true,"step_id":"%s-t1"},"issue":{"id":"%s-t1","priority":1,"status":"open","title":"Task one","is_template":true}},{"parallel_info":{"is_ready":true,"step_id":"%s-t2"},"issue":{"id":"%s-t2","priority":2,"status":"open","title":"Task two","is_template":true}}]}\n' "$MOLP" "$MOLP" "$MOLP" "$MOLP" "$MOLP" ;;
       esac
       exit 0
     fi
-    CLAIMFLAG=0
-    for a in "$@"; do [ "$a" = "--claim" ] && CLAIMFLAG=1; done
-    if [ "$CLAIMFLAG" = "1" ]; then
-      if [ "$MODE" = "umbrella" ]; then
-        printf '[{"id":"crmback-1a2","priority":1,"status":"open","title":"Backend work"}]\n'
-      else
-        printf '[{"id":"proj-1a2","priority":1,"status":"open","title":"Repo work"}]\n'
-      fi
+    if [ "\${FAKE_BD_READY_EMPTY:-0}" = "1" ]; then
+      printf '%s\n' '[{"id":"superpowers-workflow.explore","priority":2,"status":"open","title":"Explore project context: {{topic}}","is_template":true}]'
       exit 0
     fi
-    echo "ok"; exit 0
+    if [ "\${FAKE_BD_READY_INTERLEAVED:-0}" = "1" ]; then
+      printf '%s\n' '[{"id":"proj-1a2","priority":1,"status":"open","title":"Repo work"},{"id":"superpowers-workflow.explore","priority":2,"status":"open","title":"Explore project context: {{topic}}","is_template":true}]'
+      exit 0
+    fi
+    if [ "\${FAKE_BD_READY_FALSE:-0}" = "1" ]; then
+      printf '%s\n' '[{"id":"proj-1a2","priority":1,"status":"open","title":"Repo work","is_template":false}]'
+      exit 0
+    fi
+    if [ "\${FAKE_BD_READY_WRAPPED:-0}" = "1" ]; then
+      printf '%s\n' '{"issues":[{"id":"superpowers-workflow.explore","priority":2,"status":"open","title":"Explore project context: {{topic}}","is_template":true},{"id":"proj-1a2","priority":1,"status":"open","title":"Repo work"}]}'
+      exit 0
+    fi
+    if [ "\${FAKE_BD_READY_OK:-0}" = "1" ]; then
+      printf 'ok\n'
+      exit 0
+    fi
+    if [ "$MODE" = "umbrella" ]; then
+      printf '%s\n' '[{"id":"superpowers-workflow.explore","priority":2,"status":"open","title":"Explore project context: {{topic}}","is_template":true},{"id":"crmback-1a2","priority":1,"status":"open","title":"Backend work"}]'
+    else
+      printf '%s\n' '[{"id":"superpowers-workflow.explore","priority":2,"status":"open","title":"Explore project context: {{topic}}","is_template":true},{"id":"proj-1a2","priority":1,"status":"open","title":"Repo work"}]'
+    fi
+    exit 0
     ;;
   mol)
     if [ "$2" = "pour" ]; then
@@ -444,15 +459,16 @@ function makePi() {
   const status = [];
   const handlers = {};
   const tools = [];
+  const commands = [];
   const pi = {
     events: { emit: (name) => emitted.push(name) },
     on: (ev, fn) => (handlers[ev] ??= []).push(fn),
     registerTool: (t) => tools.push(t),
-    registerCommand: () => {},
+    registerCommand: (name, def) => commands.push({ name, def }),
   };
   piBeadsLean(pi);
   const byName = new Map(tools.map((t) => [t.name, t]));
-  return { pi, emitted, status, handlers, byName, tools };
+  return { pi, emitted, status, handlers, byName, tools, commands };
 }
 
 async function openSession(env, cwd) {
@@ -1279,16 +1295,123 @@ test("single-repo: close cascade treats an already-closed parent as success", as
   findInvocation(["show", "proj-closed-parent", "--json"]);
 });
 
-test("single-repo: beads_ready claim re-asserts in the owning repo and emits", async () => {
+test("single-repo: beads_ready excludes template rows", async () => {
+  const s = await openSession("single", repoDir);
+  resetLog();
+  const r = await s.byName.get("beads_ready").execute("c", { limit: 5 });
+  assert.ok(okResult(r), JSON.stringify(r));
+  const text = r.content[0].text;
+  assert.match(text, /proj-1a2/);
+  assert.doesNotMatch(text, /superpowers-workflow/);
+  findInvocation(["ready", "--json", "--include-ephemeral", "-n", "5"]);
+  assert.equal(s.emitted.length, 0, "a read must not emit");
+});
+
+test("single-repo: beads_ready claim skips the template head and claims the first real row", async () => {
   const s = await openSession("single", repoDir);
   resetLog();
   const r = await s.byName.get("beads_ready").execute("c", { limit: 5, claim: true });
   assert.ok(okResult(r), JSON.stringify(r));
-  findInvocation(["ready", "--json", "--include-ephemeral", "-n", "5", "--claim"]);
-  // the claim is a write: it is re-asserted in the owning repo and emits once
+  // no server-side --claim any more; the fixture's first row is a template
+  findInvocation(["ready", "--json", "--include-ephemeral", "-n", "5"]);
+  assertNoInvocation(["ready", "--json", "--include-ephemeral", "-n", "5", "--claim"]);
   findInvocation(["update", "proj-1a2", "--claim"]);
+  assert.doesNotMatch(r.content[0].text, /superpowers-workflow/);
   assert.equal(s.emitted.length, 1);
   assert.equal(s.emitted.at(-1), "beads:changed");
+});
+
+test("single-repo: beads_ready claim with only a template row mutates nothing", async () => {
+  process.env.FAKE_BD_READY_EMPTY = "1";
+  try {
+    const s = await openSession("single", repoDir);
+    resetLog();
+    const r = await s.byName.get("beads_ready").execute("c", { limit: 5, claim: true });
+    assert.ok(okResult(r), JSON.stringify(r));
+    assert.doesNotMatch(r.content[0].text, /superpowers-workflow/);
+    assertNoInvocation(["update", "proj-1a2", "--claim"]);
+    assert.equal(s.emitted.length, 0, "no claim -> no beads:changed");
+  } finally {
+    delete process.env.FAKE_BD_READY_EMPTY;
+  }
+});
+test("single-repo: /beads board excludes template rows", async () => {
+  const s = await openSession("single", repoDir);
+  resetLog();
+  const board = s.commands.find((c) => c.name === "beads");
+  assert.ok(board, "the /beads command must be registered");
+  let notified = "";
+  await board.def.handler("", { ui: { notify: (t) => { notified = t; } } });
+  assert.match(notified, /proj-1a2/);
+  assert.doesNotMatch(notified, /superpowers-workflow/);
+});
+
+test("single-repo: beads_ready filters a template row that appears after a real row", async () => {
+  process.env.FAKE_BD_READY_INTERLEAVED = "1";
+  try {
+    const s = await openSession("single", repoDir);
+    resetLog();
+    const r = await s.byName.get("beads_ready").execute("c", { limit: 5 });
+    assert.ok(okResult(r), JSON.stringify(r));
+    const text = r.content[0].text;
+    assert.match(text, /proj-1a2/, "the real row after the template must be listed");
+    assert.doesNotMatch(text, /superpowers-workflow/, "the later template row must be filtered");
+  } finally {
+    delete process.env.FAKE_BD_READY_INTERLEAVED;
+  }
+});
+
+test("single-repo: beads_ready keeps a row with an explicit is_template:false", async () => {
+  process.env.FAKE_BD_READY_FALSE = "1";
+  try {
+    const s = await openSession("single", repoDir);
+    resetLog();
+    const r = await s.byName.get("beads_ready").execute("c", { limit: 5 });
+    assert.ok(okResult(r), JSON.stringify(r));
+    assert.match(r.content[0].text, /proj-1a2/, "is_template:false must be kept");
+  } finally {
+    delete process.env.FAKE_BD_READY_FALSE;
+  }
+});
+
+test("single-repo: beads_ready filters templates from an {issues:[...]} envelope", async () => {
+  process.env.FAKE_BD_READY_WRAPPED = "1";
+  try {
+    const s = await openSession("single", repoDir);
+    resetLog();
+    const r = await s.byName.get("beads_ready").execute("c", { limit: 5 });
+    assert.ok(okResult(r), JSON.stringify(r));
+    const text = r.content[0].text;
+    assert.match(text, /proj-1a2/, "the object-wrapped real row must be listed");
+    assert.doesNotMatch(text, /superpowers-workflow/, "the object-wrapped template row must be filtered");
+  } finally {
+    delete process.env.FAKE_BD_READY_WRAPPED;
+  }
+});
+
+test("single-repo: beads_ready fails open on an unparseable payload", async () => {
+  process.env.FAKE_BD_READY_OK = "1";
+  try {
+    const s = await openSession("single", repoDir);
+    resetLog();
+    const r = await s.byName.get("beads_ready").execute("c", { limit: 5 });
+    assert.ok(okResult(r), JSON.stringify(r));
+    assert.equal(r.content[0].text, "ok", "an unparseable payload must be returned unchanged");
+  } finally {
+    delete process.env.FAKE_BD_READY_OK;
+  }
+});
+
+test("single-repo: beads_mol_ready still returns a template molecule's steps", async () => {
+  // Deliberate asymmetry (DoD): beads_mol_ready must NOT strip template rows — it is
+  // scoped to one molecule and has to return its steps, even when they are is_template.
+  const s = await openSession("single", repoDir);
+  resetLog();
+  const r = await s.byName.get("beads_mol_ready").execute("c", { id: "proj-m1" });
+  assert.ok(okResult(r), JSON.stringify(r));
+  const t = r.content[0].text;
+  assert.match(t, /proj-t1 P1 \[open\] Task one/);
+  assert.match(t, /proj-t2 P2 \[open\] Task two/);
 });
 
 test("single-repo: beads_close maps continue/next flags and still cascades", async () => {
@@ -1672,8 +1795,9 @@ test("umbrella: beads_ready claim routes the re-assert to the owning repo and em
   resetLog();
   const r = await s.byName.get("beads_ready").execute("c", { limit: 5, claim: true });
   assert.ok(okResult(r), JSON.stringify(r));
-  // atomic selection still runs against the umbrella aggregate
-  findInvocation(["ready", "--json", "--include-ephemeral", "-n", "5", "--claim"]);
+  // selection now runs client-side against the aggregate; no --claim is passed
+  findInvocation(["ready", "--json", "--include-ephemeral", "-n", "5"]);
+  assertNoInvocation(["ready", "--json", "--include-ephemeral", "-n", "5", "--claim"]);
   // the durable re-assert is routed to the claimed id's owning repo (backend)
   const upd = invocationsWithCwd().find(
     (iv) =>

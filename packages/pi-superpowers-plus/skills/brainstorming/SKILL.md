@@ -17,12 +17,11 @@ At the start of the skill, call `set_phase({ phase: "brainstorming" })`.
 any commands, or explore the project in any way (Step 1 below), you must pour the workflow
 molecule and put the widget on screen:
 
-- **Fresh topic:** cook and pour the workflow formula, then note the returned root issue id
+- **Fresh topic:** pour the workflow formula, then note the returned root issue id
   (the `Root issue:` line) — this is the molecule you work against for the rest of this
   skill and for `writing-plans`/`executing-plans` afterward:
 
   ```bash
-  bd cook superpowers-workflow --var topic="<topic>" --persist
   beads_mol_pour({ proto: "superpowers-workflow", vars: "topic=<topic>" })
   ```
 
@@ -43,8 +42,7 @@ molecule and put the widget on screen:
   (and `beads_mol_ready({ id: "<root-id>" })`) so the user sees the live current step
   before any exploration begins.
 
-Step 0 is **not complete until the widget is actually visible** — calling `bd cook` /
-`beads_mol_pour` alone is not enough. **Do not begin Step 1 until Step 0 is complete.**
+Step 0 is **not complete until the widget is actually visible** — calling `beads_mol_pour` alone is not enough. **Do not begin Step 1 until Step 0 is complete.**
 </HARD-GATE>
 
 <HARD-GATE>

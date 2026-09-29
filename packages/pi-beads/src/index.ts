@@ -433,6 +433,19 @@ export default function piBeadsLean(pi: any) {
     }
   }
 
+  // A proto/template `bd ready` row carries no labels (the `template` label sits on
+  // the molecule ROOT), so bd's label/type filters cannot drop it. `is_template` is
+  // the only reliable per-row marker; strip those rows client-side.
+  // FAILS OPEN by design: when the payload is neither a bare array nor `{issues:[]}`
+  // (e.g. an unparseable envelope or a new bd shape) the input is returned UNCHANGED,
+  // so a bd envelope change degrades to today's behaviour instead of hiding rows.
+  function stripTemplates(json: string): string {
+    const o = jparse(json);
+    const arr = Array.isArray(o) ? o : o?.issues;
+    if (!Array.isArray(arr)) return json; // fail open — see the note above
+    return JSON.stringify(arr.filter((r: any) => r?.is_template !== true));
+  }
+
   function fmtRows(json: string): string {
     let arr: any[];
     try {
@@ -733,7 +746,7 @@ export default function piBeadsLean(pi: any) {
         claim: {
           type: "boolean",
           description:
-            "Atomically claim the first ready issue matching the filters (bd ready --claim). This is a write: the claim is persisted in the owning repo and emits beads:changed. Read-only when omitted.",
+            "Claim the first ready issue matching the filters. Selection is client-side (over filtered `bd ready` rows); the claim is then persisted in the owning repo via `bd update <id> --claim` and emits beads:changed. This is a write. Read-only when omitted.",
         },
       },
     },
@@ -749,23 +762,27 @@ export default function piBeadsLean(pi: any) {
       const rargs = ["ready", "--json", "--include-ephemeral", "-n", String(params?.limit ?? 15)];
       if (params?.label) rargs.push("--label", String(params.label));
       if (params?.labelAny) rargs.push("--label-any", String(params.labelAny));
-      if (claim) rargs.push("--claim");
       const r = await bd(rargs, scope);
       if (!r.ok) return textResult(`bd ready failed: ${r.err}`);
-      if (!claim) return textResult(fmtRows(r.out));
-      // bd ready --claim is atomic, but in umbrella mode it mutates only the
-      // aggregate read-replica (reverted on the next repo sync). Re-assert the
-      // claim in the owning repo so it persists and emits beads:changed once.
-      const parsed = jparse(r.out);
+      // bd applies `-n <limit>` BEFORE this client-side filter, so a limited window can
+      // under-report when template rows occupy slots (and `claim:true` with a very small
+      // limit can find nothing even though real work exists). Accepted: at the default
+      // limit and with typically one template head this is negligible.
+      const filtered = stripTemplates(r.out);
+      if (!claim) return textResult(fmtRows(filtered));
+      // Select client-side so a template head can never be claimed. The owning-repo
+      // `bd update <id> --claim` is the sole durable claim path (it also emits
+      // beads:changed once); nothing mutates the aggregate read-replica.
+      const parsed = jparse(filtered);
       const claimed = Array.isArray(parsed) ? parsed[0] : parsed?.issues?.[0];
       const claimedId = claimed?.id ? String(claimed.id) : null;
       const dir = claimedId ? dirForPrefix(claimedId) : null;
-      if (!claimedId || !dir) return textResult(fmtRows(r.out));
+      if (!claimedId || !dir) return textResult(fmtRows(filtered));
       const c = await bd(["update", claimedId, "--claim"], dir);
       if (!c.ok)
-        return textResult(`claimed ${claimedId} in aggregate but repo claim failed: ${c.err}`);
+        return textResult(`claimed ${claimedId} but repo claim failed: ${c.err}`);
       await afterWrite(dir);
-      return textResult(fmtRows(r.out));
+      return textResult(fmtRows(filtered));
     },
   });
 
@@ -1745,7 +1762,10 @@ export default function piBeadsLean(pi: any) {
       await ensureTopology();
       if (!params?.id) return textResult("id is required");
       await ensureFresh();
-      // Unlike beads_ready, beads_mol_ready intentionally omits --include-ephemeral (durable molecule steps; matches molShow/molCurrent).
+      // Deliberate asymmetry with beads_ready: this tool is scoped to ONE molecule and
+      // MUST return a template's steps, so it deliberately does NOT call stripTemplates.
+      // Unlike beads_ready, beads_mol_ready intentionally omits --include-ephemeral
+      // (durable molecule steps; matches molShow/molCurrent).
       const args = ["ready", "--mol", String(params.id), "--json"];
       if (params?.limit) args.push("-n", String(params.limit));
       const r = await bd(args, umbrella);
@@ -1913,7 +1933,7 @@ export default function piBeadsLean(pi: any) {
         inProgress.ok ? fmtRows(inProgress.out) : "(error)",
         "",
         "Ready:",
-        ready.ok ? fmtRows(ready.out) : "(error)",
+        ready.ok ? fmtRows(stripTemplates(ready.out)) : "(error)",
       ].join("\n");
       ctx?.ui?.notify?.(out, "info");
     },

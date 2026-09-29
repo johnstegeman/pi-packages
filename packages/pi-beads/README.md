@@ -124,7 +124,7 @@ MCP transport, and what comes back is a digest rather than raw JSON.
 
 | Tool | What it does |
 |---|---|
-| `beads_ready` | Issues ready to work (open and unblocked) across all repositories; `claim: true` atomically claims the first match (`bd ready --claim`), read-only when omitted |
+| `beads_ready` | Issues ready to work (open and unblocked) across all repositories; **template protos are excluded**; `claim: true` claims the first non-template match (not bd-atomic), read-only when omitted |
 | `beads_list` | A list filtered by status (`open,in_progress,blocked,deferred,closed`) |
 | `beads_show` | The essential fields of one issue: status, priority, type, dependencies; `full: true` includes the whole description body |
 | `beads_deps` | Blockers or dependents: a tree for one id, compact lines for several |

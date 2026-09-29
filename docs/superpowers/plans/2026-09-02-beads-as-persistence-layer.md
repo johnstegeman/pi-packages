@@ -176,6 +176,8 @@ bd cook superpowers-workflow --var topic="<topic>" --persist
 bd mol pour superpowers-workflow --var topic="<topic>"
 ```
 
+> Superseded 2026-09-29: `--persist` is legacy; the workflow is poured from the bundled formula by name. The persisted proto was the source of the `bd ready` leak.
+
 Note the returned root issue id (the `Root issue:` line) — this is the molecule you work
 against for the rest of this skill and for `writing-plans`/`executing-plans` afterward.
 
