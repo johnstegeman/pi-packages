@@ -1480,12 +1480,23 @@ test("single-repo: beads_close claimNext surfaces a claim-write failure as a war
     resetLog();
     const r = await s.byName.get("beads_close").execute("c", { ids: "proj-t9", reason: "done", claimNext: true });
     assert.ok(okResult(r), JSON.stringify(r));
-    assert.match(r.content[0].text, /claim write failed/);
+    assert.match(r.content[0].text, /could not claim/);
     assert.match(r.content[0].text, /warning:/);
     assert.doesNotMatch(r.content[0].text, /no claimable next issue/);
   } finally {
     delete process.env.FAKE_BD_UPDATE_FAIL;
   }
+});
+
+test("single-repo: beads_close batches one beads:changed per repo when claimNext cascades", async () => {
+  const s = await openSession("single", repoDir);
+  resetLog();
+  s.emitted.length = 0;
+  const r = await s.byName.get("beads_close").execute("c", { ids: "proj-t9", reason: "done", claimNext: true });
+  assert.ok(okResult(r), JSON.stringify(r));
+  assert.equal(s.emitted.filter((e) => e === "beads:changed").length, 1, "one emit per repo");
+  assert.match(r.content[0].text, /claimed next: proj-1a2/);
+  findInvocation(["close", "proj-imp2"]); // the cascade really ran
 });
 
 test("umbrella: close cascade failure is not overwritten by a later repo failure", async () => {

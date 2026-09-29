@@ -446,23 +446,22 @@ export default function piBeadsLean(pi: any) {
     return JSON.stringify(arr.filter((r: any) => r?.is_template !== true));
   }
 
-  // bd's own --claim-next selects from the same ready set that leaks template
-  // protos, and no bd flag can exclude them (the `template` label is on the
-  // molecule root only). Select client-side instead, over filtered rows.
-  async function claimNextReady(dir: string): Promise<{ id?: string; error?: string }> {
-    // Bound the fetch: template heads are rare, so one head is normally the only
-    // row skipped by stripTemplates — a small window suffices.
-    const rr = await bd(["ready", "--json", "--include-ephemeral", "-n", "50"], dir);
-    if (!rr.ok) return { error: `bd ready failed: ${rr.err}` };
-    const parsed = jparse(stripTemplates(rr.out));
+  // Select-and-claim core shared by `beads_ready` and `beads_close`'s claimNext.
+  // `filtered` is already-template-stripped `bd ready --json`. It does NOT emit —
+  // each caller decides when (beads_close batches one emit per repo).
+  async function claimHead(
+    filtered: string,
+  ): Promise<{ id?: string; dir?: string; error?: string }> {
+    const parsed = jparse(filtered);
     const arr = Array.isArray(parsed) ? parsed : parsed?.issues;
     const head = Array.isArray(arr) ? arr[0] : null;
     const id = head?.id ? String(head.id) : null;
     if (!id) return {};
+    const dir = dirForPrefix(id);
+    if (!dir) return {}; // unresolvable owner → nothing claimed
     const c = await bd(["update", id, "--claim"], dir);
-    if (!c.ok) return { error: `selected next ${id} but the claim write failed: ${c.err}` };
-    await afterWrite(dir);
-    return { id };
+    if (!c.ok) return { error: `could not claim ${id}: ${c.err}` };
+    return { id, dir };
   }
 
   function fmtRows(json: string): string {
@@ -792,15 +791,9 @@ export default function piBeadsLean(pi: any) {
       // Select client-side so a template head can never be claimed. The owning-repo
       // `bd update <id> --claim` is the sole durable claim path (it also emits
       // beads:changed once); nothing mutates the aggregate read-replica.
-      const parsed = jparse(filtered);
-      const claimed = Array.isArray(parsed) ? parsed[0] : parsed?.issues?.[0];
-      const claimedId = claimed?.id ? String(claimed.id) : null;
-      const dir = claimedId ? dirForPrefix(claimedId) : null;
-      if (!claimedId || !dir) return textResult(fmtRows(filtered));
-      const c = await bd(["update", claimedId, "--claim"], dir);
-      if (!c.ok)
-        return textResult(`claimed ${claimedId} but repo claim failed: ${c.err}`);
-      await afterWrite(dir);
+      const cn = await claimHead(filtered);
+      if (cn.error) return textResult(cn.error);
+      if (cn.id && cn.dir) await afterWrite(cn.dir);
       return textResult(fmtRows(filtered));
     },
   });
@@ -1329,6 +1322,7 @@ export default function piBeadsLean(pi: any) {
       const claimedNext: string[] = [];
       let claimError = false;
       for (const [dir, rids] of byRepo) {
+        let changed = false;
         const args = ["close", ...rids];
         if (params.reason) args.push("-r", String(params.reason));
         if (params?.continue === true || params?.continue === "true") args.push("--continue");
@@ -1342,7 +1336,7 @@ export default function piBeadsLean(pi: any) {
           // neither silently skipped nor omitted from the accumulated failure.
           continue;
         }
-        await afterWrite(dir);
+        changed = true;
         closedIds.push(...rids);
         // cascade: closing a task may close its parent step once no open task-children remain
         for (const cid of rids) {
@@ -1363,20 +1357,31 @@ export default function piBeadsLean(pi: any) {
               failure = failure ? `${failure}; ${msg}` : msg;
               break;
             }
-            await afterWrite(dir);
+            changed = true;
             closedIds.push(nxt);
             const prev = nxt;
             nxt = await parentStepToClose(prev, dir);
           }
         }
         if (claimNext) {
-          const cn = await claimNextReady(dir);
-          if (cn.id) claimedNext.push(cn.id);
-          if (cn.error) {
+          const rr = await bd(["ready", "--json", "--include-ephemeral", "-n", "50"], dir);
+          if (!rr.ok) {
             claimError = true;
-            failure = failure ? `${failure}; ${cn.error}` : cn.error;
+            const msg = `bd ready failed: ${rr.err}`;
+            failure = failure ? `${failure}; ${msg}` : msg;
+          } else {
+            const cn = await claimHead(stripTemplates(rr.out));
+            if (cn.id) {
+              claimedNext.push(cn.id);
+              changed = true;
+            }
+            if (cn.error) {
+              claimError = true;
+              failure = failure ? `${failure}; ${cn.error}` : cn.error;
+            }
           }
         }
+        if (changed) await afterWrite(dir);
       }
       const claimNote = claimNext
         ? claimedNext.length
