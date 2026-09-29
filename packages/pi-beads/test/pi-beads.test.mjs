@@ -443,15 +443,16 @@ function makePi() {
   const status = [];
   const handlers = {};
   const tools = [];
+  const commands = [];
   const pi = {
     events: { emit: (name) => emitted.push(name) },
     on: (ev, fn) => (handlers[ev] ??= []).push(fn),
     registerTool: (t) => tools.push(t),
-    registerCommand: () => {},
+    registerCommand: (name, def) => commands.push({ name, def }),
   };
   piBeadsLean(pi);
   const byName = new Map(tools.map((t) => [t.name, t]));
-  return { pi, emitted, status, handlers, byName, tools };
+  return { pi, emitted, status, handlers, byName, tools, commands };
 }
 
 async function openSession(env, cwd) {
@@ -1318,6 +1319,17 @@ test("single-repo: beads_ready claim with only a template row mutates nothing", 
     delete process.env.FAKE_BD_READY_EMPTY;
   }
 });
+test("single-repo: /beads board excludes template rows", async () => {
+  const s = await openSession("single", repoDir);
+  resetLog();
+  const board = s.commands.find((c) => c.name === "beads");
+  assert.ok(board, "the /beads command must be registered");
+  let notified = "";
+  await board.def.handler("", { ui: { notify: (t) => { notified = t; } } });
+  assert.match(notified, /proj-1a2/);
+  assert.doesNotMatch(notified, /superpowers-workflow/);
+});
+
 
 test("single-repo: beads_close maps continue/next flags and still cascades", async () => {
   const s = await openSession("single", repoDir);

@@ -58,6 +58,13 @@ test("pi-tools.md enumerates every tool and SubagentWorkflow", () => {
 test("beads SKILL.md surfaces the workflow-critical tools", () => {
   assert.deepEqual(missing(skill, WORKFLOW_CRITICAL), [], "workflow-critical tools missing from SKILL.md");
 });
+test("beads_ready docs state the template exclusion", () => {
+  const readyRow = (doc) => doc.split("\n").find((l) => /^\|\s*`beads_ready/.test(l)) ?? "";
+  for (const [name, doc] of [["README.md", readme], ["skills/beads/SKILL.md", skill]]) {
+    const row = readyRow(doc);
+    assert.match(row, /template/i, `${name} beads_ready row must mention template exclusion`);
+  }
+});
 
 if (failures) {
   console.error(`\ntool-surface: ${failures} test(s) failed`);

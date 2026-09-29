@@ -1923,7 +1923,7 @@ export default function piBeadsLean(pi: any) {
         inProgress.ok ? fmtRows(inProgress.out) : "(error)",
         "",
         "Ready:",
-        ready.ok ? fmtRows(ready.out) : "(error)",
+        ready.ok ? fmtRows(stripTemplates(ready.out)) : "(error)",
       ].join("\n");
       ctx?.ui?.notify?.(out, "info");
     },
