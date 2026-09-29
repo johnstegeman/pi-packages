@@ -436,10 +436,13 @@ export default function piBeadsLean(pi: any) {
   // A proto/template `bd ready` row carries no labels (the `template` label sits on
   // the molecule ROOT), so bd's label/type filters cannot drop it. `is_template` is
   // the only reliable per-row marker; strip those rows client-side.
+  // FAILS OPEN by design: when the payload is neither a bare array nor `{issues:[]}`
+  // (e.g. an unparseable envelope or a new bd shape) the input is returned UNCHANGED,
+  // so a bd envelope change degrades to today's behaviour instead of hiding rows.
   function stripTemplates(json: string): string {
     const o = jparse(json);
     const arr = Array.isArray(o) ? o : o?.issues;
-    if (!Array.isArray(arr)) return json;
+    if (!Array.isArray(arr)) return json; // fail open — see the note above
     return JSON.stringify(arr.filter((r: any) => r?.is_template !== true));
   }
 
@@ -761,6 +764,10 @@ export default function piBeadsLean(pi: any) {
       if (params?.labelAny) rargs.push("--label-any", String(params.labelAny));
       const r = await bd(rargs, scope);
       if (!r.ok) return textResult(`bd ready failed: ${r.err}`);
+      // bd applies `-n <limit>` BEFORE this client-side filter, so a limited window can
+      // under-report when template rows occupy slots (and `claim:true` with a very small
+      // limit can find nothing even though real work exists). Accepted: at the default
+      // limit and with typically one template head this is negligible.
       const filtered = stripTemplates(r.out);
       if (!claim) return textResult(fmtRows(filtered));
       // Select client-side so a template head can never be claimed. The owning-repo
@@ -1755,7 +1762,10 @@ export default function piBeadsLean(pi: any) {
       await ensureTopology();
       if (!params?.id) return textResult("id is required");
       await ensureFresh();
-      // Unlike beads_ready, beads_mol_ready intentionally omits --include-ephemeral (durable molecule steps; matches molShow/molCurrent).
+      // Deliberate asymmetry with beads_ready: this tool is scoped to ONE molecule and
+      // MUST return a template's steps, so it deliberately does NOT call stripTemplates.
+      // Unlike beads_ready, beads_mol_ready intentionally omits --include-ephemeral
+      // (durable molecule steps; matches molShow/molCurrent).
       const args = ["ready", "--mol", String(params.id), "--json"];
       if (params?.limit) args.push("-n", String(params.limit));
       const r = await bd(args, umbrella);

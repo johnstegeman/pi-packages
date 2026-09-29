@@ -142,12 +142,28 @@ case "$1" in
         *empty*)
           printf '{"molecule_id":"%s-m0","molecule_title":"Empty Mol","ready_steps":0,"total_steps":3,"steps":null}\n' "$MOLP" ;;
         *)
-          printf '{"molecule_id":"%s-m0","molecule_title":"Demo Mol","ready_steps":2,"total_steps":4,"steps":[{"parallel_info":{"is_ready":true,"step_id":"%s-t1"},"issue":{"id":"%s-t1","priority":1,"status":"open","title":"Task one"}},{"parallel_info":{"is_ready":true,"step_id":"%s-t2"},"issue":{"id":"%s-t2","priority":2,"status":"open","title":"Task two"}}]}\n' "$MOLP" "$MOLP" "$MOLP" "$MOLP" "$MOLP" ;;
+          printf '{"molecule_id":"%s-m0","molecule_title":"Demo Mol","ready_steps":2,"total_steps":4,"steps":[{"parallel_info":{"is_ready":true,"step_id":"%s-t1"},"issue":{"id":"%s-t1","priority":1,"status":"open","title":"Task one","is_template":true}},{"parallel_info":{"is_ready":true,"step_id":"%s-t2"},"issue":{"id":"%s-t2","priority":2,"status":"open","title":"Task two","is_template":true}}]}\n' "$MOLP" "$MOLP" "$MOLP" "$MOLP" "$MOLP" ;;
       esac
       exit 0
     fi
     if [ "\${FAKE_BD_READY_EMPTY:-0}" = "1" ]; then
       printf '%s\n' '[{"id":"superpowers-workflow.explore","priority":2,"status":"open","title":"Explore project context: {{topic}}","is_template":true}]'
+      exit 0
+    fi
+    if [ "\${FAKE_BD_READY_INTERLEAVED:-0}" = "1" ]; then
+      printf '%s\n' '[{"id":"proj-1a2","priority":1,"status":"open","title":"Repo work"},{"id":"superpowers-workflow.explore","priority":2,"status":"open","title":"Explore project context: {{topic}}","is_template":true}]'
+      exit 0
+    fi
+    if [ "\${FAKE_BD_READY_FALSE:-0}" = "1" ]; then
+      printf '%s\n' '[{"id":"proj-1a2","priority":1,"status":"open","title":"Repo work","is_template":false}]'
+      exit 0
+    fi
+    if [ "\${FAKE_BD_READY_WRAPPED:-0}" = "1" ]; then
+      printf '%s\n' '{"issues":[{"id":"superpowers-workflow.explore","priority":2,"status":"open","title":"Explore project context: {{topic}}","is_template":true},{"id":"proj-1a2","priority":1,"status":"open","title":"Repo work"}]}'
+      exit 0
+    fi
+    if [ "\${FAKE_BD_READY_OK:-0}" = "1" ]; then
+      printf 'ok\n'
       exit 0
     fi
     if [ "$MODE" = "umbrella" ]; then
@@ -1330,6 +1346,73 @@ test("single-repo: /beads board excludes template rows", async () => {
   assert.doesNotMatch(notified, /superpowers-workflow/);
 });
 
+test("single-repo: beads_ready filters a template row that appears after a real row", async () => {
+  process.env.FAKE_BD_READY_INTERLEAVED = "1";
+  try {
+    const s = await openSession("single", repoDir);
+    resetLog();
+    const r = await s.byName.get("beads_ready").execute("c", { limit: 5 });
+    assert.ok(okResult(r), JSON.stringify(r));
+    const text = r.content[0].text;
+    assert.match(text, /proj-1a2/, "the real row after the template must be listed");
+    assert.doesNotMatch(text, /superpowers-workflow/, "the later template row must be filtered");
+  } finally {
+    delete process.env.FAKE_BD_READY_INTERLEAVED;
+  }
+});
+
+test("single-repo: beads_ready keeps a row with an explicit is_template:false", async () => {
+  process.env.FAKE_BD_READY_FALSE = "1";
+  try {
+    const s = await openSession("single", repoDir);
+    resetLog();
+    const r = await s.byName.get("beads_ready").execute("c", { limit: 5 });
+    assert.ok(okResult(r), JSON.stringify(r));
+    assert.match(r.content[0].text, /proj-1a2/, "is_template:false must be kept");
+  } finally {
+    delete process.env.FAKE_BD_READY_FALSE;
+  }
+});
+
+test("single-repo: beads_ready filters templates from an {issues:[...]} envelope", async () => {
+  process.env.FAKE_BD_READY_WRAPPED = "1";
+  try {
+    const s = await openSession("single", repoDir);
+    resetLog();
+    const r = await s.byName.get("beads_ready").execute("c", { limit: 5 });
+    assert.ok(okResult(r), JSON.stringify(r));
+    const text = r.content[0].text;
+    assert.match(text, /proj-1a2/, "the object-wrapped real row must be listed");
+    assert.doesNotMatch(text, /superpowers-workflow/, "the object-wrapped template row must be filtered");
+  } finally {
+    delete process.env.FAKE_BD_READY_WRAPPED;
+  }
+});
+
+test("single-repo: beads_ready fails open on an unparseable payload", async () => {
+  process.env.FAKE_BD_READY_OK = "1";
+  try {
+    const s = await openSession("single", repoDir);
+    resetLog();
+    const r = await s.byName.get("beads_ready").execute("c", { limit: 5 });
+    assert.ok(okResult(r), JSON.stringify(r));
+    assert.equal(r.content[0].text, "ok", "an unparseable payload must be returned unchanged");
+  } finally {
+    delete process.env.FAKE_BD_READY_OK;
+  }
+});
+
+test("single-repo: beads_mol_ready still returns a template molecule's steps", async () => {
+  // Deliberate asymmetry (DoD): beads_mol_ready must NOT strip template rows — it is
+  // scoped to one molecule and has to return its steps, even when they are is_template.
+  const s = await openSession("single", repoDir);
+  resetLog();
+  const r = await s.byName.get("beads_mol_ready").execute("c", { id: "proj-m1" });
+  assert.ok(okResult(r), JSON.stringify(r));
+  const t = r.content[0].text;
+  assert.match(t, /proj-t1 P1 \[open\] Task one/);
+  assert.match(t, /proj-t2 P2 \[open\] Task two/);
+});
 
 test("single-repo: beads_close maps continue/next flags and still cascades", async () => {
   const s = await openSession("single", repoDir);

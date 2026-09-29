@@ -62,7 +62,7 @@ test("beads_ready docs state the template exclusion", () => {
   const readyRow = (doc) => doc.split("\n").find((l) => /^\|\s*`beads_ready/.test(l)) ?? "";
   for (const [name, doc] of [["README.md", readme], ["skills/beads/SKILL.md", skill]]) {
     const row = readyRow(doc);
-    assert.match(row, /template/i, `${name} beads_ready row must mention template exclusion`);
+    assert.match(row, /template protos are excluded/i, `${name} beads_ready row must state the template exclusion`);
   }
 });
 

@@ -1,7 +1,7 @@
 # Design: stop template protos leaking into ready work; retire `bd cook --persist`
 
 Date: 2026-09-29
-Status: approved (design review), pending implementation
+Status: approved; implemented (commits b8572f4..9e09a2d)
 Tracking: `pi-packages-h0ym` (bug), molecule `pi-packages-mol-hg7b`
 
 ## Problem
