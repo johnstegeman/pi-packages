@@ -138,6 +138,8 @@ template and is not itself a mutation the widget needs to react to; `bd mol
 pour` (the step that creates real, trackable issues) is the one that must go
 through a tool.
 
+> Superseded 2026-09-29: `--persist` is legacy; the workflow is poured from the bundled formula by name. The persisted proto was the source of the `bd ready` leak.
+
 No skill references `bd close --force` today, so no force-close call sites
 need fixing beyond ensuring steps are claimed/closed/gates-resolved in the
 documented order (already the documented behavior — this design doesn't
