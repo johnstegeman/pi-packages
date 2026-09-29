@@ -743,7 +743,7 @@ export default function piBeadsLean(pi: any) {
         claim: {
           type: "boolean",
           description:
-            "Atomically claim the first ready issue matching the filters (bd ready --claim). This is a write: the claim is persisted in the owning repo and emits beads:changed. Read-only when omitted.",
+            "Claim the first ready issue matching the filters. Selection is client-side (over filtered `bd ready` rows); the claim is then persisted in the owning repo via `bd update <id> --claim` and emits beads:changed. This is a write. Read-only when omitted.",
         },
       },
     },
@@ -763,9 +763,9 @@ export default function piBeadsLean(pi: any) {
       if (!r.ok) return textResult(`bd ready failed: ${r.err}`);
       const filtered = stripTemplates(r.out);
       if (!claim) return textResult(fmtRows(filtered));
-      // Select client-side so a template head can never be claimed. Umbrella mode
-      // mutates only the aggregate read-replica, so the durable claim is re-asserted
-      // in the owning repo (which also emits beads:changed once).
+      // Select client-side so a template head can never be claimed. The owning-repo
+      // `bd update <id> --claim` is the sole durable claim path (it also emits
+      // beads:changed once); nothing mutates the aggregate read-replica.
       const parsed = jparse(filtered);
       const claimed = Array.isArray(parsed) ? parsed[0] : parsed?.issues?.[0];
       const claimedId = claimed?.id ? String(claimed.id) : null;
@@ -773,7 +773,7 @@ export default function piBeadsLean(pi: any) {
       if (!claimedId || !dir) return textResult(fmtRows(filtered));
       const c = await bd(["update", claimedId, "--claim"], dir);
       if (!c.ok)
-        return textResult(`claimed ${claimedId} in aggregate but repo claim failed: ${c.err}`);
+        return textResult(`claimed ${claimedId} but repo claim failed: ${c.err}`);
       await afterWrite(dir);
       return textResult(fmtRows(filtered));
     },
