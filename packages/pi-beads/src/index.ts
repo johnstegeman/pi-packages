@@ -450,7 +450,9 @@ export default function piBeadsLean(pi: any) {
   // protos, and no bd flag can exclude them (the `template` label is on the
   // molecule root only). Select client-side instead, over filtered rows.
   async function claimNextReady(dir: string): Promise<{ id?: string; error?: string }> {
-    const rr = await bd(["ready", "--json", "--include-ephemeral"], dir);
+    // Bound the fetch: template heads are rare, so one head is normally the only
+    // row skipped by stripTemplates — a small window suffices.
+    const rr = await bd(["ready", "--json", "--include-ephemeral", "-n", "50"], dir);
     if (!rr.ok) return { error: `bd ready failed: ${rr.err}` };
     const parsed = jparse(stripTemplates(rr.out));
     const arr = Array.isArray(parsed) ? parsed : parsed?.issues;
@@ -458,7 +460,7 @@ export default function piBeadsLean(pi: any) {
     const id = head?.id ? String(head.id) : null;
     if (!id) return {};
     const c = await bd(["update", id, "--claim"], dir);
-    if (!c.ok) return { error: `claimed next ${id} but repo claim failed: ${c.err}` };
+    if (!c.ok) return { error: `selected next ${id} but the claim write failed: ${c.err}` };
     await afterWrite(dir);
     return { id };
   }
@@ -1325,6 +1327,7 @@ export default function piBeadsLean(pi: any) {
       let failure: string | null = null;
       const claimNext = params?.claimNext === true || params?.claimNext === "true";
       const claimedNext: string[] = [];
+      let claimError = false;
       for (const [dir, rids] of byRepo) {
         const args = ["close", ...rids];
         if (params.reason) args.push("-r", String(params.reason));
@@ -1369,13 +1372,18 @@ export default function piBeadsLean(pi: any) {
         if (claimNext) {
           const cn = await claimNextReady(dir);
           if (cn.id) claimedNext.push(cn.id);
-          if (cn.error) failure = failure ? `${failure}; ${cn.error}` : cn.error;
+          if (cn.error) {
+            claimError = true;
+            failure = failure ? `${failure}; ${cn.error}` : cn.error;
+          }
         }
       }
       const claimNote = claimNext
         ? claimedNext.length
           ? `; claimed next: ${claimedNext.join(", ")}`
-          : "; no claimable next issue"
+          : claimError
+            ? "" // the warning: line already reports the failed claim
+            : "; no claimable next issue"
         : "";
       if (failure) {
         const done = closedIds.length ? `closed ${closedIds.join(", ")}${claimNote}\nwarning: ${failure}` : failure;

@@ -146,6 +146,7 @@ case "$1" in
       esac
       exit 0
     fi
+    if [ "\${FAKE_BD_READY_FAIL:-0}" = "1" ]; then echo "boom" >&2; exit 1; fi
     if [ "\${FAKE_BD_READY_EMPTY:-0}" = "1" ]; then
       printf '%s\n' '[{"id":"superpowers-workflow.explore","priority":2,"status":"open","title":"Explore project context: {{topic}}","is_template":true}]'
       exit 0
@@ -409,6 +410,7 @@ case "$1" in
     for a in "$@"; do [ "$a" = "crmback-fail" ] && { echo "boom" >&2; exit 1; }; done
     echo "ok"; exit 0 ;;
   update)
+    if [ "\${FAKE_BD_UPDATE_FAIL:-0}" = "1" ]; then echo "boom" >&2; exit 1; fi
     if [ "$MODE" = "ws-fail" ]; then
       for a in "$@"; do case "$a" in ws:*) echo "boom" >&2; exit 1 ;; esac; done
     fi
@@ -1425,7 +1427,7 @@ test("single-repo: beads_close maps continue/next flags, claims client-side, and
   findInvocation(["close", "proj-t9", "-r", "done", "--continue", "--suggest-next", "--no-auto"]);
   assertNoInvocation(["close", "proj-t9", "-r", "done", "--continue", "--suggest-next", "--claim-next", "--no-auto"]);
   // the next issue is selected client-side: a filtered ready query then an update --claim
-  findInvocation(["ready", "--json", "--include-ephemeral"]);
+  findInvocation(["ready", "--json", "--include-ephemeral", "-n", "50"]);
   findInvocation(["update", "proj-1a2", "--claim"]);
   assert.match(r.content[0].text, /claimed next: proj-1a2/);
   assert.doesNotMatch(r.content[0].text, /superpowers-workflow/);
@@ -1453,6 +1455,36 @@ test("single-repo: beads_close claimNext reports when only template rows are rea
     assertNoInvocation(["update", "superpowers-workflow.explore", "--claim"]);
   } finally {
     delete process.env.FAKE_BD_READY_EMPTY;
+  }
+});
+
+test("single-repo: beads_close claimNext surfaces a bd ready failure as a warning, not 'no next'", async () => {
+  process.env.FAKE_BD_READY_FAIL = "1";
+  try {
+    const s = await openSession("single", repoDir);
+    resetLog();
+    const r = await s.byName.get("beads_close").execute("c", { ids: "proj-t9", reason: "done", claimNext: true });
+    assert.ok(okResult(r), JSON.stringify(r));
+    assert.match(r.content[0].text, /bd ready failed/);
+    assert.match(r.content[0].text, /warning:/);
+    assert.doesNotMatch(r.content[0].text, /no claimable next issue/);
+  } finally {
+    delete process.env.FAKE_BD_READY_FAIL;
+  }
+});
+
+test("single-repo: beads_close claimNext surfaces a claim-write failure as a warning, not 'no next'", async () => {
+  process.env.FAKE_BD_UPDATE_FAIL = "1";
+  try {
+    const s = await openSession("single", repoDir);
+    resetLog();
+    const r = await s.byName.get("beads_close").execute("c", { ids: "proj-t9", reason: "done", claimNext: true });
+    assert.ok(okResult(r), JSON.stringify(r));
+    assert.match(r.content[0].text, /claim write failed/);
+    assert.match(r.content[0].text, /warning:/);
+    assert.doesNotMatch(r.content[0].text, /no claimable next issue/);
+  } finally {
+    delete process.env.FAKE_BD_UPDATE_FAIL;
   }
 });
 

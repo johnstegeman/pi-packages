@@ -1,7 +1,7 @@
 # Design: close the `beads_close --claim-next` template-claim surface
 
 Date: 2026-09-29
-Status: approved (design review), pending implementation
+Status: approved; implemented (commits 44cb5b9..60f5cb1)
 Tracking: `pi-packages-vkw2` (bug), molecule `pi-packages-mol-8w3m`
 Follows: PR #65 (merged) — `beads_ready` + `/beads` board template filtering
 
