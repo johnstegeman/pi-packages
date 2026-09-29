@@ -146,17 +146,16 @@ case "$1" in
       esac
       exit 0
     fi
-    CLAIMFLAG=0
-    for a in "$@"; do [ "$a" = "--claim" ] && CLAIMFLAG=1; done
-    if [ "$CLAIMFLAG" = "1" ]; then
-      if [ "$MODE" = "umbrella" ]; then
-        printf '[{"id":"crmback-1a2","priority":1,"status":"open","title":"Backend work"}]\n'
-      else
-        printf '[{"id":"proj-1a2","priority":1,"status":"open","title":"Repo work"}]\n'
-      fi
+    if [ "\${FAKE_BD_READY_EMPTY:-0}" = "1" ]; then
+      printf '%s\n' '[{"id":"superpowers-workflow.explore","priority":2,"status":"open","title":"Explore project context: {{topic}}","is_template":true}]'
       exit 0
     fi
-    echo "ok"; exit 0
+    if [ "$MODE" = "umbrella" ]; then
+      printf '%s\n' '[{"id":"superpowers-workflow.explore","priority":2,"status":"open","title":"Explore project context: {{topic}}","is_template":true},{"id":"crmback-1a2","priority":1,"status":"open","title":"Backend work"}]'
+    else
+      printf '%s\n' '[{"id":"superpowers-workflow.explore","priority":2,"status":"open","title":"Explore project context: {{topic}}","is_template":true},{"id":"proj-1a2","priority":1,"status":"open","title":"Repo work"}]'
+    fi
+    exit 0
     ;;
   mol)
     if [ "$2" = "pour" ]; then
@@ -1279,16 +1278,45 @@ test("single-repo: close cascade treats an already-closed parent as success", as
   findInvocation(["show", "proj-closed-parent", "--json"]);
 });
 
-test("single-repo: beads_ready claim re-asserts in the owning repo and emits", async () => {
+test("single-repo: beads_ready excludes template rows", async () => {
+  const s = await openSession("single", repoDir);
+  resetLog();
+  const r = await s.byName.get("beads_ready").execute("c", { limit: 5 });
+  assert.ok(okResult(r), JSON.stringify(r));
+  const text = r.content[0].text;
+  assert.match(text, /proj-1a2/);
+  assert.doesNotMatch(text, /superpowers-workflow/);
+  findInvocation(["ready", "--json", "--include-ephemeral", "-n", "5"]);
+  assert.equal(s.emitted.length, 0, "a read must not emit");
+});
+
+test("single-repo: beads_ready claim skips the template head and claims the first real row", async () => {
   const s = await openSession("single", repoDir);
   resetLog();
   const r = await s.byName.get("beads_ready").execute("c", { limit: 5, claim: true });
   assert.ok(okResult(r), JSON.stringify(r));
-  findInvocation(["ready", "--json", "--include-ephemeral", "-n", "5", "--claim"]);
-  // the claim is a write: it is re-asserted in the owning repo and emits once
+  // no server-side --claim any more; the fixture's first row is a template
+  findInvocation(["ready", "--json", "--include-ephemeral", "-n", "5"]);
+  assertNoInvocation(["ready", "--json", "--include-ephemeral", "-n", "5", "--claim"]);
   findInvocation(["update", "proj-1a2", "--claim"]);
+  assert.doesNotMatch(r.content[0].text, /superpowers-workflow/);
   assert.equal(s.emitted.length, 1);
   assert.equal(s.emitted.at(-1), "beads:changed");
+});
+
+test("single-repo: beads_ready claim with only a template row mutates nothing", async () => {
+  process.env.FAKE_BD_READY_EMPTY = "1";
+  try {
+    const s = await openSession("single", repoDir);
+    resetLog();
+    const r = await s.byName.get("beads_ready").execute("c", { limit: 5, claim: true });
+    assert.ok(okResult(r), JSON.stringify(r));
+    assert.doesNotMatch(r.content[0].text, /superpowers-workflow/);
+    assertNoInvocation(["update", "proj-1a2", "--claim"]);
+    assert.equal(s.emitted.length, 0, "no claim -> no beads:changed");
+  } finally {
+    delete process.env.FAKE_BD_READY_EMPTY;
+  }
 });
 
 test("single-repo: beads_close maps continue/next flags and still cascades", async () => {
@@ -1672,8 +1700,9 @@ test("umbrella: beads_ready claim routes the re-assert to the owning repo and em
   resetLog();
   const r = await s.byName.get("beads_ready").execute("c", { limit: 5, claim: true });
   assert.ok(okResult(r), JSON.stringify(r));
-  // atomic selection still runs against the umbrella aggregate
-  findInvocation(["ready", "--json", "--include-ephemeral", "-n", "5", "--claim"]);
+  // selection now runs client-side against the aggregate; no --claim is passed
+  findInvocation(["ready", "--json", "--include-ephemeral", "-n", "5"]);
+  assertNoInvocation(["ready", "--json", "--include-ephemeral", "-n", "5", "--claim"]);
   // the durable re-assert is routed to the claimed id's owning repo (backend)
   const upd = invocationsWithCwd().find(
     (iv) =>

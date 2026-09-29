@@ -433,6 +433,16 @@ export default function piBeadsLean(pi: any) {
     }
   }
 
+  // A proto/template `bd ready` row carries no labels (the `template` label sits on
+  // the molecule ROOT), so bd's label/type filters cannot drop it. `is_template` is
+  // the only reliable per-row marker; strip those rows client-side.
+  function stripTemplates(json: string): string {
+    const o = jparse(json);
+    const arr = Array.isArray(o) ? o : o?.issues;
+    if (!Array.isArray(arr)) return json;
+    return JSON.stringify(arr.filter((r: any) => r?.is_template !== true));
+  }
+
   function fmtRows(json: string): string {
     let arr: any[];
     try {
@@ -749,23 +759,23 @@ export default function piBeadsLean(pi: any) {
       const rargs = ["ready", "--json", "--include-ephemeral", "-n", String(params?.limit ?? 15)];
       if (params?.label) rargs.push("--label", String(params.label));
       if (params?.labelAny) rargs.push("--label-any", String(params.labelAny));
-      if (claim) rargs.push("--claim");
       const r = await bd(rargs, scope);
       if (!r.ok) return textResult(`bd ready failed: ${r.err}`);
-      if (!claim) return textResult(fmtRows(r.out));
-      // bd ready --claim is atomic, but in umbrella mode it mutates only the
-      // aggregate read-replica (reverted on the next repo sync). Re-assert the
-      // claim in the owning repo so it persists and emits beads:changed once.
-      const parsed = jparse(r.out);
+      const filtered = stripTemplates(r.out);
+      if (!claim) return textResult(fmtRows(filtered));
+      // Select client-side so a template head can never be claimed. Umbrella mode
+      // mutates only the aggregate read-replica, so the durable claim is re-asserted
+      // in the owning repo (which also emits beads:changed once).
+      const parsed = jparse(filtered);
       const claimed = Array.isArray(parsed) ? parsed[0] : parsed?.issues?.[0];
       const claimedId = claimed?.id ? String(claimed.id) : null;
       const dir = claimedId ? dirForPrefix(claimedId) : null;
-      if (!claimedId || !dir) return textResult(fmtRows(r.out));
+      if (!claimedId || !dir) return textResult(fmtRows(filtered));
       const c = await bd(["update", claimedId, "--claim"], dir);
       if (!c.ok)
         return textResult(`claimed ${claimedId} in aggregate but repo claim failed: ${c.err}`);
       await afterWrite(dir);
-      return textResult(fmtRows(r.out));
+      return textResult(fmtRows(filtered));
     },
   });
 
