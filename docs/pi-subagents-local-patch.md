@@ -52,6 +52,36 @@ The port is:
 This divergence carries **no** `LOCAL PATCH` markers. We own the file outright, so the
 port is simply the state of our copy — not a patch applied on top of somebody else's.
 
+## Divergence 3 — code-mode exposure, namespace and structured output (Task 6)
+
+The code-mode plan (`docs/superpowers/specs/2026-09-30-codemode-adoption-design.md`) moves
+three of this package's four tools off `direct` exposure, so their declarations stop shipping
+in every prompt. `Agent` is deliberately untouched: its description carries behavioural
+guidance the model must keep seeing.
+
+| Tool | Before | After |
+|---|---|---|
+| `SubagentWorkflow` | `direct` | `exposure: "deferred"` + the `subagents` namespace |
+| `get_subagent_result` | `direct` | `exposure: "codemode"` + the namespace + `outputSchema` + `structuredContent` on both return paths |
+| `steer_subagent` | `direct` | `exposure: "codemode"` + the namespace |
+| `Agent` | `direct` | unchanged |
+
+Files: `src/index.ts` only (the namespace constant, the exposure fields, the output schema, and
+the two wrapped returns). The upstream tool implementations, descriptions and parameter
+schemas are untouched.
+
+**Consequence, not a bug:** pi auto-activates only `direct`/`model-only` tools, so these three
+are *registered but not declared* in any session that has not activated them. Reaching them
+without a codemode script — an SDK or print-mode session, a subagent whose loader has no
+codemode — answers `Tool not found`. The design accepts that (decision 2), and this package's
+own print-mode e2e suites opt the tool back in explicitly (`activateTools` in
+`test/helpers/print-mode-runner.ts`) because they script direct calls. Task 7 adds the
+activation path for real subagent sessions.
+
+Covered by `test/tool-exposure.test.ts` (instantiates the real extension with a mock `pi` and
+inspects the registered tool objects) and by the `structuredContent` assertion in
+`test/foreground-result-retrieval.test.ts`.
+
 ### The mention clone's transcript seeding
 
 `src/mention-clone.ts` seeds its throwaway session through that session's own
@@ -81,7 +111,7 @@ handed).
 
 ## In-code marker convention
 
-Later divergences — the code-mode exposure/namespace/outputSchema changes from Tasks 6
+Divergences 3 and 4 — the code-mode exposure/namespace/outputSchema changes from Tasks 6
 and 7 — **are** marked, because they are small, surgical edits a future reader could
 otherwise mistake for upstream behaviour:
 

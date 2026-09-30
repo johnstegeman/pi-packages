@@ -54,7 +54,8 @@ on-by-default for the user's sessions and subagents.
    off (`-builtin:codemode`, `--no-extensions`, an SDK session, a subagent that does not
    inherit it). This was chosen deliberately over a dynamic-exposure design.
 3. **The packages self-guarantee codemode.** No reliance on out-of-repo
-   `settings.json`. Subagent sessions get it through a pi-subagents patch.
+   `settings.json`. Subagent sessions get it through a change to our vendored pi-subagents
+   copy (§2).
 4. **Scope:** all 23 `pi-beads` tools, and 3 of the 4 `pi-subagents` tools (`Agent`
    excepted, per decision 6). `hashline-edit` and `set_phase` stay `direct` —
    hashline-edit *is* the model's file I/O path, and hiding it would be stage B for file
@@ -81,37 +82,38 @@ A small extension, registered in the root `package.json` under `pi.extensions`.
   `getAllTools`/`setActiveTools` are unavailable in some hosts, e.g. print mode); the
   activator uses the same guard.
 
-### 2. Activation — subagent sessions: pi-subagents patch
+### 2. Activation — subagent sessions: vendored pi-subagents change
 
 `packages/pi-subagents/src/agent-runner.ts:747` builds a `DefaultResourceLoader` for every
 subagent session with **no** codemode factory, and the SDK docs are explicit that SDK
 sessions do not load codemode by default.
 
-Preferred patch (**pending spike R1**), which avoids importing anything and therefore
-avoids the dependency bump described below — `additionalExtensionPaths` accepts
-`"builtin:<name>"`:
-
-```ts
-// agent-runner.ts:727
-const additionalExtensionPaths = [...(extensionsSpec?.paths ?? []), "builtin:codemode"];
-```
-
-Fallback patch if R1 fails:
+**Variant B, decided by the Task 1 spike.** The runner passes the factory directly:
 
 ```ts
 // agent-runner.ts:747
 extensionFactories: [createCodemodeExtension()],
 ```
 
-Either way, `createCodemodeExtension`/`builtin:codemode` registers `codemode`
+The rejected variant — `additionalExtensionPaths: [..., "builtin:codemode"]` — looked
+attractive because it imports nothing, but the spike measured it: an SDK-constructed
+`DefaultResourceLoader` **silently ignores a `builtin:` entry**, so codemode never loads and
+the subagent never sees it. Variant B is therefore the plan of record, and it is a change to
+our vendored copy of pi-subagents (see "Vendoring and divergence record" below) rather than
+an upstream patch.
+
+`createCodemodeExtension()` registers `codemode`
 **inactive**, so activation must come from `installExtensionToolScope`'s `renarrow()`
 (`agent-runner.ts:280`), which sets the active set to `session.getAllTools() ∩ inScope()`.
 That includes `codemode` because it is registered by an extension — **except** when the
 agent's `extensions:` uses `ext:` selectors, where `inScope()`'s `optInActive` branch
 (`agent-runner.ts:258`) admits only *named* extensions and an inline builtin extension may
-match no canonical name. Mitigation: add `"codemode"` to `readmitToolNames` at the
-`installExtensionToolScope` call site (`agent-runner.ts:1035`), the mechanism already used
-to re-admit nested tools.
+match no canonical name. The spike confirmed the mitigation is **necessary but not
+sufficient**: when the agent's `extensions:` is a *name allowlist*, codemode is filtered out
+of the loaded set before `inScope()` ever runs, so `readmitToolNames` cannot rescue it. Task 7
+needs both: add `"codemode"` to `readmitToolNames` at the `installExtensionToolScope` call site
+(`agent-runner.ts:1035`) — the mechanism already used to re-admit nested tools — and keep
+codemode in the loaded set for name-allowlist agents.
 
 `noExtensions`/`isolated` subagents skip `installExtensionToolScope` entirely and get no
 codemode. Accepted: they also load no extension tools, so they could never reach
@@ -120,21 +122,30 @@ codemode. Accepted: they also load no extension tools, so they could never reach
 No `BUILTIN_TOOL_NAMES` change is needed — the `denyTools` loop
 (`agent-runner.ts:942`) denies only names in that list, and `codemode` is not one.
 
-#### 2.1 Dependency bump — required for the exposure work, not only the fallback patch
+#### 2.1 The `@earendil-works/*` 0.99.1 bump — landed, and what it forced
 
-`packages/pi-subagents/package.json` pins `@earendil-works/*` at **0.84.2** in
+`packages/pi-subagents/package.json` pinned `@earendil-works/*` at **0.84.2** in
 `devDependencies`. The bump to `0.99.1` (plus a regenerated `package-lock.json` and the peer
-range raised from `>=0.84.0` to `>=0.99.0`) is needed for **two independent reasons**:
+range raised from `>=0.84.0` to `>=0.99.0`) was needed for **two independent reasons**:
 
-- `createCodemodeExtension` does not exist before 0.99.0, so the fallback patch cannot be
-  typechecked without it; and
+- `createCodemodeExtension` does not exist before 0.99.0, so Variant B cannot be typechecked
+  without it; and
 - `exposure`, `namespace` and `outputSchema` are absent from the 0.84.2 `ToolDefinition` type,
   so §3's tool-surface changes fail `tsc --noEmit` regardless of which activation variant wins.
 
-Only the *first* reason is avoided by the preferred (no-import) activation variant. The bump is
-therefore planned as its own task, ahead of the exposure change, so that a failure from the
-0.84.2 → 0.99.1 jump is unambiguously a dependency problem and not a symptom of the code-mode
-change (risk R3).
+The bump is **done**: the package carries `0.99.1` devDeps with peer ranges at `>=0.99.0`, so
+both reasons are retired and Tasks 6 and 7 build on real 0.99.1 types.
+
+**R3 fired, and this is what forced the vendoring decision.** At 0.99.1 the package did not
+typecheck — 2 errors in `src/mention-clone.ts` (`ExtensionContext` vs `ExtensionToolContext`;
+`agent.state.systemPrompt` now read-only) — and 17 e2e tests across 7 files failed. All 17
+traced to **one** root cause, and it was not a regression: the faux-provider harness still read
+the pre-0.86.0 `Context.tools` / `Context.systemPrompt`, so every responder misclassified the
+parent session as a child and never emitted its tool call. There is no intermediate version to
+pin — the codemode types arrived in 0.99.0, the same release whose loop changed these
+behaviours. Adapting the fork therefore meant carrying a third, materially larger local
+divergence on a nightly-synced subtree, which is what tipped the decision to vendor it instead
+(see "Vendoring and divergence record" below).
 
 ### 3. Tool surfaces
 
@@ -177,6 +188,16 @@ renders exactly as it does now.
 - Namespace: `{ name: "subagents", description: "Subagent dispatch and workflow orchestration" }`.
 - `outputSchema` on `get_subagent_result` → `{ status, result?, error?, agentId? }`.
 
+**Consequence worth knowing before you read a failing suite.** pi only auto-activates
+`direct`/`model-only` tools, so from this change onward the three moved tools are
+*registered but not declared* in any session that has not activated them — including an SDK
+or print-mode session with no codemode, which is exactly what decision 2 accepts. A model in
+such a session that emits `get_subagent_result(...)` directly gets "Tool not found"; it has to
+reach it from a codemode script. pi-subagents' own print-mode e2e suites script direct calls,
+so they opt the tool back in explicitly (`activateTools` in `test/helpers/print-mode-runner.ts`),
+which declares it exactly as it was before. That is a test-harness accommodation, not a
+fallback in the extension.
+
 ### 4. What stays declared, and the cost side of the ledger
 
 `read`, `bash`, `edit`, `write`, `grep`, `find`, `ls`, hashline-edit's `read`/`edit`/`grep`,
@@ -210,28 +231,38 @@ magnitude is not asserted until measured (R4).
   A exists to save, and cannot distinguish these packages from MCP servers drawing on the
   same budget.
 
-## Divergence policy and guardrail
+## Vendoring and divergence record
 
-> **SUPERSEDED (2026-09-30):** pi-subagents is now a **vendored fork** this repo owns. The nightly
-> sync workflow and both sync script directories are deleted, upstream tracking has ended, and the
-> guardrail task described below was closed as superseded — there are no subtree syncs left to
-> guard. Task 6 rewrites this section. The text below is retained only as the record of what was
-> decided before the vendoring decision, and it also forced the 0.99.1 port described in §2.1.
+pi-subagents is a **vendored fork** this repo owns and edits directly. It is no longer a
+squashed git subtree synced nightly from upstream: the sync workflow
+(`.github/workflows/sync-pi-subagents.yml`) and both sync script directories (`scripts/sync/`,
+`scripts/sim/`) are deleted, no CI job references them, and there is no "do not hand-edit"
+rule. The root guardrail check this section used to specify
+(`scripts/ci/check-pi-subagents-patch.mjs`) was **closed as superseded** — it existed to catch a
+subtree sync silently dropping our delta, and there are no syncs left to guard.
 
-pi-subagents is a squashed git subtree (`b10e000`); `scripts/sync/sync-subtree.sh` fails loudly
-on conflict ("Manual resolution required"). This design accepts a permanent divergence anyway.
-It is no longer true that the subtree has no local commits — by the time this plan is executed it
-carries two: `686e30d` (host-provided typebox declared as peers, which also fixed the root
-dep-mirror gate) and the code-mode delta below.
+`docs/pi-subagents-local-patch.md` is the divergence record: it exists so a reader comparing our
+copy against upstream can tell an intentional local change from an upstream one, and so the
+in-code marker has somewhere to point. The divergences carried today:
 
-1. Smallest possible footprint. Every changed line bracketed by
-   `// LOCAL PATCH (pi-packages) — see docs/pi-subagents-local-patch.md`.
-2. New `docs/pi-subagents-local-patch.md` recording the exact delta and why.
-3. A **root-level** check, `scripts/ci/check-pi-subagents-patch.mjs`, living outside the
-   subtree so a sync cannot wipe it, asserting the local delta is still present. Wired
-   into root `npm test` and CI, in the spirit of the existing dep-mirror check. This turns
-   a sync that silently drops the patch into a CI failure instead of a quiet regression.
-4. A note on the pi-subagents entry in `AGENTS.md`.
+1. **`686e30d` — host-provided typebox declared as peers.** Upstream declares
+   `@sinclair/typebox` / `typebox` under `dependencies`; pi supplies both to extensions itself,
+   and the root dep-mirror gate mirrors a package's runtime dependencies into root, so
+   upstream's shape made root depend on packages pi provides. `package.json` and the lockfile
+   only; a JSON manifest has nowhere to carry a marker.
+2. **The 0.99.1 port.** devDeps at `0.99.1`, peer ranges at `>=0.99.0`, `src/mention-clone.ts`
+   adapted to the split extension context and the read-only agent system prompt, the `Agent`
+   handler's ctx narrowed to `ExtensionContext`, and the test harness moved to the 0.86.0
+   `TranscriptContext`. Forced by the R3 outcome recorded in §2.1. This divergence carries
+   **no** `LOCAL PATCH` markers: we own the file outright, so the port is the state of our copy,
+   not a patch applied on top of somebody else's.
+3. **The code-mode delta (this plan).** Every changed line bracketed by
+   `// LOCAL PATCH (pi-packages) — see docs/pi-subagents-local-patch.md`, with the delta
+   recorded in that doc.
+
+The marker rule survives the vendoring, with a changed purpose: it is now a **divergence marker
+for a future reader comparing us to upstream**, not sync-conflict management. `AGENTS.md`
+describes the package as a vendored fork we own.
 
 ## Verification
 
@@ -244,7 +275,10 @@ assertion.
   that no moved tool is left `direct`. This is the assertion that pins the actual claim.
 - **Activator tests.** Adds `codemode` when registered and absent; idempotent; adds
   nothing else; no-ops cleanly when `getActiveTools`/`setActiveTools` throw.
-- **Root guardrail check** as above.
+- **Registration-time exposure tests (per package gate).** Each package's own suite
+  instantiates the real extension with a mock `pi` and inspects the tool objects pi would
+  actually receive — `pi-subagents`' `test/tool-exposure.test.ts` is the model. A
+  source-text assertion cannot show what pi gets, so none is used.
 - **Recorded measurement.** Before/after assembled declaration payload using the chars/4
   heuristic — the same method and caveat as the `tool-description-mode-compact` spec —
   recorded here as an estimate, not asserted.
@@ -258,19 +292,24 @@ assertion.
 
 | # | Risk | Retire by |
 |---|---|---|
-| R1 | `builtin:codemode` in `additionalExtensionPaths` does not survive the loader's `ext:` filtering, forcing the larger fallback patch and the dependency bump | spike — decides patch size |
-| R2 | The codemode extension is dropped for agents using `ext:` selectors and `readmitToolNames` does not rescue it | spike |
-| R3 | Bumping pi-subagents devDeps 0.84.2 → 0.99.1 breaks the subtree's typecheck or tests | spike — only if R1 fails |
+| R1 | `builtin:codemode` in `additionalExtensionPaths` does not survive the loader's `ext:` filtering, forcing the larger fallback patch and the dependency bump | **retired** — the Task 1 spike measured that an SDK-built loader silently ignores the `builtin:` entry, so Variant A never loads codemode; Variant B chosen (§2) |
+| R2 | The codemode extension is dropped for agents using `ext:` selectors and `readmitToolNames` does not rescue it | **open, Task 7** — the spike found `readmitToolNames` necessary but not sufficient when `extensions:` is a name allowlist |
+| R3 | Bumping pi-subagents devDeps 0.84.2 → 0.99.1 breaks the typecheck or tests | **retired (fired)** — 2 typecheck errors + 17 e2e failures, one root cause; forced the vendoring decision and the port (§2.1) |
 | R4 | The net token win is eaten by appended `declare const tools` signatures on the remaining declared tools | measurement |
 | R5 | Subagents cannot reach codemode-exposed beads tools | end-to-end |
 | R6 | Skills that name `beads_*` tools now require a script; `packages/pi-beads/skills/beads/SKILL.md` and the superpowers skills may need a short note | doc pass in the plan |
+| R7 | The port leaves a behaviour silently broken that no test covers | **retired** — the port did exactly this to `src/mention-clone.ts`'s transcript seeding (both writes discarded, so a spawned mention ran with no conversation and a rebuilt prompt, while the suite stayed green on a fake that asserted the module's own writes). Fixed by `pi-packages-r6i4`; now pinned by `test/mention-clone.test.ts` and `test/e2e/mention-clone-seeding.e2e.test.ts`, which read the projection the provider is actually handed. A green suite is not evidence that a ported path still runs. |
 
 ## Implementation order
 
-1. Spike R1 → R2 (and R3 only if R1 fails).
+1. Spike R1 → R2. **Done:** R1 retired (Variant B); R2 open, with the allowlist hazard
+   recorded for Task 7.
 2. `packages/codemode-bootstrap` package, tests, root manifest entry, gate row.
 3. pi-beads exposure/namespace + `outputSchema`/`structuredContent` on reads.
-4. pi-subagents local patch + root guardrail check + `docs/pi-subagents-local-patch.md`.
+4. pi-subagents: vendor the fork, port it to 0.99.1, then the code-mode delta
+   (exposure/namespace/`outputSchema`/`structuredContent`) plus
+   `docs/pi-subagents-local-patch.md`. **No root guardrail check** — superseded by the
+   vendoring.
 5. Docs: `AGENTS.md` note, skill note (R6).
 6. Measurement + manual end-to-end.
 
