@@ -11,6 +11,11 @@ import {
   type AgentSession,
   type AgentSessionEvent,
   createAgentSession,
+  // LOCAL PATCH (pi-packages) — see docs/pi-subagents-local-patch.md
+  // Subagent sessions do not load the CLI's built-in codemode extension (SDK
+  // sessions never do). pi-packages ships tools with codemode/deferred exposure,
+  // which a subagent can only reach through codemode, so load it explicitly.
+  createCodemodeExtension,
   DefaultResourceLoader,
   type ExtensionAPI,
   getAgentDir,
@@ -737,6 +742,13 @@ export async function runAgent(
           return {
             ...base,
             extensions: base.extensions.filter((e) => {
+              // LOCAL PATCH (pi-packages) — see docs/pi-subagents-local-patch.md
+              // Inline factories are injected by this runner, not discovered from
+              // disk, so the `extensions:` allowlist does not govern them. Exempting
+              // them keeps the codemode factory we add below in the LOADED set for
+              // name-allowlist agents — without it, `readmitToolNames` (which can only
+              // re-admit names already in session.getAllTools()) could never see it.
+              if (e.path.startsWith("<inline:")) return true;
               const canons = extensionCanonicalNames(e.path);
               if (canons.some((n) => excludeNames.has(n))) return false; // exclude wins
               return loadAll || canons.some((n) => keepNames.has(n));
@@ -750,6 +762,8 @@ export async function runAgent(
     noExtensions,
     additionalExtensionPaths,
     extensionsOverride,
+    // LOCAL PATCH (pi-packages) — see docs/pi-subagents-local-patch.md
+    extensionFactories: [createCodemodeExtension()],
     noSkills,
     noPromptTemplates: true,
     noThemes: true,
@@ -1038,7 +1052,11 @@ export async function runAgent(
       disallowedSet,
       extNames,
       narrowing,
-      readmitToolNames,
+      // LOCAL PATCH (pi-packages) — see docs/pi-subagents-local-patch.md
+      // codemode's canonical name (`<inline:N>`) can never appear in an `ext:`
+      // selector, so inScope()'s opt-in branch would drop it from the active set
+      // even once the override above keeps it loaded. Re-admit it by tool name.
+      readmitToolNames: new Set([...readmitToolNames, "codemode"]),
     });
   }
 

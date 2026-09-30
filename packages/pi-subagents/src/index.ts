@@ -2658,8 +2658,12 @@ Terse command-style prompts produce shallow, generic work.
         pi.setActiveTools(active.filter(name => name !== SUBAGENT_TOOL_NAMES.WORKFLOW));
       }
     } catch {
-      // getAllTools/setActiveTools are unavailable in some hosts (print mode,
-      // RPC). Not being able to check is not a reason to fail the session.
+      // LOCAL PATCH (pi-packages) — see docs/pi-subagents-local-patch.md
+      // getAllTools/setActiveTools throw only in a host that loads extension
+      // definitions without ever binding a session — standalone
+      // discoverAndLoadExtensions, for instance; the throwing stubs exist only
+      // until core.bindCore runs. A bound print-mode session exposes both
+      // normally. Not being able to check is not a reason to fail the session.
     }
   }
 

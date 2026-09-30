@@ -108,13 +108,50 @@ hands the provider, not the module's own writes) and
 through a faux provider, asserting on the transcript the provider was actually
 handed).
 
+## Divergence 4 — codemode activation in subagent sessions (Task 7)
+
+`src/agent-runner.ts` builds every subagent session's `DefaultResourceLoader`, and an
+SDK-constructed loader never loads the CLI's built-in codemode extension. pi-packages ships
+tools with `codemode`/`deferred` exposure, which a subagent can only reach through codemode,
+so the runner now injects the factory itself and makes sure it survives the agent's own
+`extensions:`/`tools:` filtering. Three edits, each bracketed by the marker:
+
+1. **Load it** — `extensionFactories: [createCodemodeExtension()]` on the subagent loader
+   (`agent-runner.ts:766`).
+2. **Keep it loaded under an `extensions:` name allowlist** — the `extensionsOverride`
+   predicate (`agent-runner.ts:751`) exempts `<inline:*>` entries. Inline factories are
+   injected by the runner, not discovered from disk, so the disk-extension allowlist does
+   not govern them. Without this, a name allowlist filtered the codemode entry out of the
+   loaded set — an unnamed inline factory canonicalizes to `<inline:N>`, which no name
+   matches — and no later stage could re-admit a tool that never loaded.
+3. **Re-admit it into the active set** — `readmitToolNames` at the
+   `installExtensionToolScope` call site (`agent-runner.ts:1059`) gains `"codemode"`. When
+   the agent's `tools:` carries any `ext:` selector, `inScope()`'s opt-in branch admits only
+   *named* extensions, and codemode's canonical name can never appear in one.
+
+**Rejected alternative, for the record:** `additionalExtensionPaths: ["builtin:codemode"]`
+does not work. The `builtin:<name>` code is supplied by the CLI when *it* constructs the
+loader; a loader we construct has no code behind the name, so the entry is silently ignored
+(`docs/sdk.md:112` implies otherwise; `docs/sdk.md:116` is the accurate statement). Measured
+by the plan's spike, recorded in the design spec's §2.
+
+A fourth, comment-only edit belongs to this divergence: the `getAllTools`/`setActiveTools`
+`catch` in `src/index.ts` (`:2660`) said the APIs are "unavailable in some hosts (print mode,
+RPC)". That is over-conservative — a bound print-mode session exposes both — and the
+corrected design spec cites the comment, so it now names the real case: a host that loads
+extension definitions without ever binding a session (standalone `discoverAndLoadExtensions`),
+where the throwing stubs exist only until `core.bindCore` runs.
+
+Files: `src/agent-runner.ts`, `src/index.ts`. Covered by `test/agent-runner.test.ts`'s
+"subagent codemode activation" block, which asserts on the loader's constructor options and
+on the session's active tool names — not on source text.
+
 
 ## In-code marker convention
 
-Divergence 3 — the code-mode exposure/namespace/outputSchema changes from Task 6 — **is**
-marked, because it is a small, surgical edit a future reader could otherwise mistake for
-upstream behaviour. Divergence 4 is Task 7's activation delta; it lands with that task and
-is marked the same way:
+Divergence 3 — the code-mode exposure/namespace/outputSchema changes from Task 6 — and
+Divergence 4 — Task 7's codemode activation delta — **are** marked, because each is a small,
+surgical edit a future reader could otherwise mistake for upstream behaviour. The marker is:
 
 ```ts
 // LOCAL PATCH (pi-packages) — see docs/pi-subagents-local-patch.md

@@ -86,36 +86,47 @@ A small extension, registered in the root `package.json` under `pi.extensions`.
 
 ### 2. Activation — subagent sessions: vendored pi-subagents change
 
-`packages/pi-subagents/src/agent-runner.ts:747` builds a `DefaultResourceLoader` for every
-subagent session with **no** codemode factory, and the SDK docs are explicit that SDK
-sessions do not load codemode by default.
+`packages/pi-subagents/src/agent-runner.ts` builds a `DefaultResourceLoader` for every
+subagent session. Before Task 7 it passed **no** codemode factory, and the SDK docs are
+explicit that SDK sessions do not load codemode by default — so no subagent could reach a
+codemode- or `deferred`-exposed tool.
 
-**Variant B, decided by the Task 1 spike.** The runner passes the factory directly:
+**Variant B, decided by the Task 1 spike and landed in Task 7.** The runner passes the
+factory directly:
 
 ```ts
-// agent-runner.ts:747
+// agent-runner.ts:766
 extensionFactories: [createCodemodeExtension()],
 ```
 
 The rejected variant — `additionalExtensionPaths: [..., "builtin:codemode"]` — looked
 attractive because it imports nothing, but the spike measured it: an SDK-constructed
 `DefaultResourceLoader` **silently ignores a `builtin:` entry**, so codemode never loads and
-the subagent never sees it. Variant B is therefore the plan of record, and it is a change to
-our vendored copy of pi-subagents (see "Vendoring and divergence record" below) rather than
-an upstream patch.
+the subagent never sees it. Variant B is therefore the implementation of record, and it is a
+change to our vendored copy of pi-subagents (see "Vendoring and divergence record" below)
+rather than an upstream patch.
 
-`createCodemodeExtension()` registers `codemode`
-**inactive**, so activation must come from `installExtensionToolScope`'s `renarrow()`
-(`agent-runner.ts:280`), which sets the active set to `session.getAllTools() ∩ inScope()`.
-That includes `codemode` because it is registered by an extension — **except** when the
-agent's `extensions:` uses `ext:` selectors, where `inScope()`'s `optInActive` branch
-(`agent-runner.ts:258`) admits only *named* extensions and an inline builtin extension may
-match no canonical name. The spike confirmed the mitigation is **necessary but not
-sufficient**: when the agent's `extensions:` is a *name allowlist*, codemode is filtered out
-of the loaded set before `inScope()` ever runs, so `readmitToolNames` cannot rescue it. Task 7
-needs both: add `"codemode"` to `readmitToolNames` at the `installExtensionToolScope` call site
-(`agent-runner.ts:1035`) — the mechanism already used to re-admit nested tools — and keep
-codemode in the loaded set for name-allowlist agents.
+**Landed in Task 7.** `createCodemodeExtension()` registers `codemode` **inactive**, so
+activation comes from `installExtensionToolScope`'s eager `renarrow()` at session start
+(`agent-runner.ts:285`), which sets the active set to `session.getAllTools() ∩ inScope()`.
+That alone is not enough, and the spike measured why. Two independent mechanisms have to be
+fixed, and Task 7 lands both (each bracketed by the `LOCAL PATCH` marker):
+
+1. **Keep it loaded.** `extensionsOverride` (`agent-runner.ts:744-751`) filters the loaded set
+   down to the agent's `extensions:` names. An inline factory has no usable canonical name —
+   an unnamed entry becomes `<inline:N>` by array index — so a *name allowlist* filtered
+   codemode out of the **loaded** set before `inScope()` ever ran, and `readmitToolNames`
+   (which can only re-admit names already in `session.getAllTools()`) could not rescue it.
+   The override now exempts `<inline:*>` entries: inline factories are injected by the runner,
+   not discovered from disk, so the disk-extension allowlist does not govern them.
+2. **Re-admit it into the active set.** When the agent's `tools:` carries any `ext:` selector,
+   `inScope()`'s `optInActive` branch (`agent-runner.ts:263`) admits only *named* extensions,
+   and codemode's canonical name can never appear in an `ext:` selector. `"codemode"` is
+   therefore added to `readmitToolNames` at the `installExtensionToolScope` call site
+   (`agent-runner.ts:1059`) — the same mechanism already used to re-admit nested tools.
+
+So the spike's finding holds in the code: `readmitToolNames` is **necessary but not
+sufficient**, and R1's Variant A is dead (see the risk table).
 
 `noExtensions`/`isolated` subagents skip `installExtensionToolScope` entirely and get no
 codemode. Accepted: they also load no extension tools, so they could never reach
@@ -295,8 +306,8 @@ assertion.
 
 | # | Risk | Retire by |
 |---|---|---|
-| R1 | `builtin:codemode` in `additionalExtensionPaths` does not survive the loader's `ext:` filtering, forcing the larger fallback patch and the dependency bump | **retired** — the Task 1 spike measured that an SDK-built loader silently ignores the `builtin:` entry, so Variant A never loads codemode; Variant B chosen (§2) |
-| R2 | The codemode extension is dropped for agents using `ext:` selectors and `readmitToolNames` does not rescue it | **open, Task 7** — the spike found `readmitToolNames` necessary but not sufficient when `extensions:` is a name allowlist |
+| R1 | `builtin:codemode` in `additionalExtensionPaths` does not survive the loader's `ext:` filtering, forcing the larger fallback patch and the dependency bump | **failed** — the Task 1 spike measured that an SDK-built loader silently ignores the `builtin:` entry, so Variant A never loads codemode at all; Variant B chosen (§2) |
+| R2 | The codemode extension is dropped for agents using `ext:` selectors and `readmitToolNames` does not rescue it | **retired by Task 7** — `readmitToolNames` is necessary but not sufficient: a name-allowlist `extensions:` dropped codemode from the *loaded* set first. Task 7 lands both fixes — the `<inline:*>` exemption in `extensionsOverride` and `"codemode"` in `readmitToolNames` (§2) — and pins them in `test/agent-runner.test.ts` |
 | R3 | Bumping pi-subagents devDeps 0.84.2 → 0.99.1 breaks the typecheck or tests | **retired (fired)** — 2 typecheck errors + 17 e2e failures, one root cause; forced the vendoring decision and the port (§2.1) |
 | R4 | The net token win is eaten by appended `declare const tools` signatures on the remaining declared tools | measurement |
 | R5 | Subagents cannot reach codemode-exposed beads tools | end-to-end |
@@ -305,8 +316,8 @@ assertion.
 
 ## Implementation order
 
-1. Spike R1 → R2. **Done:** R1 retired (Variant B); R2 open, with the allowlist hazard
-   recorded for Task 7.
+1. Spike R1 → R2. **Done:** R1 failed (Variant A never loads codemode); R2 recorded the
+   allowlist hazard and was retired by Task 7's two changes (§2).
 2. `packages/codemode-bootstrap` package, tests, root manifest entry, gate row.
 3. pi-beads exposure/namespace + `outputSchema`/`structuredContent` on reads.
 4. pi-subagents: vendor the fork, port it to 0.99.1, then the code-mode delta
