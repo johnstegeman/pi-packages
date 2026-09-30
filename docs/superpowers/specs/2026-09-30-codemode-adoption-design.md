@@ -120,13 +120,21 @@ codemode. Accepted: they also load no extension tools, so they could never reach
 No `BUILTIN_TOOL_NAMES` change is needed — the `denyTools` loop
 (`agent-runner.ts:942`) denies only names in that list, and `codemode` is not one.
 
-#### 2.1 Dependency bump — only if the fallback patch is needed
+#### 2.1 Dependency bump — required for the exposure work, not only the fallback patch
 
 `packages/pi-subagents/package.json` pins `@earendil-works/*` at **0.84.2** in
-`devDependencies`; `createCodemodeExtension` does not exist before 0.99.0. The fallback
-patch therefore forces: bump the three `@earendil-works/*` devDeps to `0.99.1`, regenerate
-`package-lock.json`, and raise the peer range from `>=0.84.0` to `>=0.99.0`. The preferred
-patch avoids all of this, which is why R1 is retired first.
+`devDependencies`. The bump to `0.99.1` (plus a regenerated `package-lock.json` and the peer
+range raised from `>=0.84.0` to `>=0.99.0`) is needed for **two independent reasons**:
+
+- `createCodemodeExtension` does not exist before 0.99.0, so the fallback patch cannot be
+  typechecked without it; and
+- `exposure`, `namespace` and `outputSchema` are absent from the 0.84.2 `ToolDefinition` type,
+  so §3's tool-surface changes fail `tsc --noEmit` regardless of which activation variant wins.
+
+Only the *first* reason is avoided by the preferred (no-import) activation variant. The bump is
+therefore planned as its own task, ahead of the exposure change, so that a failure from the
+0.84.2 → 0.99.1 jump is unambiguously a dependency problem and not a symptom of the code-mode
+change (risk R3).
 
 ### 3. Tool surfaces
 
@@ -204,9 +212,11 @@ magnitude is not asserted until measured (R4).
 
 ## Divergence policy and guardrail
 
-pi-subagents is a squashed git subtree (`b10e000`) with no local non-merge commits and no
-patch mechanism; `scripts/sync/sync-subtree.sh` fails loudly on conflict
-("Manual resolution required"). This design accepts a permanent divergence anyway.
+pi-subagents is a squashed git subtree (`b10e000`); `scripts/sync/sync-subtree.sh` fails loudly
+on conflict ("Manual resolution required"). This design accepts a permanent divergence anyway.
+It is no longer true that the subtree has no local commits — by the time this plan is executed it
+carries two: `686e30d` (host-provided typebox declared as peers, which also fixed the root
+dep-mirror gate) and the code-mode delta below.
 
 1. Smallest possible footprint. Every changed line bracketed by
    `// LOCAL PATCH (pi-packages) — see docs/pi-subagents-local-patch.md`.
