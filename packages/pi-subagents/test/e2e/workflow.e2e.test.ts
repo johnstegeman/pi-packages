@@ -99,6 +99,10 @@ describe("Workflow end to end", () => {
     const run = await runPrintMode({
       prompt: "run the workflow",
       cwd,
+      // SubagentWorkflow is `deferred` exposure: registered, not declared to the
+      // model. This suite scripts the direct call a production model now makes
+      // from a codemode script, so it activates the tool to match.
+      activateTools: ["SubagentWorkflow"],
       maxModelCalls: 32,
       live: false, // scripted on purpose: a real model would not emit the tool call
       respond: context => {
@@ -183,6 +187,7 @@ describe("Workflow end to end", () => {
     const run = await runPrintMode({
       prompt: "run the saved workflow",
       cwd,
+      activateTools: ["SubagentWorkflow"],
       maxModelCalls: 32,
       live: false, // scripted on purpose: a real model would not emit the tool call
       respond: context => {
@@ -231,6 +236,7 @@ describe("Workflow end to end", () => {
     const run = await runPrintMode({
       prompt: "run the broken workflow",
       cwd: workflowProject(),
+      activateTools: ["SubagentWorkflow"],
       maxModelCalls: 12,
       live: false, // scripted on purpose: a real model would not emit the tool call
       respond: context => {
@@ -330,6 +336,9 @@ describe.runIf(LIVE)("Workflow end to end (live LLM, opt-in)", () => {
           "Pass it as the `name` parameter — do not write a script of your own. " +
           "Then tell me the task id it returned.",
         cwd,
+        // See the scripted suites above: the tool is `deferred` now, so a
+        // smoke that asks a real model to call it by name must declare it.
+        activateTools: ["SubagentWorkflow"],
         timeoutMs: LIVE_TIMEOUT,
       });
 
@@ -380,6 +389,9 @@ describe.runIf(LIVE)("Workflow end to end (live LLM, opt-in)", () => {
           script,
         ].join("\n"),
         cwd,
+        // See the scripted suites above: the tool is `deferred` now, so a
+        // smoke that asks a real model to call it by name must declare it.
+        activateTools: ["SubagentWorkflow"],
         timeoutMs: LIVE_TIMEOUT,
       });
 
@@ -429,6 +441,9 @@ describe.runIf(LIVE)("Workflow end to end (live LLM, opt-in)", () => {
           script,
         ].join("\n"),
         cwd,
+        // See the scripted suites above: the tool is `deferred` now, so a
+        // smoke that asks a real model to call it by name must declare it.
+        activateTools: ["SubagentWorkflow"],
         timeoutMs: LIVE_TIMEOUT,
       });
 

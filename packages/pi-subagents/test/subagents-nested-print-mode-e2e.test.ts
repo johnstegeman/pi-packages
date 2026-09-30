@@ -126,7 +126,18 @@ function writeAgents(cwd: string, agents: Record<string, string>): void {
 async function runWithAgents(
   agents: Record<string, string>,
   respond: FauxResponder,
-  options: { prompt: string; maxModelCalls?: number; hold?: boolean } = {
+  options: {
+    prompt: string;
+    maxModelCalls?: number;
+    hold?: boolean;
+    /**
+     * Parent-session tools to activate beyond the auto-activated `direct` ones.
+     * `get_subagent_result`/`steer_subagent` are `codemode` exposure now: the
+     * root of a suite that scripts a direct call to them has to declare them,
+     * exactly as the pre-exposure registration used to.
+     */
+    activateTools?: string[];
+  } = {
     prompt: "root",
   },
 ): Promise<{ run: PrintModeRun; cwd: string }> {
@@ -280,7 +291,11 @@ describe("PR #164 nested agents through the real print-mode boundary", () => {
         }
         return lastToolResult(ctx, "get_subagent_result");
       },
-      { prompt: "root-background", maxModelCalls: 24 },
+      {
+        prompt: "root-background",
+        maxModelCalls: 24,
+        activateTools: ["get_subagent_result"],
+      },
     ));
 
     expect(run.responseText).toContain("BACKGROUND_NESTED_RESULT");
@@ -416,7 +431,12 @@ describe("PR #164 nested agents through the real print-mode boundary", () => {
           }
           return lastToolResult(ctx, "get_subagent_result");
         },
-        { prompt: "root-ownership", maxModelCalls: 32, hold: false },
+        {
+          prompt: "root-ownership",
+          maxModelCalls: 32,
+          hold: false,
+          activateTools: ["get_subagent_result", "steer_subagent"],
+        },
       ));
 
       await waitForChildReady(ownedChildReady, 5_000);

@@ -75,6 +75,14 @@ import { fullWorkflowToolDescription } from "./workflow/tool-description.js";
 import { isWorktreeIsolationEnabled, setWorktreeIsolationEnabled } from "./worktree.js";
 import { escapeXml } from "./xml.js";
 
+// Code-mode grouping for the tools this package moves off `direct` exposure
+// (SubagentWorkflow, get_subagent_result, steer_subagent — `Agent` stays direct).
+// LOCAL PATCH (pi-packages) — see docs/pi-subagents-local-patch.md
+const SUBAGENTS_NAMESPACE = {
+  name: "subagents",
+  description: "Subagent dispatch and workflow orchestration",
+} as const;
+
 // ---- Shared helpers ----
 
 /** Tool execute return value for a text response. */
@@ -2414,6 +2422,9 @@ Terse command-style prompts produce shallow, generic work.
   const workflowTool = defineTool({
     name: SUBAGENT_TOOL_NAMES.WORKFLOW,
     label: "SubagentWorkflow",
+    // LOCAL PATCH (pi-packages) — see docs/pi-subagents-local-patch.md
+    exposure: "deferred",
+    namespace: SUBAGENTS_NAMESPACE,
     description: renderToolDescriptionTemplate(fullWorkflowToolDescription),
     promptSnippet: "Run a deterministic script that orchestrates many subagents",
     promptGuidelines: [
@@ -2738,9 +2749,19 @@ Terse command-style prompts produce shallow, generic work.
   registerToolReportingUsage(defineTool({
     name: SUBAGENT_TOOL_NAMES.GET_RESULT,
     label: "Get Agent Result",
+    // LOCAL PATCH (pi-packages) — see docs/pi-subagents-local-patch.md
+    exposure: "codemode",
+    namespace: SUBAGENTS_NAMESPACE,
     description:
       "Check status and retrieve a background agent's full result — its completion notification carries only a preview. Use the agent ID returned by Agent.",
     promptSnippet: "Check status and retrieve results from a background agent",
+    // LOCAL PATCH (pi-packages) — see docs/pi-subagents-local-patch.md
+    outputSchema: Type.Object({
+      error: Type.Optional(Type.String()),
+      agentId: Type.Optional(Type.String()),
+      status: Type.Optional(Type.String()),
+      result: Type.Optional(Type.String()),
+    }),
     parameters: Type.Object({
       agent_id: Type.String({
         description: "The agent ID to check. The agent's handle also works — its `name` if you gave it one, otherwise its type (`explore`, `explore-2`).",
@@ -2759,7 +2780,11 @@ Terse command-style prompts produce shallow, generic work.
     execute: async (_toolCallId, params, signal, _onUpdate, _ctx) => {
       const record = resolveAgentRef(params.agent_id);
       if (!record || !isTopLevelAgent(record)) {
-        return textResult(`Agent not found: "${params.agent_id}". It may have been cleaned up.`);
+        // LOCAL PATCH (pi-packages) — see docs/pi-subagents-local-patch.md
+        return {
+          ...textResult(`Agent not found: "${params.agent_id}". It may have been cleaned up.`),
+          structuredContent: { error: `Agent not found: "${params.agent_id}"` },
+        };
       }
 
       // Wait for completion if requested. Cancellation stops only this tool
@@ -2818,7 +2843,16 @@ Terse command-style prompts produce shallow, generic work.
         }
       }
 
-      return textResult(output);
+      // LOCAL PATCH (pi-packages) — see docs/pi-subagents-local-patch.md
+      return {
+        ...textResult(output),
+        structuredContent: {
+          agentId: String(params.agent_id),
+          status: String(record.status),
+          ...(record.result ? { result: String(record.result) } : {}),
+          ...(record.error ? { error: String(record.error) } : {}),
+        },
+      };
     },
   }));
 
@@ -2827,6 +2861,9 @@ Terse command-style prompts produce shallow, generic work.
   registerToolReportingUsage(defineTool({
     name: SUBAGENT_TOOL_NAMES.STEER,
     label: "Steer Agent",
+    // LOCAL PATCH (pi-packages) — see docs/pi-subagents-local-patch.md
+    exposure: "codemode",
+    namespace: SUBAGENTS_NAMESPACE,
     description:
       "Send a steering message to a running agent. The message will interrupt the agent after its current tool execution " +
       "and be injected into its conversation, allowing you to redirect its work mid-run. Only works on running agents.",

@@ -154,6 +154,18 @@ export interface RunPrintModeOptions {
    * which is worse than not running them: it hides a real regression in noise.
    */
   live?: { provider: string; model: string } | false;
+  /**
+   * Extra tool names to activate on the parent session after boot.
+   *
+   * pi only auto-activates `direct`/`model-only` tools, so the subagents tools
+   * this package moved to `codemode`/`deferred` exposure (`SubagentWorkflow`,
+   * `get_subagent_result`, `steer_subagent`) are registered but *not* declared
+   * to the model. In production the model reaches them from a codemode script;
+   * a suite that scripts a direct call by name has to activate it here.
+   * Activation is explicit and legal for any non-`hidden` tool, so the tool is
+   * declared exactly as it was before the exposure change.
+   */
+  activateTools?: string[];
 }
 
 export interface PrintModeRun {
@@ -381,6 +393,12 @@ export async function runPrintMode(options: RunPrintModeOptions): Promise<PrintM
   // Binding fires session_start so the extension initializes and publishes its
   // manager on the global Symbol.
   await session.bindExtensions({});
+
+  // Declare any codemode/deferred tool the suite scripts a direct call to. Names
+  // pi doesn't know are ignored, so a typo can't fail a run for the wrong reason.
+  if (options.activateTools?.length) {
+    session.setActiveToolsByName([...session.getActiveToolNames(), ...options.activateTools]);
+  }
 
   const manager = (globalThis as Record<symbol, unknown>)[MANAGER_KEY] as
     | ManagerHandle
