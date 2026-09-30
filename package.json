@@ -25,6 +25,7 @@
   },
   "pi": {
     "extensions": [
+      "./packages/codemode-bootstrap/index.ts",
       "./packages/bifrost/index.ts",
       "./packages/statusline/src/statusline.ts",
       "./packages/hashline-edit/src/index.ts",
