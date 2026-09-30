@@ -98,8 +98,13 @@ function visibleTools(opts: any): any[] {
  * that hides its own tool prompts a model with nothing to call.
  */
 function cloneSession(turn?: (tool: any) => Promise<void> | void) {
+  // Pi 0.99.1 keeps the prompt in the transcript: the leading system message
+  // holds the base prompt, and `state.systemPrompt` is a read-only replay of
+  // it. The mock models that, so the assertions below read the prompt where it
+  // now lives instead of on the removed writable field.
+  const messages: any[] = [{ role: "system", content: "rebuilt-from-cwd", timestamp: 0 }];
   const session = {
-    agent: { state: { systemPrompt: "rebuilt-from-cwd", messages: [] as any[] } },
+    agent: { state: { messages } },
     prompt: vi.fn(async () => {}),
     dispose: vi.fn(),
   } as any;
@@ -137,7 +142,9 @@ describe("cloning the conversation", () => {
 
     await runMentionClone(opts());
 
+    // The leading system message is the clone's own; the conversation follows it.
     expect(session.agent.state.messages).toEqual([
+      { role: "system", content: "the live system prompt", timestamp: 0 },
       { role: "user", content: [{ type: "text", text: "hi" }] },
       { role: "assistant", content: [{ type: "text", text: "hello" }] },
     ]);
@@ -192,8 +199,10 @@ describe("cloning the conversation", () => {
     const result = await runMentionClone(o);
 
     expect(result).toEqual({ spawned: true });
-    expect(session.agent.state.messages).toEqual([]);
-    expect(session.agent.state.systemPrompt).toBe("the live system prompt");
+    // No history was carried, so the leading system message is all there is.
+    expect(session.agent.state.messages).toEqual([
+      { role: "system", content: "the live system prompt", timestamp: 0 },
+    ]);
   });
 
   it("carries the live system prompt rather than the one it rebuilt", async () => {
@@ -203,7 +212,11 @@ describe("cloning the conversation", () => {
 
     await runMentionClone(opts());
 
-    expect(session.agent.state.systemPrompt).toBe("the live system prompt");
+    expect(session.agent.state.messages[0]).toEqual({
+      role: "system",
+      content: "the live system prompt",
+      timestamp: 0,
+    });
   });
 
   it("inherits the parent's model, thinking level and providers", async () => {

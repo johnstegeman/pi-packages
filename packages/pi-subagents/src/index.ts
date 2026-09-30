@@ -1764,7 +1764,13 @@ Terse command-style prompts produce shallow, generic work.
 
     // ---- Execute ----
 
-    execute: async (toolCallId, params, signal, onUpdate, ctx) => {
+    // The handler needs only the base context (cwd, model, modelRegistry, ui,
+    // sessionManager). Declaring that narrower type is what lets the mention clone
+    // invoke it with the MAIN session's context: Pi 0.99.1 splits the tool-context
+    // additions (`tools`, `executeTool`) into `ExtensionToolContext`, which a plain
+    // `ExtensionContext` does not have — and the clone must not hand over its own,
+    // because the spawn has to be attributed to the real session (see mention-clone.ts).
+    execute: async (toolCallId, params, signal, onUpdate, ctx: ExtensionContext) => {
       // Ensure we have UI context for widget rendering
       widget.setUICtx(ctx.ui as UICtx);
 

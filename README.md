@@ -12,7 +12,7 @@ packages/
 ├── langfuse/       – Langfuse observability with Superpowers phase metadata
 ├── statusline/     – Single-line statusline footer with ayu/tokyo-night/classic presets
 ├── pi-beads/       – Fork of abix5/pi-beads (beads_* tools) with wisp (--ephemeral) support in beads_create
-├── pi-subagents/  – vendored fork via squashed git subtree of tintinweb/pi-subagents (auto-synced nightly via PR)
+├── pi-subagents/  – Vendored fork of tintinweb/pi-subagents (owned here; patched locally)
 └── pi-superpowers-plus/ – Vendored Superpowers workflow skills + set_phase/beads-molecule-widget extensions + agent templates
 ```
 
@@ -22,23 +22,17 @@ here) with the standalone repo deprecated — the whole monorepo install
 (`pi install git:github.com/johnstegeman/pi-packages`) provides both the extensions and
 the full Superpowers skill set.
 
-## Upstream-tracked subtree: pi-subagents
+## Vendored fork: pi-subagents
 
-`packages/pi-subagents/` is a squashed [git subtree](https://git-scm.com/book/en/v2/Git-Tools-Subtree-Merging)
-of `tintinweb/pi-subagents` (branch `master`). It is **upstream-tracked — do not hand-edit
-files inside it**; local edits will conflict with the next sync.
-
-A nightly GitHub Action (`.github/workflows/sync-pi-subagents.yml`, 04:00 UTC + manual
-`workflow_dispatch`) runs `git subtree pull` on a **persistent** `bot/update-pi-subagents`
-branch and opens a review PR when upstream changes. Each run merges upstream onto the
-branch's current tip, so a dep-mirror fix committed to the sync PR survives reruns — the
-branch is never force-pushed. Merge the PR to accept the update. No changes are ever pushed
-to `main` or auto-merged.
+`packages/pi-subagents/` is a fork of `tintinweb/pi-subagents` (branch `master`) that this
+repo owns and edits directly. There is no upstream sync and no subtree merge: changes are
+made in-tree like any other package here. The divergences from upstream are recorded in
+[`docs/pi-subagents-local-patch.md`](docs/pi-subagents-local-patch.md).
 
 A CI workflow (`.github/workflows/ci.yml`, on any PR to `main` and push to `main`) validates
-the root manifest, enforces that subtree dependencies are mirrored in root `package.json`
-with a compatible range, and runs the subtree's `npm ci` + `tsc --noEmit`. Sync PRs therefore
-carry a real red/green signal.
+the root manifest, enforces that the package's runtime dependencies are mirrored in root
+`package.json` with a compatible range, and runs the package's full gate (`npm run check`:
+lint, `tsc --noEmit`, and the vitest suite) through the package-gate matrix.
 
 ## Install from GitHub
 

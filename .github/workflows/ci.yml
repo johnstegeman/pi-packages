@@ -37,7 +37,7 @@ jobs:
           '
 
   deps-mirror:
-    name: Subtree deps mirrored in root
+    name: pi-subagents deps mirrored in root
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -58,32 +58,6 @@ jobs:
         env:
           NODE_PATH: /tmp/depsmirror/node_modules
         run: node --test scripts/ci/check-deps-mirror.test.mjs
-
-  subtree-smoke:
-    name: Subtree install + typecheck
-    runs-on: ubuntu-latest
-    defaults:
-      run:
-        working-directory: packages/pi-subagents
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 22
-          cache: npm
-          cache-dependency-path: packages/pi-subagents/package-lock.json
-      - name: Install subtree deps
-        run: npm ci
-      - name: Typecheck subtree
-        run: npm run typecheck
-
-  sim:
-    name: Sync-loop simulation
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - name: Run sync sim (happy path + failure scenarios)
-        run: bash scripts/sim/simulate-sync.sh
 
   workflow-lint:
     name: Actionlint workflows

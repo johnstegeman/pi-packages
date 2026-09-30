@@ -63,6 +63,8 @@
 
 import type { Model } from "@earendil-works/pi-ai";
 import {
+  type AgentToolResult,
+  type AgentToolUpdateCallback,
   buildSessionContext,
   createAgentSession,
   type ExtensionContext,
@@ -73,6 +75,27 @@ import { runInChildSessionContext } from "./child-context.js";
 import { agentMentionReminder } from "./mention.js";
 import type { SubagentType, ThinkingLevel } from "./types.js";
 
+/**
+ * The registered `Agent` tool, as the clone uses it.
+ *
+ * Everything a `ToolDefinition` has, except `execute` is invoked with the MAIN
+ * session's `ExtensionContext` rather than the `ExtensionToolContext` that
+ * `ToolDefinition.execute` declares. Pi 0.99.1 splits `tools`/`executeTool` onto
+ * the tool-context variant; the Agent handler uses neither (index.ts narrows its
+ * own parameter to say so), and the clone must never hand over its own context —
+ * the spawn has to be attributed to the real session. Declared as a method so the
+ * real `ToolDefinition` stays assignable.
+ */
+export type MentionAgentTool = Omit<ToolDefinition, "execute"> & {
+  execute(
+    toolCallId: string,
+    params: unknown,
+    signal: AbortSignal | undefined,
+    onUpdate: AgentToolUpdateCallback<unknown> | undefined,
+    ctx: ExtensionContext,
+  ): Promise<AgentToolResult<unknown>>;
+};
+
 export interface MentionCloneOptions {
   /** The MAIN session's context — what the spawn is attributed to, and the
    * source of both the conversation and the live system prompt. */
@@ -82,7 +105,7 @@ export interface MentionCloneOptions {
   /** What the user typed after the handle. */
   message: string;
   /** The registered `Agent` tool, reused so the spawn is an ordinary one. */
-  agentTool: ToolDefinition;
+  agentTool: MentionAgentTool;
 }
 
 export interface MentionCloneResult {
@@ -174,8 +197,27 @@ export async function runMentionClone(opts: MentionCloneOptions): Promise<Mentio
     // but not the live one — extensions contribute to it per turn. Copy the
     // real thing, so the copy reasons under the instructions the user's model
     // is actually working under.
+    //
+    // 0.99.1 made `agent.state.systemPrompt` read-only: the prompt is replayed
+    // from the transcript's system messages, and the leading one holds the base
+    // prompt. That leading message is where the base prompt is written — the
+    // replacement for the old `agent.state.systemPrompt = …` assignment, which
+    // 0.99.1 made illegal; appending a later system message would only add
+    // instructions on top of the rebuilt base. It is mutated rather than replaced
+    // so its tool declarations stay put.
     const systemPrompt = ctx.getSystemPrompt?.();
-    if (systemPrompt) session.agent.state.systemPrompt = systemPrompt;
+    if (systemPrompt) {
+      const leadingMessage = session.agent.state.messages[0];
+      if (leadingMessage?.role === "system") {
+        leadingMessage.content = systemPrompt;
+      } else {
+        session.agent.state.messages.unshift({
+          role: "system",
+          content: systemPrompt,
+          timestamp: Date.now(),
+        });
+      }
+    }
 
     // The conversation itself. Pushed rather than assigned so the array the
     // session was built around stays the one it goes on using.
