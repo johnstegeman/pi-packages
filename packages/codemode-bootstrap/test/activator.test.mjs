@@ -12,7 +12,7 @@ function harness({ registered = ["read", "bash"], active = ["read", "bash"], thr
     setActiveTools: (names) => { if (throwOn === "setActiveTools") throw new Error("nope"); current = [...names]; calls.push([...names]); },
   };
   codemodeBootstrap(pi);
-  return { handlers, calls, start: () => handlers.session_start[0]({}, {}) };
+  return { handlers, calls, getCurrent: () => [...current], start: () => handlers.session_start[0]({}, {}) };
 }
 
 let failures = 0;
@@ -61,6 +61,8 @@ test("no-ops when the tool APIs throw", () => {
   for (const which of ["getAllTools", "getActiveTools", "setActiveTools"]) {
     const h = harness({ registered: ["read", "codemode"], active: ["read"], throwOn: which });
     h.start();
+    assert.deepEqual(h.calls, []);
+    assert.deepEqual(h.getCurrent(), ["read"]);
   }
 });
 
