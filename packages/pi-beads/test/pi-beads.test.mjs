@@ -222,6 +222,11 @@ case "$1" in
       printf '%s\n' '{"issues":[{"id":"proj-xpl","title":"Explore project context: FIXEDTOPIC","issue_type":"task"},{"id":"proj-clr","title":"Ask clarifying questions","issue_type":"task"},{"id":"proj-app","title":"Propose approaches","issue_type":"task"},{"id":"proj-des","title":"Present design sections","issue_type":"task"},{"id":"proj-apr","title":"User approves design","issue_type":"task"},{"id":"proj-g1","title":"Gate: human","issue_type":"gate"},{"id":"proj-wsp","title":"Write spec to docs/superpowers/specs/","issue_type":"task"},{"id":"proj-srv","title":"Spec self-review","issue_type":"task"},{"id":"proj-sap","title":"User reviews written spec","issue_type":"task"},{"id":"proj-g2","title":"Gate: human","issue_type":"gate"},{"id":"proj-imp","title":"Implement FIXEDTOPIC","issue_type":"task"},{"id":"proj-ver","title":"Verify","issue_type":"task"},{"id":"proj-smt","title":"Smoke test / manual QA sign-off","issue_type":"task"},{"id":"proj-g3","title":"Gate: human","issue_type":"gate"},{"id":"proj-fin","title":"Finish development branch","issue_type":"task"}],"dependencies":[{"depends_on_id":"proj-g1","issue_id":"proj-apr","type":"blocks"},{"depends_on_id":"proj-g2","issue_id":"proj-sap","type":"blocks"},{"depends_on_id":"proj-g3","issue_id":"proj-smt","type":"blocks"}]}'
       exit 0
     fi
+    if [ "$2" = "current" ]; then
+      # real bd returns a top-level ARRAY (len=1) for mol current
+      printf '%s\n' '[{"molecule_id":"proj-m0","molecule_title":"Demo Mol","ready_steps":2,"total_steps":4,"steps":[{"issue":{"id":"proj-t1","priority":1,"status":"open","title":"Task one"}}]}]'
+      exit 0
+    fi
     echo "ok"; exit 0
     ;;
   list)
@@ -1756,6 +1761,22 @@ test("single-repo: beads_mol_ready digest (ready + empty) without emitting", asy
   assert.match(t2, /molecule: proj-m0 — Empty Mol · 0\/3 ready/);
   assert.match(t2, /no ready steps \(all blocked or completed\)/);
   assert.equal(s.emitted.length, 0);
+});
+
+test("single-repo: beads_mol_current normalises the array envelope into an object", async () => {
+  // real `bd mol current <id> --json` returns a top-level ARRAY (len=1); the declared
+  // schema says molecule is an OBJECT, so the payload must unwrap it (fmtMolReady's
+  // `Array.isArray(obj) ? obj[0] : obj` convention) while the text stays raw bd JSON.
+  const s = await openSession("single", repoDir);
+  resetLog();
+  const r = await s.byName.get("beads_mol_current").execute("c", { id: "proj-m1" });
+  assert.ok(okResult(r), JSON.stringify(r));
+  findInvocation(["mol", "current", "proj-m1", "--json"]);
+  const m = r.structuredContent?.molecule;
+  assert.ok(m && typeof m === "object" && !Array.isArray(m), "molecule must be a non-array object");
+  assert.equal(m.molecule_id, "proj-m0");
+  assert.match(r.content[0].text, /proj-m0/, "text output stays the raw bd JSON");
+  assert.equal(s.emitted.length, 0, "a read must not emit");
 });
 
 test("single-repo: beads_mol_ready limit truncates the step rows client-side", async () => {

@@ -1953,7 +1953,8 @@ export default function piBeadsLean(pi: any) {
         const msg = `bd mol current failed: ${r.err}`;
         return jsonResult(msg, { error: msg });
       }
-      return jsonResult(r.out.trim(), { molecule: jparse(r.out) ?? {} });
+      const mo = jparse(r.out);
+      return jsonResult(r.out.trim(), { molecule: (Array.isArray(mo) ? mo[0] : mo) ?? {} });
     },
   });
 
