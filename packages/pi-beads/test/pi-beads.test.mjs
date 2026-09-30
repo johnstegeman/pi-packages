@@ -1724,6 +1724,13 @@ test("single-repo: beads_list formats object-shape --parent output (normalizes {
   const r = await s.byName.get("beads_list").execute("c", { mol: "proj-m1" });
   assert.ok(okResult(r), JSON.stringify(r));
   assert.match(r.content[0].text, /proj-m1-imp/);
+  // the fixture returns a `{issues:[...],meta:{...}}` envelope for --parent; the
+  // structured payload must be array-shaped (agrees with the text and READ_SCHEMAS.issues)
+  assert.ok(Array.isArray(r.structuredContent.issues), "enveloped list must yield an issues array");
+  assert.ok(
+    r.structuredContent.issues.some((i) => i.id === "proj-m1-imp"),
+    "the enveloped row must be present in structuredContent",
+  );
 });
 
 test("single-repo: beads_list mol resolves closed labeled steps too (--all)", async () => {

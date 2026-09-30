@@ -499,6 +499,15 @@ export default function piBeadsLean(pi: any) {
     return JSON.stringify(arr.filter((r: any) => r?.is_template !== true));
   }
 
+  // Structured counterpart of `fmtRows`'s envelope handling: bd may return a bare
+  // array or `{issues:[...]}` (e.g. `list --parent`). Keeps the structured payload
+  // array-shaped so it agrees with the text and with READ_SCHEMAS.issues.
+  const issueArray = (json: string) => {
+    const p = jparse(json);
+    if (Array.isArray(p)) return p;
+    return Array.isArray(p?.issues) ? p.issues : [];
+  };
+
   // Select-and-claim core shared by `beads_ready` and `beads_close`'s claimNext.
   // `filtered` is already-template-stripped `bd ready --json`. It does NOT emit —
   // each caller decides when (beads_close batches one emit per repo).
@@ -946,7 +955,7 @@ export default function piBeadsLean(pi: any) {
         const msg = `bd list failed: ${r.err}`;
         return jsonResult(msg, { error: msg });
       }
-      return jsonResult(fmtRows(r.out), { issues: jparse(r.out) ?? [] });
+      return jsonResult(fmtRows(r.out), { issues: issueArray(r.out) });
     },
   });
 
@@ -1699,7 +1708,7 @@ export default function piBeadsLean(pi: any) {
         const msg = `bd stale failed: ${r.err}`;
         return jsonResult(msg, { error: msg });
       }
-      return jsonResult(fmtRows(r.out), { issues: jparse(r.out) ?? [] });
+      return jsonResult(fmtRows(r.out), { issues: issueArray(r.out) });
     },
   });
 
