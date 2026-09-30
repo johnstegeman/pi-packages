@@ -72,6 +72,59 @@ const TOOL = {
   molReady: "beads_mol_ready",
 };
 
+// ---- code-mode exposure ---------------------------------------------------
+// Design: docs/superpowers/specs/2026-09-30-codemode-adoption-design.md
+// Every beads tool leaves `direct` exposure. The codemode tool lists these under
+// one namespace; `deferred` tools are reachable only through `searchTools()` /
+// `ALL_TOOLS` inside a script, which keeps them out of its inline token budget.
+export const BEADS_NAMESPACE = {
+  name: "beads",
+  description: "Beads issue tracker — umbrella aggregate across all repos",
+} as const;
+
+/** Listed by the codemode tool, subject to its inline budget. */
+export const BEADS_CODEMODE_TOOLS = [
+  "beads_ready",
+  "beads_list",
+  "beads_show",
+  "beads_deps",
+  "beads_create",
+  "beads_create_list",
+  "beads_update",
+  "beads_close",
+  "beads_comment",
+  "beads_comments",
+  "beads_dep",
+  "beads_undep",
+] as const;
+
+/** Reachable only via searchTools()/ALL_TOOLS inside a codemode script. */
+export const BEADS_DEFERRED_TOOLS = [
+  "beads_reopen",
+  "beads_promote",
+  "beads_gate_create",
+  "beads_gate_resolve",
+  "beads_mol_pour",
+  "beads_mol_show",
+  "beads_mol_current",
+  "beads_mol_ready",
+  "beads_memories",
+  "beads_stale",
+  "beads_lint",
+] as const;
+
+export const BEADS_TOOL_EXPOSURE: Record<string, "codemode" | "deferred"> =
+  Object.fromEntries([
+    ...BEADS_CODEMODE_TOOLS.map((n) => [n, "codemode"] as const),
+    ...BEADS_DEFERRED_TOOLS.map((n) => [n, "deferred"] as const),
+  ]);
+
+/** Spread into every `pi.registerTool({...})` definition in this file. */
+const beadsExposure = (name: string) => ({
+  exposure: BEADS_TOOL_EXPOSURE[name],
+  namespace: BEADS_NAMESPACE,
+});
+
 // Type allowlists, enforced before the value reaches bd (a typo must not
 // silently persist a junk edge; bd itself accepts arbitrary --type strings).
 // Verified against `bd link --help` / `bd gate create --help` on bd 1.2.2.
@@ -740,6 +793,7 @@ export default function piBeadsLean(pi: any) {
   // ============ tools (read) — always against the umbrella aggregate ============
   pi.registerTool({
     name: TOOL.ready,
+    ...beadsExposure(TOOL.ready),
     label: "Beads ready",
     description:
       "List beads issues that are ready to work (open, unblocked) across ALL repos, newest-priority first. Compact output; id prefix shows the owning project.",
@@ -800,6 +854,7 @@ export default function piBeadsLean(pi: any) {
 
   pi.registerTool({
     name: TOOL.list,
+    ...beadsExposure(TOOL.list),
     label: "Beads list",
     description:
       "List beads issues across ALL repos, optionally filtered by status (open,in_progress,blocked,deferred,closed). Compact output; id prefix shows the owning project.",
@@ -854,6 +909,7 @@ export default function piBeadsLean(pi: any) {
 
   pi.registerTool({
     name: TOOL.show,
+    ...beadsExposure(TOOL.show),
     label: "Beads show",
     description:
       "Show essential details of one beads issue (status, priority, type, description, dependency counts). Works for any repo by id.",
@@ -896,6 +952,7 @@ export default function piBeadsLean(pi: any) {
 
   pi.registerTool({
     name: TOOL.deps,
+    ...beadsExposure(TOOL.deps),
     label: "Beads dependencies",
     description:
       "Inspect dependencies across ALL repos: blockers (what must finish first) or dependents (what this blocks). Pass ONE id to get the blocker/dependent tree; pass SEVERAL ids to get one compact line each (ideal for triaging a set of epics). Read-only.",
@@ -966,6 +1023,7 @@ export default function piBeadsLean(pi: any) {
   // ============ tools (write) — routed to the owning repo, then aggregate refreshed ============
   pi.registerTool({
     name: TOOL.create,
+    ...beadsExposure(TOOL.create),
     label: "Beads create",
     description:
       "Create a beads issue in the OWNING repo. Pass `repo` (folder name or id prefix) to choose the project; if omitted, the repo containing the session cwd is used. Returns the new id. Use BEFORE starting non-trivial work.",
@@ -1041,6 +1099,7 @@ export default function piBeadsLean(pi: any) {
 
   pi.registerTool({
     name: TOOL.createList,
+    ...beadsExposure(TOOL.createList),
     label: "Beads create list",
     description:
       "Create a gate bead (optional) and then a sequence of task beads under one parent, each via a sequential `bd create --parent` call so ids come out parent.1..N in declared order, then wire the blocks-chain (every task → gate; task N → task N-1). One call replaces N beads_create + beads_dep + beads_gate_create rounds. Tasks array order is the plan order. Returns `gate:` (task bead) and `human-gate:` ids when a gate is requested, then `t1:..tN:` in plan order. Partial failures report ids created so far.",
@@ -1177,6 +1236,7 @@ export default function piBeadsLean(pi: any) {
 
   pi.registerTool({
     name: TOOL.update,
+    ...beadsExposure(TOOL.update),
     label: "Beads update",
     description:
       "Update a beads issue: status (open|in_progress|blocked|deferred|closed), priority (0-4), title, claim (assignee=you + status=in_progress), setMetadata, and/or description. Auto-routed to the owning repo by id prefix.",
@@ -1282,6 +1342,7 @@ export default function piBeadsLean(pi: any) {
 
   pi.registerTool({
     name: TOOL.close,
+    ...beadsExposure(TOOL.close),
     label: "Beads close",
     description:
       "Close one or more beads issues by id (any repos). Run this when work is done before reporting completion. Auto-routed to owning repos by id prefix.",
@@ -1400,6 +1461,7 @@ export default function piBeadsLean(pi: any) {
 
   pi.registerTool({
     name: TOOL.reopen,
+    ...beadsExposure(TOOL.reopen),
     label: "Beads reopen",
     description:
       "Reopen one or more closed beads issues by id. Auto-routed to owning repos by id prefix.",
@@ -1451,6 +1513,7 @@ export default function piBeadsLean(pi: any) {
 
   pi.registerTool({
     name: TOOL.promote,
+    ...beadsExposure(TOOL.promote),
     label: "Beads promote",
     description:
       "Promote a wisp (ephemeral issue) to a permanent bead, preserving its id and links. Routed to the owning repo by id prefix.",
@@ -1481,6 +1544,7 @@ export default function piBeadsLean(pi: any) {
 
   pi.registerTool({
     name: TOOL.memories,
+    ...beadsExposure(TOOL.memories),
     label: "Beads memories",
     description:
       "Persistent memories injected at prime time: action=remember|recall|list|forget. All run against the umbrella so they surface in every session.",
@@ -1533,6 +1597,7 @@ export default function piBeadsLean(pi: any) {
 
   pi.registerTool({
     name: TOOL.stale,
+    ...beadsExposure(TOOL.stale),
     label: "Beads stale",
     description:
       "List stale issues (not updated recently) across ALL repos — abandoned in_progress work is visible at session start.",
@@ -1563,6 +1628,7 @@ export default function piBeadsLean(pi: any) {
 
   pi.registerTool({
     name: TOOL.lint,
+    ...beadsExposure(TOOL.lint),
     label: "Beads lint",
     description:
       "Check issues for missing recommended sections (e.g. Acceptance Criteria). Pass ids to lint specific issues, or status/type filters to lint a set.",
@@ -1601,6 +1667,7 @@ export default function piBeadsLean(pi: any) {
 
   pi.registerTool({
     name: TOOL.gateCreate,
+    ...beadsExposure(TOOL.gateCreate),
     label: "Beads gate create",
     description:
       "Create an async gate that blocks an issue until resolved (bd gate resolve/beads_gate_resolve). Routed to the owning repo by the blocked issue's id prefix.",
@@ -1639,6 +1706,7 @@ export default function piBeadsLean(pi: any) {
 
   pi.registerTool({
     name: TOOL.gateResolve,
+    ...beadsExposure(TOOL.gateResolve),
     label: "Beads gate resolve",
     description:
       "Resolve a human gate (unblocks dependents) and close the gated step(s) it was blocking in one call, so dependents' later beads_close never fails with 'blocked by open issues'.",
@@ -1697,6 +1765,7 @@ export default function piBeadsLean(pi: any) {
 
   pi.registerTool({
     name: TOOL.molPour,
+    ...beadsExposure(TOOL.molPour),
     label: "Beads molecule pour",
     description:
       "Instantiate a proto formula as a persistent molecule (bd mol pour). Prints the root issue id from bd's output. Repo-scoped like beads_create.",
@@ -1750,6 +1819,7 @@ export default function piBeadsLean(pi: any) {
 
   pi.registerTool({
     name: TOOL.molShow,
+    ...beadsExposure(TOOL.molShow),
     label: "Beads molecule show",
     description: "Show a molecule/proto's structure (bd mol show <id> --json). Read-only.",
     parameters: {
@@ -1769,6 +1839,7 @@ export default function piBeadsLean(pi: any) {
 
   pi.registerTool({
     name: TOOL.molCurrent,
+    ...beadsExposure(TOOL.molCurrent),
     label: "Beads molecule current",
     description: "Show the current position in a molecule's workflow (bd mol current <id> --json). Read-only.",
     parameters: {
@@ -1788,6 +1859,7 @@ export default function piBeadsLean(pi: any) {
 
   pi.registerTool({
     name: TOOL.molReady,
+    ...beadsExposure(TOOL.molReady),
     label: "Beads molecule ready",
     description:
       "Show the ready frontier of one molecule's steps (bd ready --mol <id>): which steps/tasks are unblocked right now. Accepts a molecule id or a step id (e.g. the implement step with task children). Read-only; aggregate-aware; id prefix shows the owning project.",
@@ -1818,6 +1890,7 @@ export default function piBeadsLean(pi: any) {
 
   pi.registerTool({
     name: TOOL.dep,
+    ...beadsExposure(TOOL.dep),
     label: "Beads dependency",
     description:
       "Add a dependency: 'blocker' blocks 'issue' (issue depends on blocker). Both must live in the same repo; routed by the issue's id prefix.",
@@ -1864,6 +1937,7 @@ export default function piBeadsLean(pi: any) {
 
   pi.registerTool({
     name: TOOL.undep,
+    ...beadsExposure(TOOL.undep),
     label: "Beads unlink dependency",
     description:
       "Remove a dependency: the issue will no longer depend on blocker. Both ids must be in the same repo; routed by the issue id prefix.",
@@ -1905,6 +1979,7 @@ export default function piBeadsLean(pi: any) {
 
   pi.registerTool({
     name: TOOL.comment,
+    ...beadsExposure(TOOL.comment),
     label: "Beads comment",
     description: "Add a progress note/comment to an issue in its owning repo.",
     parameters: {
@@ -1933,6 +2008,7 @@ export default function piBeadsLean(pi: any) {
 
   pi.registerTool({
     name: TOOL.comments,
+    ...beadsExposure(TOOL.comments),
     label: "Beads comments",
     description:
       "Read the comments on one beads issue in time order. Works for any repo by id; use after beads_comment to read back SDD blocker/revision context.",
