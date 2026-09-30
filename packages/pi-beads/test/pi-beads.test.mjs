@@ -1404,6 +1404,43 @@ test("single-repo: beads_ready fails open on an unparseable payload", async () =
   }
 });
 
+test("single-repo: read tools declare outputSchema and only read tools carry structuredContent", async () => {
+  const { byName } = makePi();
+  const read = [
+    "beads_ready", "beads_list", "beads_show", "beads_deps", "beads_comments",
+    "beads_memories", "beads_stale", "beads_lint", "beads_mol_show",
+    "beads_mol_current", "beads_mol_ready",
+  ];
+  for (const n of read) assert.ok(byName.get(n).outputSchema, `${n} must declare outputSchema`);
+  for (const [n, t] of byName) {
+    if (!read.includes(n)) assert.equal(t.outputSchema, undefined, `${n} must not declare outputSchema`);
+  }
+});
+
+test("single-repo: beads_ready returns structuredContent (issues array) and an error object on failure", async () => {
+  const s = await openSession("single", repoDir);
+  resetLog();
+  const ready = s.byName.get("beads_ready");
+  const r = await ready.execute("t1", {});
+  assert.ok(okResult(r), JSON.stringify(r));
+  assert.ok(r.structuredContent, "beads_ready must set structuredContent");
+  assert.ok(Array.isArray(r.structuredContent.issues), "issues must be an array");
+  assert.ok(
+    r.structuredContent.issues.some((i) => i.id === "proj-1a2"),
+    "the real row must be present in structuredContent",
+  );
+  assert.ok(
+    r.structuredContent.issues.every((i) => i.is_template !== true),
+    "template rows must be absent from structuredContent",
+  );
+  // pi requires a tool declaring outputSchema to set structuredContent on EVERY
+  // path, so the validation/failure path must carry { error } too.
+  const bad = await ready.execute("t1", { repo: "nope" });
+  assert.ok(bad.structuredContent, "the unknown-repo path must set structuredContent");
+  assert.equal(typeof bad.structuredContent.error, "string");
+  assert.equal(bad.structuredContent.error, bad.content[0].text);
+});
+
 test("single-repo: beads_mol_ready still returns a template molecule's steps", async () => {
   // Deliberate asymmetry (DoD): beads_mol_ready must NOT strip template rows — it is
   // scoped to one molecule and has to return its steps, even when they are is_template.
