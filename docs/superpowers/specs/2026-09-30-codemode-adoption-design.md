@@ -212,6 +212,12 @@ magnitude is not asserted until measured (R4).
 
 ## Divergence policy and guardrail
 
+> **SUPERSEDED (2026-09-30):** pi-subagents is now a **vendored fork** this repo owns. The nightly
+> sync workflow and both sync script directories are deleted, upstream tracking has ended, and the
+> guardrail task described below was closed as superseded — there are no subtree syncs left to
+> guard. Task 6 rewrites this section. The text below is retained only as the record of what was
+> decided before the vendoring decision, and it also forced the 0.99.1 port described in §2.1.
+
 pi-subagents is a squashed git subtree (`b10e000`); `scripts/sync/sync-subtree.sh` fails loudly
 on conflict ("Manual resolution required"). This design accepts a permanent divergence anyway.
 It is no longer true that the subtree has no local commits — by the time this plan is executed it
