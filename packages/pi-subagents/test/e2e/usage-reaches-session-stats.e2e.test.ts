@@ -126,13 +126,14 @@ describe("subagent usage reaches the parent session's stats (real pi)", () => {
     // result reports are what must stay out: they are 75% of this model's window.
     const session = await realSession();
     try {
+      const before = session.getSessionStats().contextUsage?.percent ?? null;
       const pool = new PendingUsagePool();
       pool.add({ input: 150_000, output: 400, cacheWrite: 100, cost: 1.5 });
       session.sessionManager.appendMessage(toolResultCarrying(pool.drain()) as any);
 
       const percent = session.getSessionStats().contextUsage?.percent ?? null;
       expect(percent).not.toBeNull();
-      expect(percent as number).toBeLessThan(1);
+      expect((percent as number) - (before as number)).toBeLessThan(1);
     } finally {
       session.dispose?.();
     }

@@ -31,14 +31,17 @@ JSON manifest has nowhere to carry one, and the change is visible in the diff.
 
 Upstream is written against 0.84.2 and does not typecheck or pass its e2e suite against
 0.99.1. This fork is ported, so that Tasks 6 and 7 of the code-mode plan can build on
-`exposure` / `namespace` / `outputSchema` / `structuredOutput` — all of which landed in
-0.99.0, the same release that added `codemode`. There is no intermediate version to pin.
+`exposure` / `namespace` / `outputSchema` / `structuredContent` — all of which landed
+in 0.99.0, the same release that added `codemode`. There is no intermediate version to pin.
 
 The port is:
 
 - **devDependencies** at `0.99.1`; **peer ranges** at `>=0.99.0`.
 - **`src/mention-clone.ts`** adapted to the split extension context and the read-only
   agent system prompt (see the file's own comments).
+- **`src/index.ts`** — the `Agent` tool's handler now declares its context as
+  `ExtensionContext` rather than the widened `ExtensionToolContext`, which is what
+  keeps the clone's `MentionAgentTool` boundary honest.
 - **Test harness** adapted to the provider-facing `TranscriptContext` introduced in
   0.86.0: a faux responder now reads tools and prompt through `getCurrentTools()` /
   `getCurrentSystemPrompt()` instead of the removed `Context.tools` /

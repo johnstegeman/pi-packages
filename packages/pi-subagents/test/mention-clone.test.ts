@@ -102,6 +102,11 @@ function cloneSession(turn?: (tool: any) => Promise<void> | void) {
   // holds the base prompt, and `state.systemPrompt` is a read-only replay of
   // it. The mock models that, so the assertions below read the prompt where it
   // now lives instead of on the removed writable field.
+  //
+  // NOTE: this models the *intent* of `runMentionClone`'s seeding, not what
+  // 0.99.1 actually does with it — the write is discarded before the turn, so
+  // these assertions passing does not prove the clone carries the prompt. See
+  // the Known gap in `docs/pi-subagents-local-patch.md`.
   const messages: any[] = [{ role: "system", content: "rebuilt-from-cwd", timestamp: 0 }];
   const session = {
     agent: { state: { messages } },

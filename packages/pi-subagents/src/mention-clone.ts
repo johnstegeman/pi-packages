@@ -200,11 +200,17 @@ export async function runMentionClone(opts: MentionCloneOptions): Promise<Mentio
     //
     // 0.99.1 made `agent.state.systemPrompt` read-only: the prompt is replayed
     // from the transcript's system messages, and the leading one holds the base
-    // prompt. That leading message is where the base prompt is written — the
-    // replacement for the old `agent.state.systemPrompt = …` assignment, which
-    // 0.99.1 made illegal; appending a later system message would only add
-    // instructions on top of the rebuilt base. It is mutated rather than replaced
-    // so its tool declarations stay put.
+    // prompt. The write below targets that leading message — the replacement
+    // for the old `agent.state.systemPrompt = …` assignment, which 0.99.1 made
+    // illegal; appending a later system message would only add instructions on
+    // top of the rebuilt base. It is mutated rather than replaced so its tool
+    // declarations stay put.
+    //
+    // KNOWN GAP: the prompt written here does not survive the turn. See the
+    // Known gap in `docs/pi-subagents-local-patch.md`: at 0.99.1 the session
+    // refreshes `state.messages` from the `SessionManager`'s own projection
+    // before the turn, so this write is discarded and the clone runs on the
+    // prompt rebuilt from cwd/agentDir.
     const systemPrompt = ctx.getSystemPrompt?.();
     if (systemPrompt) {
       const leadingMessage = session.agent.state.messages[0];
@@ -220,7 +226,8 @@ export async function runMentionClone(opts: MentionCloneOptions): Promise<Mentio
     }
 
     // The conversation itself. Pushed rather than assigned so the array the
-    // session was built around stays the one it goes on using.
+    // session was built around stays the one it goes on using — but like the
+    // prompt above, this push is discarded before the turn (same Known gap).
     session.agent.state.messages.push(...conversation.messages);
 
     // User text first, reminder after — the order Claude Code's attachment
