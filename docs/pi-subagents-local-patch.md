@@ -52,23 +52,31 @@ The port is:
 This divergence carries **no** `LOCAL PATCH` markers. We own the file outright, so the
 port is simply the state of our copy — not a patch applied on top of somebody else's.
 
-### Known gap in the port: the mention clone's transcript seeding
+### The mention clone's transcript seeding
 
-`src/mention-clone.ts` seeds its throwaway session by writing to
-`session.agent.state.messages` (the conversation) and to the leading transcript
-system message (the live prompt). Both writes are **discarded** at 0.99.1: since
-0.87.0 the `SessionManager` is canonical for an `AgentSession`'s provider context,
-and the session refreshes `state.messages` from its own projection before the turn.
-A spawned mention therefore runs with no conversation and the prompt rebuilt from
-cwd/agentDir — the opposite of what the module exists to do.
+`src/mention-clone.ts` seeds its throwaway session through that session's own
+`SessionManager` — canonical for an `AgentSession`'s provider context since
+0.87.0 — and forces the parent's live system prompt with a `before_agent_start`
+handler that returns `systemPrompt`. That is pi's documented way to force a
+run's prompt: the runner turns it into `systemPromptOptions.forceSystemPrompt`,
+which the request projects as the provider's leading system message. The handler
+rides an inline extension on the clone's own `DefaultResourceLoader`, so it
+applies to the clone and nowhere else.
 
-The two typecheck errors this file raised are fixed (the field is read-only, and the
-tool context was split), and the writes are still expressed through the supported
-transcript shape — but making them *take effect* needs the clone to seed through the
-`SessionManager` (and to carry the parent's prompt via the loader or
-`before_agent_start`) rather than by mutating agent state. That is a behaviour-affecting
-redesign, not a mechanical port, and it is deliberately not attempted here; no test
-covers it today.
+The 0.99.1 port had left the seeding writing to `session.agent.state.messages`
+and to the leading transcript system message. Both writes were **discarded**
+before the turn — the session refreshes its provider context from the
+`SessionManager` and derives the prompt from `systemPromptOptions` — so a spawned
+mention ran with no conversation and a prompt rebuilt from cwd/agentDir, the
+opposite of what the module exists to do. The suite stayed green because nothing
+covered the seeding: the old fake session asserted on the array the module
+happened to write to, which passes against a clone that seeds nothing.
+
+Covered now by `test/mention-clone.test.ts` (reads the projection the session
+hands the provider, not the module's own writes) and
+`test/e2e/mention-clone-seeding.e2e.test.ts` (a real `AgentSession` driven
+through a faux provider, asserting on the transcript the provider was actually
+handed).
 
 
 ## In-code marker convention
