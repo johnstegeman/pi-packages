@@ -138,6 +138,11 @@ case "$1" in
   ready)
     if [ "$2" = "--mol" ]; then
       MOLP="proj"; [ "$MODE" = "umbrella" ] && MOLP="umb"
+      if [ "\${FAKE_BD_READY_MOL_ARRAY:-0}" = "1" ]; then
+        # defensive-symmetry shape: real bd returns an OBJECT here, but fmtMolReady tolerates an array
+        printf '[{"molecule_id":"%s-m0","molecule_title":"Demo Mol","ready_steps":1,"total_steps":4,"steps":[{"issue":{"id":"%s-t1","priority":1,"status":"open","title":"Task one"}}]}]\n' "$MOLP" "$MOLP"
+        exit 0
+      fi
       case "$3" in
         *empty*)
           printf '{"molecule_id":"%s-m0","molecule_title":"Empty Mol","ready_steps":0,"total_steps":3,"steps":null}\n' "$MOLP" ;;
@@ -399,6 +404,11 @@ case "$1" in
     echo "ok"; exit 0
     ;;
   comments)
+    if [ "\${FAKE_BD_COMMENTS_ENVELOPE:-0}" = "1" ]; then
+      # latent envelope shape (real bd returns a bare array): bd's envelope key is issues
+      printf '%s\n' '{"issues":[{"author":"alice","created_at":"2026-09-14T10:00:00Z","text":"first"}]}'
+      exit 0
+    fi
     printf '%s\n' '[{"author":"alice","created_at":"2026-09-14T10:00:00Z","text":"first"},{"author":"bob","created_at":"2026-09-14T11:00:00Z","text":"second"}]'
     exit 0
     ;;
@@ -1161,6 +1171,23 @@ test("single-repo: beads_comments reads comments and never emits", async () => {
   assert.match(r.content[0].text, /second/);
 });
 
+test("single-repo: beads_comments unwraps an enveloped comments response", async () => {
+  // real bd returns a bare array; this drives the latent {issues:[...]} envelope so the
+  // structured payload stays array-shaped (the text path fmtComments does not normalise).
+  process.env.FAKE_BD_COMMENTS_ENVELOPE = "1";
+  try {
+    const s = await openSession("single", repoDir);
+    resetLog();
+    const r = await s.byName.get("beads_comments").execute("c", { id: "proj-1a2" });
+    assert.ok(okResult(r), JSON.stringify(r));
+    assert.ok(Array.isArray(r.structuredContent.comments), "comments must be an array");
+    assert.equal(r.structuredContent.comments[0]?.text, "first");
+    assert.equal(s.emitted.length, 0, "a read must not emit");
+  } finally {
+    delete process.env.FAKE_BD_COMMENTS_ENVELOPE;
+  }
+});
+
 test("single-repo: beads_promote routes by prefix and emits", async () => {
   const s = await openSession("single", repoDir);
   resetLog();
@@ -1777,6 +1804,24 @@ test("single-repo: beads_mol_current normalises the array envelope into an objec
   assert.equal(m.molecule_id, "proj-m0");
   assert.match(r.content[0].text, /proj-m0/, "text output stays the raw bd JSON");
   assert.equal(s.emitted.length, 0, "a read must not emit");
+});
+
+test("single-repo: beads_mol_ready unwraps an array response into an object", async () => {
+  // real bd 1.3.0 returns an OBJECT for ready --mol, but fmtMolReady already tolerates
+  // an array; the structured payload must match that tolerance (same as beads_mol_current).
+  process.env.FAKE_BD_READY_MOL_ARRAY = "1";
+  try {
+    const s = await openSession("single", repoDir);
+    resetLog();
+    const r = await s.byName.get("beads_mol_ready").execute("c", { id: "proj-m1" });
+    assert.ok(okResult(r), JSON.stringify(r));
+    const m = r.structuredContent?.molecule;
+    assert.ok(m && typeof m === "object" && !Array.isArray(m), "molecule must be a non-array object");
+    assert.equal(m.molecule_id, "proj-m0");
+    assert.equal(s.emitted.length, 0, "a read must not emit");
+  } finally {
+    delete process.env.FAKE_BD_READY_MOL_ARRAY;
+  }
 });
 
 test("single-repo: beads_mol_ready limit truncates the step rows client-side", async () => {

@@ -1989,7 +1989,7 @@ export default function piBeadsLean(pi: any) {
         return jsonResult(msg, { error: msg });
       }
       const o = jparse(r.out);
-      return jsonResult(o ? fmtMolReady(o, params?.limit) : r.out.trim(), { molecule: o ?? {} });
+      return jsonResult(o ? fmtMolReady(o, params?.limit) : r.out.trim(), { molecule: (Array.isArray(o) ? o[0] : o) ?? {} });
     },
   });
 
@@ -2132,7 +2132,7 @@ export default function piBeadsLean(pi: any) {
         const msg = `bd comments failed: ${r.err}`;
         return jsonResult(msg, { error: msg });
       }
-      return jsonResult(fmtComments(r.out), { comments: jparse(r.out) ?? [] });
+      return jsonResult(fmtComments(r.out), { comments: issueArray(r.out) });
     },
   });
 
