@@ -111,9 +111,10 @@ handed).
 
 ## In-code marker convention
 
-Divergences 3 and 4 — the code-mode exposure/namespace/outputSchema changes from Tasks 6
-and 7 — **are** marked, because they are small, surgical edits a future reader could
-otherwise mistake for upstream behaviour:
+Divergence 3 — the code-mode exposure/namespace/outputSchema changes from Task 6 — **is**
+marked, because it is a small, surgical edit a future reader could otherwise mistake for
+upstream behaviour. Divergence 4 is Task 7's activation delta; it lands with that task and
+is marked the same way:
 
 ```ts
 // LOCAL PATCH (pi-packages) — see docs/pi-subagents-local-patch.md

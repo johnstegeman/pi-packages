@@ -394,12 +394,6 @@ export async function runPrintMode(options: RunPrintModeOptions): Promise<PrintM
   // manager on the global Symbol.
   await session.bindExtensions({});
 
-  // Declare any codemode/deferred tool the suite scripts a direct call to. Names
-  // pi doesn't know are ignored, so a typo can't fail a run for the wrong reason.
-  if (options.activateTools?.length) {
-    session.setActiveToolsByName([...session.getActiveToolNames(), ...options.activateTools]);
-  }
-
   const manager = (globalThis as Record<symbol, unknown>)[MANAGER_KEY] as
     | ManagerHandle
     | undefined;
@@ -475,6 +469,24 @@ export async function runPrintMode(options: RunPrintModeOptions): Promise<PrintM
     }
     if (ownsCwd) rmSync(cwd, { recursive: true, force: true });
   };
+
+  // Declare any codemode/deferred tool the suite scripts a direct call to. pi
+  // silently drops names it doesn't know, so a typo would otherwise become a
+  // no-op and surface later as a misleading `Tool not found`. Verify each name
+  // actually became active, and tear the session down before failing loudly.
+  if (options.activateTools?.length) {
+    session.setActiveToolsByName([...session.getActiveToolNames(), ...options.activateTools]);
+    const active = new Set(session.getActiveToolNames());
+    const missing = options.activateTools.filter((name) => !active.has(name));
+    if (missing.length > 0) {
+      unsubscribe();
+      options.signal?.removeEventListener("abort", onAbort);
+      await dispose();
+      throw new Error(
+        `runPrintMode: activateTools named tool(s) pi does not know (or that are hidden): ${missing.join(", ")}`
+      );
+    }
+  }
 
   // --- drive the turn under a wall-clock guard ---
   let timer: ReturnType<typeof setTimeout> | undefined;

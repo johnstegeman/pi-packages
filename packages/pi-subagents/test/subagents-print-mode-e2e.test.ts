@@ -337,6 +337,10 @@ describe.runIf(LIVE)("subagents print-mode e2e (live LLM, opt-in)", () => {
           "Spawn a general-purpose subagent IN THE BACKGROUND (run_in_background: true) whose " +
           "only task is to reply with the exact word BGPONG. After it finishes, use the " +
           "get_subagent_result tool to fetch its result, then tell me exactly what it said.",
+        // get_subagent_result is `codemode` exposure now — registered, not declared
+        // to the model. This smoke asks the model to call it directly by name, so
+        // activate it explicitly (see the activateTools note in the runner).
+        activateTools: ["get_subagent_result"],
         timeoutMs: LIVE_TIMEOUT,
       });
       const calls = agentToolCalls(run.parentSession);
@@ -389,6 +393,9 @@ describe.runIf(LIVE)("subagents print-mode e2e (live LLM, opt-in)", () => {
           "   working directory in one line.",
           "Finish with: 'SELF-SMOKE COMPLETE' followed by the PASS/FAIL lines.",
         ].join("\n"),
+        // Step 2 scripts a direct get_subagent_result call, and that tool is
+        // `codemode` exposure now — activate it so the model can see it.
+        activateTools: ["get_subagent_result"],
         timeoutMs: SELF_SMOKE_TIMEOUT,
       });
 

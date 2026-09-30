@@ -78,9 +78,11 @@ A small extension, registered in the root `package.json` under `pi.extensions`.
   `pi.setActiveTools([...pi.getActiveTools(), "codemode"])`.
 - **Adds only.** Never removes or reorders any other tool. Idempotent.
 - Degrades to a no-op where the tool APIs are unavailable. pi-subagents already guards
-  this exact case (`packages/pi-subagents/src/index.ts:2644` notes that
-  `getAllTools`/`setActiveTools` are unavailable in some hosts, e.g. print mode); the
-  activator uses the same guard.
+  this exact case (`packages/pi-subagents/src/index.ts:2661`): the throwing
+  `getAllTools`/`setActiveTools` stubs exist only until `core.bindCore` runs, so the case
+  is a host that loads extension definitions without ever binding a session — standalone
+  `discoverAndLoadExtensions`, for instance. It is **not** print mode: a bound print-mode
+  session exposes both APIs normally. The activator uses the same guard.
 
 ### 2. Activation — subagent sessions: vendored pi-subagents change
 
@@ -186,7 +188,8 @@ renders exactly as it does now.
   entirely.
 - `get_subagent_result`, `steer_subagent` → `codemode`.
 - Namespace: `{ name: "subagents", description: "Subagent dispatch and workflow orchestration" }`.
-- `outputSchema` on `get_subagent_result` → `{ status, result?, error?, agentId? }`.
+- `outputSchema` on `get_subagent_result` → `{ status?, result?, error?, agentId? }` (all
+  optional: the not-found path returns only `{ error }`).
 
 **Consequence worth knowing before you read a failing suite.** pi only auto-activates
 `direct`/`model-only` tools, so from this change onward the three moved tools are
