@@ -34,6 +34,7 @@ There is **no fallback** if the tools aren't present (they ship in the monorepo 
 
 - **Pass `ephemeral: true` to `beads_create` for wisps** (session phase bookkeeping — excluded from sync, purged via `bd purge` when closed); omit it for persistent issues (durable plan-step work).
 - **Repo routing:** omit `repo` on `beads_create` to target the session cwd's repo; from an umbrella root, pass the owning repo explicitly (`repo` is required there). Skills never hardcode a repo name.
+- **An undeclared argument is not filtered out for you.** pi itself does not filter a tool's arguments (probe, pi 0.99.2 — it passes undeclared keys through on both the direct and the codemode paths; what keeps them off a direct call is the strict tool schema pi asks the *provider* for, and that request defaults off, so it depends on the model), so a field that is not on a tool's surface is a silent no-op on the direct path; a codemode script gets the object through intact, and the beads write tools reject undeclared keys by name. Either way, check the surface (the `beads_create` vs `beads_update` field table in the pi-beads README) before reporting a field as applied.
 - **Structural workflow:** brainstorm → design → plan → implement → verify → finish is
   modeled as a beads molecule poured from the bundled `superpowers-workflow` formula
   (`bd mol pour`), not tracked via ad hoc wisps. Skills advance it with the

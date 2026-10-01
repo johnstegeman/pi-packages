@@ -26,8 +26,7 @@
     "multi-repo"
   ],
   "files": [
-    "src/index.ts",
-    "src/cost-tracking.ts",
+    "src",
     "skills",
     "README.md",
     "LICENSE"
@@ -51,7 +50,7 @@
     "access": "public"
   },
   "scripts": {
-    "test": "node test/lock-retry.test.mjs && node test/pi-beads.test.mjs && node test/cost-tracking.test.mjs && node test/tool-surface.test.mjs && node test/tool-exposure.test.mjs"
+    "test": "node test/lock-retry.test.mjs && node test/pi-beads.test.mjs && node test/cost-tracking.test.mjs && node test/tool-surface.test.mjs && node test/tool-exposure.test.mjs && node test/packaging.test.mjs"
   },
   "main": "./src/index.ts",
   "exports": "./src/index.ts"

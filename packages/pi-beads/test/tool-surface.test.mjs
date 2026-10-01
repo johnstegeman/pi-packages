@@ -45,6 +45,59 @@ function test(name, fn) {
   }
 }
 
+// --- tool surfaces vs the schemas -------------------------------------------
+const piBeadsLean = (await import("../src/index.ts")).default;
+const registeredTools = [];
+piBeadsLean({
+  events: { emit: () => {} },
+  on: () => {},
+  registerTool: (t) => registeredTools.push(t),
+  registerCommand: () => {},
+});
+const propsOf = (name) =>
+  Object.keys(registeredTools.find((t) => t.name === name)?.parameters?.properties ?? {});
+
+// Non-vacuity: `propsOf` returns [] for a name the capture never saw, so every assertion
+// built on it below would pass while asserting nothing (the discipline the packaging guard
+// carries too). Fail loudly here instead.
+for (const tool of ["beads_create", "beads_update"]) {
+  assert.ok(
+    propsOf(tool).length > 0,
+    `the registration capture yielded no declared properties for ${tool}`
+  );
+}
+
+// Fields that exist only on beads_create. There is no update counterpart, so passing one
+// to beads_update is unusable on a direct call (pi holds the model to the schema; whether an
+// undeclared key even arrives depends on the provider) and rejected by the tool's own guard
+// from a script - which is why the asymmetry is declared here rather than discovered later.
+const CREATE_ONLY = ["repo", "design", "ephemeral"];
+
+// Create fields whose update counterpart is a different name rather than absent. `labels`
+// is one comma-separated string on create; update splits it into `addLabels`/
+// `removeLabels`. Naming it here keeps CREATE_ONLY honest (labels IS updatable) while still
+// forcing the asymmetry to be declared instead of discovered.
+const RENAMED_ON_UPDATE = { labels: ["addLabels", "removeLabels"] };
+
+test("beads_update covers every beads_create field or declares it create-only", () => {
+  const create = propsOf("beads_create");
+  const update = propsOf("beads_update");
+  const covered = (k) =>
+    update.includes(k) ||
+    CREATE_ONLY.includes(k) ||
+    (RENAMED_ON_UPDATE[k]?.every((u) => update.includes(u)) ?? false);
+  assert.deepEqual(
+    create.filter((k) => !covered(k)),
+    [],
+    "beads_create fields with no beads_update counterpart and no CREATE_ONLY entry",
+  );
+});
+
+test("CREATE_ONLY is not a hiding place: those fields really are create-only", () => {
+  const update = propsOf("beads_update");
+  assert.deepEqual(CREATE_ONLY.filter((k) => update.includes(k)), [], "a CREATE_ONLY field is also on beads_update");
+});
+
 test("toolMap exposes the expected 23 tools", () => {
   assert.equal(tools.length, 23, `src/index.ts toolMap has ${tools.length} tools`);
 });
@@ -64,6 +117,31 @@ test("beads_ready docs state the template exclusion", () => {
     const row = readyRow(doc);
     assert.match(row, /template protos are excluded/i, `${name} beads_ready row must state the template exclusion`);
   }
+});
+
+const FIELD_TABLE_MARKER = "<!-- fields:surface-table";
+
+function readmeFieldRow(tool) {
+  const lines = readme.split("\n");
+  const start = lines.findIndex((l) => l.includes(FIELD_TABLE_MARKER));
+  assert.notEqual(start, -1, "README is missing the field-surface table marker");
+  const row = lines.slice(start).find((l) => new RegExp(`^\\|\\s*\`${tool}\``).test(l));
+  assert.ok(row, `README field table has no row for ${tool}`);
+  return row;
+}
+
+test("the README field table names every declared field of both surfaces", () => {
+  for (const tool of ["beads_create", "beads_update"]) {
+    const row = readmeFieldRow(tool);
+    const missing = propsOf(tool).filter((k) => !row.includes(`\`${k}\``));
+    assert.deepEqual(missing, [], `${tool}: fields missing from the README field table`);
+  }
+});
+
+test("the README field table keeps create-only fields off the update row", () => {
+  const row = readmeFieldRow("beads_update");
+  const leaked = CREATE_ONLY.filter((k) => row.includes(`\`${k}\``));
+  assert.deepEqual(leaked, [], "create-only fields must not appear on the beads_update row");
 });
 
 if (failures) {
