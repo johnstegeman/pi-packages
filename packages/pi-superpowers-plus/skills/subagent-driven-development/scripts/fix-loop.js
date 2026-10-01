@@ -119,8 +119,6 @@ const reReviewPrompt = [
   // command into two args, matching wave-parallel.js. All three are
   // controller-supplied — a skill path, a bead id, a SHA — so a quote in one is
   // assumed impossible, not enforced; it would fail loudly, as this bug did.
-  // command into two args, matching wave-parallel.js. All three are
-  // controller-supplied — a skill path, a bead id, a SHA — so none can carry a quote.
   '  ' + "'" + ARGS.reviewPackage + "' '" + ARGS.taskBeadId + "' '" + ARGS.fixBase + "' HEAD",
   'If that command reports `0 commit(s)`, STOP: the fix agent did not commit, so there is no fix to judge. Do not verdict findings against an empty diff — close with **Fix round: FAILED** instead (the closing contract below carries that state).',
   'Read the printed diff file once. Do not re-run git commands beyond that script. Your review is READ-ONLY: do not mutate the working tree, the index, HEAD, or branch state.',

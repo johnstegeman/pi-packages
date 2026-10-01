@@ -102,8 +102,11 @@ test("coupling: the guard's `0 commit(s)` signal is the one review-package actua
   // printing the signal it names, and nothing else couples the two: reword the
   // echo line and the guard would point at something the reviewer never sees,
   // with every other test still green.
+  // Anchor on the interpolated count-and-unit, not the bare token: a comment in
+  // review-package mentioning `commit(s)` would satisfy the loose form while the
+  // reviewer still never sees the count.
   const rp = readFileSync(join(dirname(fileURLToPath(import.meta.url)), 'review-package'), 'utf8');
-  assert.match(rp, /commit\(s\)/, 'review-package must keep printing `N commit(s)` — the guard names that signal');
+  assert.match(rp, /\$\{commits\} commit\(s\)/, 'review-package must keep printing `${commits} commit(s)` — the guard names that signal');
   assert.match(src, /0 commit\(s\)/, 'the guard must keep naming the signal review-package prints');
 });
 
