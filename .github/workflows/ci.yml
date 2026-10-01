@@ -59,6 +59,17 @@ jobs:
           NODE_PATH: /tmp/depsmirror/node_modules
         run: node --test scripts/ci/check-deps-mirror.test.mjs
 
+  gate-selftest:
+    name: Package gate self-test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Run the package-gate test suite
+        run: node --test scripts/ci/package-gate.test.mjs
+
   workflow-lint:
     name: Actionlint workflows
     runs-on: ubuntu-latest
