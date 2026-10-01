@@ -119,11 +119,42 @@ export const BEADS_TOOL_EXPOSURE: Record<string, "codemode" | "deferred"> =
     ...BEADS_DEFERRED_TOOLS.map((n) => [n, "deferred"] as const),
   ]);
 
-/** Spread into every `pi.registerTool({...})` definition in this file. */
+/** Spread into every tool definition in this file. */
 const beadsExposure = (name: string) => ({
   exposure: BEADS_TOOL_EXPOSURE[name],
   namespace: BEADS_NAMESPACE,
 });
+
+// ---- undeclared-argument guard ---------------------------------------------
+// A tool's `parameters.properties` is the whole surface a *direct* (model-initiated)
+// call can reach: pi validates the model's arguments against that schema and strips
+// anything undeclared before `execute` runs. Probe, pi 0.99.2 - a tool declaring only
+// `foo`, called with {"foo":"a","bar":"b"}, received {"foo":"a"}, silently; adding
+// `additionalProperties: false` to the schema does not make pi reject instead. So on the
+// direct path an undeclared key never reaches us, and the schema is the only contract.
+//
+// The codemode nested path is different: `tools.beads_update({ ... })` inside a script
+// hands the object over intact, so an undeclared key DOES arrive - and used to be ignored
+// while the tool answered success (pi-packages-5ov5). This guard closes that path by
+// naming the keys it will not apply. Do not delete it as unreachable: the direct path
+// cannot reach it, the scripted path can, and that is how the bug was found.
+//
+// Deliberate limits: top-level keys only (a `tasks[]` item in beads_create_list is a
+// nested surface with no schema of its own to derive from), and write tools only.
+const WRITE_TOOLS = new Set<string>([
+  TOOL.create,
+  TOOL.createList,
+  TOOL.update,
+  TOOL.close,
+  TOOL.dep,
+  TOOL.undep,
+  TOOL.comment,
+  TOOL.reopen,
+  TOOL.promote,
+  TOOL.gateCreate,
+  TOOL.gateResolve,
+  TOOL.molPour,
+]);
 
 // Type allowlists, enforced before the value reaches bd (a typo must not
 // silently persist a junk edge; bd itself accepts arbitrary --type strings).
@@ -724,6 +755,30 @@ export default function piBeadsLean(pi: any) {
     ...(structuredContent === undefined ? {} : { structuredContent }),
   });
 
+  // Undeclared-argument guard, applied through `registerTool` below. See the comment
+  // on WRITE_TOOLS for why it exists and what it cannot cover.
+  function guardUnknownKeys(def: any): any {
+    const declared = Object.keys(def?.parameters?.properties ?? {});
+    if (declared.length === 0) return def;
+    const allowed = new Set(declared);
+    const run = def.execute.bind(def);
+    return {
+      ...def,
+      async execute(id: string, params: any) {
+        const unknown = Object.keys(params ?? {}).filter((k) => !allowed.has(k));
+        if (unknown.length > 0)
+          return textResult(
+            `${def.name}: unknown argument(s): ${unknown.join(", ")} (accepted: ${declared.join(", ")})`,
+          );
+        return run(id, params);
+      },
+    };
+  }
+
+  /** Every tool registers through here, so the guard's coverage is one auditable set. */
+  const registerTool = (def: any) =>
+    pi.registerTool(WRITE_TOOLS.has(def.name) ? guardUnknownKeys(def) : def);
+
   // `outputSchema` tools must always set structuredContent, including failures.
   // Not a pass-through alias: the check is what makes the name a contract, and a
   // caller that forgets it fails loudly here instead of shipping a result that
@@ -842,7 +897,7 @@ export default function piBeadsLean(pi: any) {
   });
 
   // ============ tools (read) — always against the umbrella aggregate ============
-  pi.registerTool({
+  registerTool({
     name: TOOL.ready,
     ...beadsExposure(TOOL.ready),
     outputSchema: READ_SCHEMAS.issues,
@@ -912,7 +967,7 @@ export default function piBeadsLean(pi: any) {
     },
   });
 
-  pi.registerTool({
+  registerTool({
     name: TOOL.list,
     ...beadsExposure(TOOL.list),
     outputSchema: READ_SCHEMAS.issues,
@@ -971,7 +1026,7 @@ export default function piBeadsLean(pi: any) {
     },
   });
 
-  pi.registerTool({
+  registerTool({
     name: TOOL.show,
     ...beadsExposure(TOOL.show),
     outputSchema: READ_SCHEMAS.show,
@@ -1018,7 +1073,7 @@ export default function piBeadsLean(pi: any) {
     },
   });
 
-  pi.registerTool({
+  registerTool({
     name: TOOL.deps,
     ...beadsExposure(TOOL.deps),
     outputSchema: READ_SCHEMAS.deps,
@@ -1097,7 +1152,7 @@ export default function piBeadsLean(pi: any) {
   });
 
   // ============ tools (write) — routed to the owning repo, then aggregate refreshed ============
-  pi.registerTool({
+  registerTool({
     name: TOOL.create,
     ...beadsExposure(TOOL.create),
     label: "Beads create",
@@ -1173,7 +1228,7 @@ export default function piBeadsLean(pi: any) {
     },
   });
 
-  pi.registerTool({
+  registerTool({
     name: TOOL.createList,
     ...beadsExposure(TOOL.createList),
     label: "Beads create list",
@@ -1310,7 +1365,7 @@ export default function piBeadsLean(pi: any) {
     },
   });
 
-  pi.registerTool({
+  registerTool({
     name: TOOL.update,
     ...beadsExposure(TOOL.update),
     label: "Beads update",
@@ -1416,7 +1471,7 @@ export default function piBeadsLean(pi: any) {
     return openTaskChildren.length === 0 ? String(parent.id) : null;
   }
 
-  pi.registerTool({
+  registerTool({
     name: TOOL.close,
     ...beadsExposure(TOOL.close),
     label: "Beads close",
@@ -1535,7 +1590,7 @@ export default function piBeadsLean(pi: any) {
     },
   });
 
-  pi.registerTool({
+  registerTool({
     name: TOOL.reopen,
     ...beadsExposure(TOOL.reopen),
     label: "Beads reopen",
@@ -1587,7 +1642,7 @@ export default function piBeadsLean(pi: any) {
     },
   });
 
-  pi.registerTool({
+  registerTool({
     name: TOOL.promote,
     ...beadsExposure(TOOL.promote),
     label: "Beads promote",
@@ -1618,7 +1673,7 @@ export default function piBeadsLean(pi: any) {
     },
   });
 
-  pi.registerTool({
+  registerTool({
     name: TOOL.memories,
     ...beadsExposure(TOOL.memories),
     outputSchema: READ_SCHEMAS.memories,
@@ -1687,7 +1742,7 @@ export default function piBeadsLean(pi: any) {
     },
   });
 
-  pi.registerTool({
+  registerTool({
     name: TOOL.stale,
     ...beadsExposure(TOOL.stale),
     outputSchema: READ_SCHEMAS.issues,
@@ -1724,7 +1779,7 @@ export default function piBeadsLean(pi: any) {
     },
   });
 
-  pi.registerTool({
+  registerTool({
     name: TOOL.lint,
     ...beadsExposure(TOOL.lint),
     outputSchema: READ_SCHEMAS.lint,
@@ -1769,7 +1824,7 @@ export default function piBeadsLean(pi: any) {
     },
   });
 
-  pi.registerTool({
+  registerTool({
     name: TOOL.gateCreate,
     ...beadsExposure(TOOL.gateCreate),
     label: "Beads gate create",
@@ -1808,7 +1863,7 @@ export default function piBeadsLean(pi: any) {
     },
   });
 
-  pi.registerTool({
+  registerTool({
     name: TOOL.gateResolve,
     ...beadsExposure(TOOL.gateResolve),
     label: "Beads gate resolve",
@@ -1867,7 +1922,7 @@ export default function piBeadsLean(pi: any) {
     },
   });
 
-  pi.registerTool({
+  registerTool({
     name: TOOL.molPour,
     ...beadsExposure(TOOL.molPour),
     label: "Beads molecule pour",
@@ -1921,7 +1976,7 @@ export default function piBeadsLean(pi: any) {
     },
   });
 
-  pi.registerTool({
+  registerTool({
     name: TOOL.molShow,
     ...beadsExposure(TOOL.molShow),
     outputSchema: READ_SCHEMAS.molecule,
@@ -1945,7 +2000,7 @@ export default function piBeadsLean(pi: any) {
     },
   });
 
-  pi.registerTool({
+  registerTool({
     name: TOOL.molCurrent,
     ...beadsExposure(TOOL.molCurrent),
     outputSchema: READ_SCHEMAS.molecule,
@@ -1970,7 +2025,7 @@ export default function piBeadsLean(pi: any) {
     },
   });
 
-  pi.registerTool({
+  registerTool({
     name: TOOL.molReady,
     ...beadsExposure(TOOL.molReady),
     outputSchema: READ_SCHEMAS.molecule,
@@ -2005,7 +2060,7 @@ export default function piBeadsLean(pi: any) {
     },
   });
 
-  pi.registerTool({
+  registerTool({
     name: TOOL.dep,
     ...beadsExposure(TOOL.dep),
     label: "Beads dependency",
@@ -2052,7 +2107,7 @@ export default function piBeadsLean(pi: any) {
     },
   });
 
-  pi.registerTool({
+  registerTool({
     name: TOOL.undep,
     ...beadsExposure(TOOL.undep),
     label: "Beads unlink dependency",
@@ -2094,7 +2149,7 @@ export default function piBeadsLean(pi: any) {
     },
   });
 
-  pi.registerTool({
+  registerTool({
     name: TOOL.comment,
     ...beadsExposure(TOOL.comment),
     label: "Beads comment",
@@ -2123,7 +2178,7 @@ export default function piBeadsLean(pi: any) {
     },
   });
 
-  pi.registerTool({
+  registerTool({
     name: TOOL.comments,
     ...beadsExposure(TOOL.comments),
     outputSchema: READ_SCHEMAS.comments,

@@ -1094,6 +1094,34 @@ test("single-repo: beads_update claim/setMetadata/description/title plumbing", a
   assert.equal(s.emitted.length, before + 1);
 });
 
+test("single-repo: beads_update rejects an undeclared argument without touching bd", async () => {
+  const s = await openSession("single", repoDir);
+  const before = s.emitted.length;
+  resetLog();
+  const r = await s.byName.get("beads_update").execute("c", { id: "proj-1a2", title: "New title", typoKey: 1 });
+  const text = r?.content?.[0]?.text ?? "";
+  assert.match(text, /beads_update: unknown argument\(s\): typoKey/, text);
+  assert.match(text, /accepted: .*\bstatus\b/, text);
+  assert.equal(invocations().length, 0, "an undeclared argument must not reach bd");
+  assert.equal(s.emitted.length, before, "a rejected call must not emit beads:changed");
+});
+
+test("single-repo: the undeclared-argument guard covers every write tool, not one", async () => {
+  const s = await openSession("single", repoDir);
+  resetLog();
+  const r = await s.byName.get("beads_close").execute("c", { ids: "proj-1a2", reson: "typo" });
+  assert.match(r?.content?.[0]?.text ?? "", /beads_close: unknown argument\(s\): reson/);
+  assert.equal(invocations().length, 0);
+});
+
+test("single-repo: the guard runs before the tool's own validation", async () => {
+  const s = await openSession("single", repoDir);
+  resetLog();
+  const r = await s.byName.get("beads_update").execute("c", { typoKey: 1 });
+  assert.match(r?.content?.[0]?.text ?? "", /unknown argument\(s\): typoKey/, "the unknown key is reported even with id missing");
+  assert.equal(invocations().length, 0);
+});
+
 test("single-repo: beads_dep --type plumbing and default (no --type)", async () => {
   const s = await openSession("single", repoDir);
   resetLog();
