@@ -96,6 +96,20 @@ test("no sandbox-forbidden globals", () => {
   }
 });
 
+test("coupling: the guard's `0 commit(s)` signal is the one review-package actually prints", () => {
+  // The guard tells the re-reviewer to stop when the package reports an empty
+  // range. That instruction is only worth anything while review-package keeps
+  // printing the signal it names, and nothing else couples the two: reword the
+  // echo line and the guard would point at something the reviewer never sees,
+  // with every other test still green.
+  // Anchor on the interpolated count-and-unit, not the bare token: a comment in
+  // review-package mentioning `commit(s)` would satisfy the loose form while the
+  // reviewer still never sees the count.
+  const rp = readFileSync(join(dirname(fileURLToPath(import.meta.url)), 'review-package'), 'utf8');
+  assert.match(rp, /\$\{commits\} commit\(s\)/, 'review-package must keep printing `${commits} commit(s)` — the guard names that signal');
+  assert.match(src, /0 commit\(s\)/, 'the guard must keep naming the signal review-package prints');
+});
+
 test("script parses as valid JS (vm: runtime wrapper compile)", () => {
   // Bare `node --check` is not a valid parse gate for this format: the
   // pi-subagents loader strips the `export ` keyword (extractMeta) and then
@@ -134,15 +148,18 @@ test("behavior: the re-review package ends at the runtime HEAD, so the fix commi
   // dispatch-time `head` would omit the very commit the re-review exists to
   // judge — a vacuous re-review that still reports clean. The range must end at
   // the runtime HEAD, which only the reviewer's own shell can resolve.
-  const args = { ...passedArgs, fixBase: 'aaaaaaa', head: 'bbbbbbb' }
+  // The spaced `reviewPackage` is deliberate: it pins that the operands are
+  // quoted, since an unquoted path containing a space splits into two args and
+  // the reviewer runs a command that cannot work.
+  const args = { ...passedArgs, fixBase: 'aaaaaaa', head: 'bbbbbbb', reviewPackage: '/my repos/scripts/review-package' }
   const prompts = []
   const agent = async (prompt, opts) => { prompts.push({ prompt, label: opts?.label ?? '' }); return 'done' }
   await runWorkflow(src, { args, agent })
 
   const reReview = prompts.find((p) => p.label === 're-review')
   assert.ok(reReview, 'the re-review agent must have run')
-  const toRuntimeHead = `${args.reviewPackage} ${args.taskBeadId} ${args.fixBase} HEAD`
-  const toStaleHead = `${args.reviewPackage} ${args.taskBeadId} ${args.fixBase} ${args.head}`
+  const toRuntimeHead = `'${args.reviewPackage}' '${args.taskBeadId}' '${args.fixBase}' HEAD`
+  const toStaleHead = `'${args.reviewPackage}' '${args.taskBeadId}' '${args.fixBase}' ${args.head}`
   assert.ok(
     reReview.prompt.includes(toRuntimeHead),
     `the re-review package must be built to the runtime HEAD; expected:\n  ${toRuntimeHead}`,
@@ -150,6 +167,30 @@ test("behavior: the re-review package ends at the runtime HEAD, so the fix commi
   assert.ok(
     !reReview.prompt.includes(toStaleHead),
     'the re-review package must not end at the dispatch-time head — the fix commit would be missing from the diff',
+  );
+})
+
+test("behavior: the re-review prompt guards against a fix that never committed", async () => {
+  // The range ends at the runtime HEAD, so a fix agent that edits and tests but
+  // does NOT commit leaves the package empty (0 commits, 74 bytes) — the same
+  // silent-vacuous-review shape, and nothing else in the round can detect it:
+  // the gate is a test command, and only the reviewer's shell can run git.
+  const prompts = []
+  const agent = async (prompt, opts) => { prompts.push({ prompt, label: opts?.label ?? '' }); return 'done' }
+  await runWorkflow(src, { args: passedArgs, agent })
+
+  const reReview = prompts.find((p) => p.label === 're-review')
+  assert.ok(reReview, 'the re-review agent must have run')
+  assert.match(reReview.prompt, /0 commit\(s\)/, 'the prompt must name the empty-package signal the script prints')
+  assert.match(
+    reReview.prompt,
+    /do not verdict findings against an empty diff/i,
+    'the prompt must tell the reviewer to stop rather than verdict findings',
+  );
+  assert.match(
+    reReview.prompt,
+    /FAILED — the fix agent did not commit/,
+    'the closing contract must offer a FAILED state, or the guard has no legal expression in the mandated final message',
   );
 })
 
