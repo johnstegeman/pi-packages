@@ -262,3 +262,54 @@ In `test/pi-beads.test.mjs`, using the existing fake-`bd` fixture (argv is asser
 - `files` arrays in other packages, and a repo-wide packaging check (D2).
 - Widening either surface beyond `type`/`acceptance` (e.g. `estimate`, `assignee`, `design`
   on update): a separate decision, not a by-product of this fix.
+
+## Errata (2026-10-01, post-implementation)
+
+**Context §3's conclusion is wrong, and so is the D6/D7 rationale that rested on it: "the
+direct path cannot reach the guard".** The probe recorded in §3 measured the *provider*, not
+pi. The shipped pi 0.99.2 bundle shows pi does not filter tool arguments at all:
+
+```js
+function validateToolArguments(tool, toolCall) {
+  const args = structuredClone(toolCall.arguments);
+  normalizeOptionalNulls(args, tool.parameters);   // declared keys only
+  exports_value.Convert(tool.parameters, args);
+  const validator2 = getValidator(tool.parameters);
+  ...
+  if (validator2.Check(args)) return args;          // returned UNCHANGED
+}
+```
+
+Nothing deletes an undeclared key, and both paths run through that function: the direct path
+via `prepareToolCall`, and the codemode nested path via
+`NestedToolCallRunner._executeNestedToolCall` -> `runToolCall` -> `prepareToolCall`. What kept
+the extra key out of the probe was provider-side strict sampling: `convertResponsesTools`
+computes `const defaultStrict = options?.strict === undefined ? false : options.strict;`, and
+`makeStrictJsonSchema` is what sets `additionalProperties = false` on the schema sent to the
+provider (`resolveJsonSchemaStrictSampling` only returns true for a strict-capable model).
+The probe's "stripping" was therefore a provider artifact, not a pi behaviour.
+
+Consequences for what shipped:
+
+- **The guard covers both paths.** §3's "not implementable inside pi-beads for
+  model-initiated calls" is superseded, as is the D6/D7 premise that the direct path cannot
+  reach the guard, and the risk-table row that leaned on the probe. The guard is still
+  load-bearing - it is the only thing that makes an undeclared key loud - but its blast radius
+  includes the direct path on any provider/model that does not honour strict tool sampling,
+  and on those the change turns a silent-partial-success write into an error tool result.
+- **`additionalProperties: false` is not what makes pi reject.** It is what pi *asks the
+  provider for*, and that request defaults off, so whether a direct call carries an undeclared
+  key depends on the provider and model.
+- **The four prose copies of the false premise were corrected** in the follow-up fix commit:
+  the `WRITE_TOOLS` comment in `packages/pi-beads/src/index.ts`, the field-table prose in
+  `packages/pi-beads/README.md`, the bullet in
+  `packages/pi-superpowers-plus/skills/using-superpowers/references/pi-tools.md`, and this
+  section. The original Context §3 text above is left unchanged as the record.
+- **The "Out of scope" item "Fixing pi-core's stripping"** describes no pi-core behaviour:
+  there is nothing in pi to fix. That follow-up bead should be re-scoped to the
+  provider-side strict-sampling default.
+
+Two related corrections landed in the same commit: `WRITE_TOOLS` now includes `beads_ready`
+(it mutates with `claim: true`) and the comment records why `beads_memories` is deliberately
+still excluded, and the guard wrapper forwards the whole `execute(toolCallId, params, signal,
+onUpdate, ctx)` argument list instead of truncating it to two.
