@@ -103,8 +103,16 @@ function mergeInto(prev, f) {
     dimensions: prev.dimensions.includes(f.dimension)
       ? prev.dimensions
       : prev.dimensions.concat([f.dimension]),
+    // A phrasing already collected — or equal to the winning description — must not
+    // be appended twice: the same location can be re-reported with the same wording
+    // across lenses, and a naive concat would surface ['B', 'B'] in the refuter
+    // prompt's also-reported-as list.
     alsoDescribed: (prev.alsoDescribed ?? []).concat(
       normalize(lo.description) === normalize(hi.description) ? [] : [lo.description],
+    ).filter(
+      (d, i, all) =>
+        normalize(d) !== normalize(hi.description) &&
+        all.findIndex((x) => normalize(x) === normalize(d)) === i,
     ),
   }
 }

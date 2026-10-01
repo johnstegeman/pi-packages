@@ -410,4 +410,76 @@ test("refutation: the extra phrasings ride inside the DATA boundary", () => {
   assert.ok(begin < extras && extras < end, 'alsoDescribed must sit between the DATA markers')
 })
 
+// The line-less branch of dedupeKey keeps the description in the key precisely so a
+// file carrying several line-less findings does not fold them into one row. That
+// non-collapse is a behavior, not a shape: pin it through the harness so a future
+// coarsening of the key cannot silently swallow real signal.
+const LINE_LESS_DESCRIPTIONS = [
+  'line-less item one: stale note',
+  'line-less item two: missing example',
+  'line-less item three: broken link',
+  'line-less item four: vague wording',
+]
+const lineLessAgent = () => {
+  const state = { refuterCalls: 0 }
+  const agent = async (prompt, callOpts) => {
+    const label = callOpts?.label ?? ''
+    if (label.startsWith('find:')) {
+      return label === 'find:maintainability'
+        ? { findings: LINE_LESS_DESCRIPTIONS.map((d) => ({ file: 'docs/notes.md', severity: 'minor', description: d })) }
+        : { findings: [] }
+    }
+    state.refuterCalls++
+    return { isReal: true, reason: 'holds against the diff' }
+  }
+  return { state, agent }
+}
+
+test("behavior: four line-less findings at one file stay four rows, not one", async () => {
+  const { state, agent } = lineLessAgent()
+  const inline = await runWorkflow(src, {
+    args: { base: 'a', head: 'b', packagePath: '/x', description: 'd', gateBeadId: 'g' },
+    agent,
+  })
+  assert.equal(inline.findings.length, 4, 'line-less findings must not fold into one row')
+  assert.equal(state.refuterCalls, 4, 'one refuter per line-less finding')
+
+  // the compact envelope must agree: the same four rows, not a collapsed one
+  const { agent: fileAgent } = lineLessAgent()
+  const fileMode = await runWorkflow(src, {
+    args: { base: 'a', head: 'b', packagePath: '/x', description: 'd', gateBeadId: 'g', findingsFile: '/tmp/line-less.jsonl' },
+    agent: fileAgent,
+  })
+  assert.equal(fileMode.count, 4, 'the compact envelope counts four rows')
+})
+
+test("behavior: a repeated phrasing appears exactly once in alsoDescribed", async () => {
+  // Reachable sequence: one location reported as A, then B, then B again. The
+  // third merge has hi = prev (A) and lo = B, so a naive append would store
+  // ['B', 'B'] and surface it verbatim in the refuter prompt.
+  const agent = async (prompt, callOpts) => {
+    const label = callOpts?.label ?? ''
+    if (label.startsWith('find:')) {
+      return label === 'find:correctness'
+        ? {
+            findings: [
+              { file: 'src/dup.js', line: 7, severity: 'minor', description: 'phrasing A' },
+              { file: 'src/dup.js', line: 7, severity: 'minor', description: 'phrasing B' },
+              { file: 'src/dup.js', line: 7, severity: 'minor', description: 'phrasing B' },
+            ],
+          }
+        : { findings: [] }
+    }
+    return { isReal: true, reason: 'holds against the diff' }
+  }
+  const result = await runWorkflow(src, {
+    args: { base: 'a', head: 'b', packagePath: '/x', description: 'd', gateBeadId: 'g' },
+    agent,
+  })
+  const row = result.findings.find((f) => f.file === 'src/dup.js')
+  assert.ok(row, 'the repeated location merged into one row')
+  assert.equal(result.findings.length, 1)
+  assert.deepEqual([...row.alsoDescribed], ['phrasing B'], 'the repeated phrasing appears exactly once')
+})
+
 run();
