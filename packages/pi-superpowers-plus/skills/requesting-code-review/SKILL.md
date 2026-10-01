@@ -8,6 +8,11 @@ disable-model-invocation: true
 
 # Requesting Code Review
 
+> **Reaching beads tools:** every `beads_*` tool has `codemode`/`deferred` exposure, so
+> none is in your tool list. Call them from a `codemode` script —
+> `await tools.beads_update({ ... })` — and find the deferred ones with
+> `await searchTools("beads")`. The call shapes below are that script's arguments.
+
 Dispatch a code reviewer subagent to catch issues before they cascade. The reviewer gets precisely crafted context for evaluation — never your session's history.
 
 **Core principle:** Review early, review often.

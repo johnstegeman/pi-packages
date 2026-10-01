@@ -9,15 +9,15 @@ Dispatch a subagent with this prompt:
 
     ## Task Description
 
-    Read your task bead first: beads_show({ id: "<TASK_ID>", full: true }).
-    Note on your toolset: extension tools (beads_* / bd) ARE available to you
-    even though a plain Agent-dispatch "Tools:" summary lists only
-    read/write/edit/bash — that summary is the default no-extension scope; in
-    this extension-enabled session beads_show works. Use beads tools
+    Read your task bead first, from a codemode script:
+    `return await tools.beads_show({ id: "<TASK_ID>", full: true });`
+    Note on your toolset: the beads_* tools (and `bd`) are registered with
+    code-mode exposure, so they do NOT appear in a plain Agent-dispatch
+    "Tools:" summary listing only read/write/edit/bash — that is expected, not
+    a missing toolset. Reach them through the `codemode` tool. Use beads tools
     READ-ONLY (reading your task bead) here.
-    If `beads_show` is not actually available to you in this session, say so
-    (NEEDS_CONTEXT) — the controller will inline your task text; don't guess
-    or work from memory.
+    If `codemode` itself is not available to you, say so (NEEDS_CONTEXT) — the
+    controller will inline your task text; don't guess or work from memory.
 
     It contains the exact, full text of your task.
 

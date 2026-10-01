@@ -168,6 +168,10 @@ case "$1" in
       printf '%s\n' '{"issues":[{"id":"superpowers-workflow.explore","priority":2,"status":"open","title":"Explore project context: {{topic}}","is_template":true},{"id":"proj-1a2","priority":1,"status":"open","title":"Repo work"}]}'
       exit 0
     fi
+    if [ "\${FAKE_BD_READY_OBJECT:-0}" = "1" ]; then
+      printf '%s\n' '{"meta":{"total":0}}'
+      exit 0
+    fi
     if [ "\${FAKE_BD_READY_OK:-0}" = "1" ]; then
       printf 'ok\n'
       exit 0
@@ -1420,6 +1424,26 @@ test("single-repo: beads_ready filters templates from an {issues:[...]} envelope
     assert.doesNotMatch(text, /superpowers-workflow/, "the object-wrapped template row must be filtered");
   } finally {
     delete process.env.FAKE_BD_READY_WRAPPED;
+  }
+});
+
+test("single-repo: beads_ready keeps structuredContent.issues array-shaped on a non-array payload", async () => {
+  // stripTemplates fails OPEN, so a parseable object carrying no `issues` key
+  // passes through untouched. structuredContent must still be array-shaped:
+  // READ_SCHEMAS.issues declares an array, and an object here is the shape
+  // mismatch the other structured reads already normalise away.
+  process.env.FAKE_BD_READY_OBJECT = "1";
+  try {
+    const s = await openSession("single", repoDir);
+    resetLog();
+    const r = await s.byName.get("beads_ready").execute("c", { limit: 5 });
+    assert.ok(okResult(r), JSON.stringify(r));
+    assert.ok(
+      Array.isArray(r.structuredContent.issues),
+      `issues must be an array even when the payload is not; got ${JSON.stringify(r.structuredContent.issues)}`,
+    );
+  } finally {
+    delete process.env.FAKE_BD_READY_OBJECT;
   }
 });
 

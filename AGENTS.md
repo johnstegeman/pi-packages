@@ -8,6 +8,7 @@ Guidance for AI coding agents working in this repo.
 packages/
 ├── ayu/         – Ayu color scheme for Pi (Day, Dusk, Dark)
 ├── bifrost/     – Custom provider for Bifrost AI gateway
+├── codemode-bootstrap/ – Activates pi's `codemode` tool for every session (see docs/superpowers/specs/2026-09-30-codemode-adoption-design.md)
 ├── hashline-edit/ – Hash-anchored read/edit tool override, with opt-in grep
 ├── langfuse/    – Langfuse observability with Superpowers phase metadata
 ├── statusline/  – Single-line statusline footer with ayu/tokyo-night/classic presets

@@ -19,7 +19,11 @@ export default function codemodeBootstrap(pi: any): void {
       if (active.includes(CODEMODE)) return; // already on
       pi.setActiveTools?.([...active, CODEMODE]);
     } catch {
-      // Tool APIs are unavailable in some hosts (print mode, SDK); stay a no-op.
+      // getAllTools/setActiveTools throw only in a host that loads extension
+      // definitions without ever binding a session — standalone
+      // `discoverAndLoadExtensions`, for instance; the throwing stubs exist only
+      // until `core.bindCore` runs. A bound print-mode or SDK session exposes
+      // both normally. Not being able to check is not a reason to fail.
     }
   };
   pi.on?.("session_start", activate);

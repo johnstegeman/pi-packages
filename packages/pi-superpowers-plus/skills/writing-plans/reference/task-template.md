@@ -1,5 +1,10 @@
 # Task Template
 
+> **Reaching beads tools:** every `beads_*` tool has `codemode`/`deferred` exposure, so
+> none is in your tool list. Call them from a `codemode` script —
+> `await tools.beads_update({ ... })` — and find the deferred ones with
+> `await searchTools("beads")`. The call shapes below are that script's arguments.
+
 Each task is one task bead. The template below is the exact shape of every task bead's
 `description` — what `beads_create({ title, description })` writes. The markdown
 heading `### Task N: [Component Name]` is the bead's TITLE, not a heading in a

@@ -725,8 +725,16 @@ export default function piBeadsLean(pi: any) {
   });
 
   // `outputSchema` tools must always set structuredContent, including failures.
-  const jsonResult = (text: string, structuredContent: unknown) =>
-    textResult(text, structuredContent);
+  // Not a pass-through alias: the check is what makes the name a contract, and a
+  // caller that forgets it fails loudly here instead of shipping a result that
+  // violates the schema pi declared to the model. (A throw inside a tool surfaces
+  // as an error tool result, so this can only fire on a programming mistake.)
+  const jsonResult = (text: string, structuredContent: unknown) => {
+    if (structuredContent === undefined) {
+      throw new Error("jsonResult requires structuredContent — the tool declares an outputSchema");
+    }
+    return textResult(text, structuredContent);
+  };
 
   const ISSUE_SCHEMA = {
     type: "object",
@@ -888,7 +896,11 @@ export default function piBeadsLean(pi: any) {
       // limit can find nothing even though real work exists). Accepted: at the default
       // limit and with typically one template head this is negligible.
       const filtered = stripTemplates(r.out);
-      const structured = { issues: jparse(filtered) ?? [] };
+      // issueArray, not `jparse(filtered) ?? []`: stripTemplates fails OPEN, so a
+      // parseable non-array payload would otherwise land an object under an
+      // `issues` key that READ_SCHEMAS declares as an array. Same helper (and
+      // same double-parse saving) as the other structured reads.
+      const structured = { issues: issueArray(filtered) };
       if (!claim) return jsonResult(fmtRows(filtered), structured);
       // Select client-side so a template head can never be claimed. The owning-repo
       // `bd update <id> --claim` is the sole durable claim path (it also emits

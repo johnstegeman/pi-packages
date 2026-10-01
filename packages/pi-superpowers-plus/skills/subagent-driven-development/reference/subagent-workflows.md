@@ -1,5 +1,11 @@
 ## Workflows (SubagentWorkflow)
 
+> **Reaching these tools:** every `beads_*` tool has `codemode`/`deferred` exposure, and so
+> does `SubagentWorkflow`; none is in your tool list. Call them from a `codemode` script —
+> `await tools.beads_update({ ... })`, `await tools.SubagentWorkflow({ ... })` — and find the
+> deferred ones with `await searchTools("beads")`. The call shapes below are that script's
+> arguments. (`Agent` stays direct.)
+
 SubagentWorkflow (pi-subagents >=0.19, pi >=0.84) runs deterministic scripts that coordinate many subagents in the background — `agent()`, `parallel()`, `pipeline()`, `gate`, `resume` (see the pi-subagents README / docs/workflows.md). It is for batches, not single tasks: use `Agent` for one delegated task or a handful you can name up front.
 
 **When a workflow is right.** Prefer `SubagentWorkflow` for SDD's batch shapes:

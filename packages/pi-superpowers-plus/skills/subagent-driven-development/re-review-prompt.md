@@ -17,8 +17,11 @@ Dispatch a subagent with this prompt:
     ## The Task
 
     call set_phase({ phase: "development" }).
-    Read your task bead: beads_show({ id: "<TASK_ID>", full: true }).
-    It contains the exact, full text of the task.
+    Read your task bead, from a codemode script:
+    `return await tools.beads_show({ id: "<TASK_ID>", full: true });`
+    It contains the exact, full text of the task. (The beads_* tools have
+    code-mode exposure, so they are not in your declared tool list — reach
+    them through `codemode`.)
 
     ## The Findings Under Verification
 
