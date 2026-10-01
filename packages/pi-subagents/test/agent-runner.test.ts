@@ -1700,8 +1700,52 @@ describe("agent-runner async extension tool registration", () => {
     // A hard registry gate is the right boundary here: nothing can register
     // asynchronously, so there is no active-set narrowing to maintain.
     expect(createAgentSession.mock.calls[0][0].tools).toEqual(["read"]);
+    // The registration layer: `tools:` is the allowlist pi applies to the registry
+    // (`allowedToolNames`), so codemode — which the inline factory registers for every
+    // session — never becomes callable here. The mock loader cannot run
+    // extensionFactories, so this pins the allowlist rather than the live registry; the
+    // nested fail-closed branch is the second, independent layer.
+    expect(createAgentSession.mock.calls[0][0].tools).not.toContain("codemode");
     expect(session.setActiveToolsByName).not.toHaveBeenCalled();
     expect(session.agent.beforeToolCall).toBeUndefined();
+  });
+
+  it("fails closed for nested calls when no scope was installed", async () => {
+    // `isolated` (and `extensions: false`) never calls installExtensionToolScope, so the
+    // veto's holder is never filled. The registration gate is what keeps codemode out of
+    // the registry; this pins the second, independent layer.
+    vi.mocked(getConfig).mockReturnValueOnce(makeConfig({ extensions: false }));
+    vi.mocked(getAgentConfig).mockReturnValueOnce(makeAgentConfig({ extensions: false }));
+    vi.mocked(getToolNamesForType).mockReturnValueOnce(["read"]);
+    const { session } = createSession("OK");
+    createAgentSession.mockResolvedValue({ session });
+
+    await runAgent(ctx, "Explore", "go", { pi, isolated: true });
+
+    // The mock loader stores extensionFactories but never runs them, so drive the veto
+    // factory by hand — the same way the real loader would.
+    const factories = lastLoaderOpts().extensionFactories as Array<{
+      name?: string;
+      factory?: (pi: any) => void;
+    }>;
+    const veto = factories.find((f) => f?.name === "subagent-tool-scope");
+    expect(veto?.factory).toBeTypeOf("function");
+
+    const handlers: Array<(event: any) => unknown> = [];
+    veto?.factory?.({
+      on: (name: string, handler: (event: any) => unknown) => {
+        if (name === "tool_call") handlers.push(handler);
+      },
+    });
+    expect(handlers).toHaveLength(1);
+
+    // NESTED — the call a codemode script makes through ctx.executeTool(). Fail closed.
+    expect(handlers[0]({ toolName: "codemode", parentToolCallId: "p1" })).toMatchObject({
+      block: true,
+      reason: expect.stringContaining("not available to this subagent"),
+    });
+    // DIRECT — must stay allowed, or every noExtensions session would freeze.
+    expect(handlers[0]({ toolName: "read" })).toBeUndefined();
   });
 });
 
