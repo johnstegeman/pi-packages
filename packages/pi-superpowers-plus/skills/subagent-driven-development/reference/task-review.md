@@ -1,5 +1,10 @@
 # Task review: inputs, constraint lens, and pre-judging
 
+> **Reaching beads tools:** every `beads_*` tool has `codemode`/`deferred` exposure, so
+> none is in your tool list. Call them from a `codemode` script —
+> `await tools.beads_update({ ... })` — and find the deferred ones with
+> `await searchTools("beads")`. The call shapes below are that script's arguments.
+
 - **Reviewer inputs:** the task reviewer gets three paths — the same task
   bead id, the report file, and the review package — plus the gate bead
   id holding the plan's canonical Global Constraints.

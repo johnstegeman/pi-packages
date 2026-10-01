@@ -11,9 +11,15 @@ import {
   type AgentSession,
   type AgentSessionEvent,
   createAgentSession,
+  // LOCAL PATCH (pi-packages) — see docs/pi-subagents-local-patch.md
+  // Subagent sessions do not load the CLI's built-in codemode extension (SDK
+  // sessions never do). pi-packages ships tools with codemode/deferred exposure,
+  // which a subagent can only reach through codemode, so load it explicitly.
+  createCodemodeExtension,
   DefaultResourceLoader,
   type ExtensionAPI,
   getAgentDir,
+  type InlineExtension,
   SessionManager,
   SettingsManager,
 } from "@earendil-works/pi-coding-agent";
@@ -204,6 +210,46 @@ export function parseExtSelectors(entries: string[]): {
 }
 
 /**
+ * The extension `tool_call` handler that enforces the subagent tool scope on the
+ * NESTED path — the calls a codemode script makes through `ctx.executeTool()`.
+ *
+ * `installExtensionToolScope` wraps `session.agent.beforeToolCall`, but that
+ * property is not on the nested path: `AgentSession._executeNestedToolCall`
+ * hands `runToolCall` its own `_beforeToolCall`, which dispatches extension
+ * `tool_call` handlers and never the `agent.beforeToolCall` property. The ACTIVE
+ * set does not cover it either — `_getCallableTools()` gives a script every
+ * registered `codemode`/`deferred` tool regardless of the active set, so `ext:`
+ * narrowing cannot bound what a script calls. The same predicate therefore has
+ * to be re-asserted here as a handler.
+ *
+ * The factory runs at `loader.reload()`, before the session exists and before
+ * `inScope()` is computable (it depends on the injected-tool re-admits), so it
+ * reads the predicate from a holder {@link installExtensionToolScope} fills in.
+ * Until it does, the handler is a no-op: no prompt can run before the scope is
+ * installed, and the `noExtensions` sessions that never install one are gated at
+ * registration by `excludeTools`.
+ *
+ * LOCAL PATCH (pi-packages) — see docs/pi-subagents-local-patch.md (Divergence 4).
+ */
+function createToolScopeVeto(holder: { inScope?: () => Set<string> }): InlineExtension {
+  return {
+    name: "subagent-tool-scope",
+    hidden: true,
+    factory: (pi: ExtensionAPI) => {
+      pi.on("tool_call", (event) => {
+        const inScope = holder.inScope;
+        if (!inScope) return undefined;
+        if (inScope().has(event.toolName)) return undefined;
+        return {
+          block: true,
+          reason: `Tool "${event.toolName}" is not available to this subagent.`,
+        };
+      });
+    },
+  };
+}
+
+/**
  * Keep a subagent's tool scope correct as extensions register tools over time.
  *
  * Extensions may call `registerTool` long after load — pi-mcp from `session_start`,
@@ -211,7 +257,7 @@ export function parseExtSelectors(entries: string[]): {
  * snapshotted. `registerTool` writes into the very `extension.tools` maps this reads,
  * so `inScope()` sees late arrivals on the next call.
  *
- * Two enforcement points, because neither covers the whole picture:
+ * Three enforcement points, because none of them covers the whole picture:
  *
  *   - `turn_end` re-narrows the ACTIVE set. pi emits `turn_end` immediately before
  *     `prepareNextTurn` re-snapshots `agent.state.tools`, and session listeners run
@@ -220,8 +266,16 @@ export function parseExtSelectors(entries: string[]): {
  *     `before_agent_start` fires INSIDE `prompt()` and may widen the tool set, but
  *     `createContextSnapshot()` freezes that turn's tools immediately after — there
  *     is no hook in between. A call-time check is the only correct guard there.
+ *   - the `tool_call` handler registered by `createToolScopeVeto` blocks out-of-scope
+ *     calls made by a codemode SCRIPT. The `beforeToolCall` wrap above is invisible
+ *     there: `ctx.executeTool()` reaches `_executeNestedToolCall`, whose `runToolCall`
+ *     calls the session's own `_beforeToolCall` (extension `tool_call` handlers) and
+ *     never the `agent.beforeToolCall` property. The active set cannot close the gap
+ *     either — `_getCallableTools()` hands a script every `codemode`/`deferred` tool
+ *     regardless of the active set, so `inScope()` has to be re-asserted at call time
+ *     on that path too. See docs/pi-subagents-local-patch.md (Divergence 4).
  *
- * Both are installed on the session and deliberately NOT unsubscribed: they must
+ * These are installed on the session and deliberately NOT unsubscribed: they must
  * outlive the `runAgent` call so resumed/steered turns stay scoped. pi's `dispose()`
  * clears `_eventListeners`, so they die with the session rather than leaking.
  *
@@ -245,9 +299,15 @@ export function installExtensionToolScope(
      * seeded from `toolNames`.
      */
     readmitToolNames: Set<string>;
+    /**
+     * Receives the live `inScope()` predicate for the extension `tool_call`
+     * handler that guards NESTED (codemode script) calls — see
+     * {@link createToolScopeVeto}.
+     */
+    toolScopeVeto: { inScope?: () => Set<string> };
   },
 ): void {
-  const { loader, toolNames, disallowedSet, extNames, narrowing, readmitToolNames } = ctx;
+  const { loader, toolNames, disallowedSet, extNames, narrowing, readmitToolNames, toolScopeVeto } = ctx;
 
   // The names allowed right now. Mirrors the `ext:` opt-in flip: when any `ext:`
   // selector is present, extension tools become an explicit allowlist — a loaded
@@ -276,6 +336,11 @@ export function installExtensionToolScope(
     for (const name of readmitToolNames) keep.add(name);
     return keep;
   };
+
+  // Publish the predicate for the nested path's `tool_call` handler. The
+  // extension factory that reads it ran at loader.reload(), before this scope
+  // existed; every read is deferred, so the handler sees the live value.
+  toolScopeVeto.inScope = inScope;
 
   const renarrow = () => {
     const allowed = inScope();
@@ -737,6 +802,13 @@ export async function runAgent(
           return {
             ...base,
             extensions: base.extensions.filter((e) => {
+              // LOCAL PATCH (pi-packages) — see docs/pi-subagents-local-patch.md
+              // Inline factories are injected by this runner, not discovered from
+              // disk, so the `extensions:` allowlist does not govern them. Exempting
+              // them keeps the codemode factory we add below in the LOADED set for
+              // name-allowlist agents — without it, `readmitToolNames` (which can only
+              // re-admit names already in session.getAllTools()) could never see it.
+              if (e.path.startsWith("<inline:")) return true;
               const canons = extensionCanonicalNames(e.path);
               if (canons.some((n) => excludeNames.has(n))) return false; // exclude wins
               return loadAll || canons.some((n) => keepNames.has(n));
@@ -744,12 +816,19 @@ export async function runAgent(
           };
         };
 
+  // LOCAL PATCH (pi-packages) — see docs/pi-subagents-local-patch.md (Divergence 4).
+  // Filled in by `installExtensionToolScope` below; the extension factory that
+  // reads it runs during `loader.reload()`, before the scope exists.
+  const toolScopeVeto: { inScope?: () => Set<string> } = {};
+
   const loader = new DefaultResourceLoader({
     cwd: configCwd,
     agentDir,
     noExtensions,
     additionalExtensionPaths,
     extensionsOverride,
+    // LOCAL PATCH (pi-packages) — see docs/pi-subagents-local-patch.md
+    extensionFactories: [createCodemodeExtension(), createToolScopeVeto(toolScopeVeto)],
     noSkills,
     noPromptTemplates: true,
     noThemes: true,
@@ -1038,7 +1117,12 @@ export async function runAgent(
       disallowedSet,
       extNames,
       narrowing,
-      readmitToolNames,
+      // LOCAL PATCH (pi-packages) — see docs/pi-subagents-local-patch.md
+      // codemode's canonical name (`<inline:N>`) can never appear in an `ext:`
+      // selector, so inScope()'s opt-in branch would drop it from the active set
+      // even once the override above keeps it loaded. Re-admit it by tool name.
+      readmitToolNames: new Set([...readmitToolNames, "codemode"]),
+      toolScopeVeto,
     });
   }
 

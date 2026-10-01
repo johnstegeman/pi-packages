@@ -63,15 +63,40 @@
 
 import type { Model } from "@earendil-works/pi-ai";
 import {
+  type AgentToolResult,
+  type AgentToolUpdateCallback,
   buildSessionContext,
   createAgentSession,
+  DefaultResourceLoader,
   type ExtensionContext,
+  getAgentDir,
   SessionManager,
   type ToolDefinition,
 } from "@earendil-works/pi-coding-agent";
 import { runInChildSessionContext } from "./child-context.js";
 import { agentMentionReminder } from "./mention.js";
 import type { SubagentType, ThinkingLevel } from "./types.js";
+
+/**
+ * The registered `Agent` tool, as the clone uses it.
+ *
+ * Everything a `ToolDefinition` has, except `execute` is invoked with the MAIN
+ * session's `ExtensionContext` rather than the `ExtensionToolContext` that
+ * `ToolDefinition.execute` declares. Pi 0.99.1 splits `tools`/`executeTool` onto
+ * the tool-context variant; the Agent handler uses neither (index.ts narrows its
+ * own parameter to say so), and the clone must never hand over its own context —
+ * the spawn has to be attributed to the real session. Declared as a method so the
+ * real `ToolDefinition` stays assignable.
+ */
+export type MentionAgentTool = Omit<ToolDefinition, "execute"> & {
+  execute(
+    toolCallId: string,
+    params: unknown,
+    signal: AbortSignal | undefined,
+    onUpdate: AgentToolUpdateCallback<unknown> | undefined,
+    ctx: ExtensionContext,
+  ): Promise<AgentToolResult<unknown>>;
+};
 
 export interface MentionCloneOptions {
   /** The MAIN session's context — what the spawn is attributed to, and the
@@ -82,7 +107,7 @@ export interface MentionCloneOptions {
   /** What the user typed after the handle. */
   message: string;
   /** The registered `Agent` tool, reused so the spawn is an ordinary one. */
-  agentTool: ToolDefinition;
+  agentTool: MentionAgentTool;
 }
 
 export interface MentionCloneResult {
@@ -146,8 +171,32 @@ export async function runMentionClone(opts: MentionCloneOptions): Promise<Mentio
     // the settings level instead, which is what a session that never ran
     // `/think` is on anyway. Same shim shape as `modelRuntime` below.
     const thinkingLevel = (ctx as { thinkingLevel?: ThinkingLevel }).thinkingLevel;
-    const created = await runInChildSessionContext(() =>
-      createAgentSession({
+    // The clone rebuilds a system prompt from cwd and agentDir, which is close
+    // but not the live one — extensions contribute to it per turn. Copy the
+    // real thing, so the copy reasons under the instructions the user's model
+    // is actually working under.
+    //
+    // 0.99.1 made `agent.state.systemPrompt` read-only and made the session's
+    // provider context a projection of its `SessionManager`. The supported way
+    // to force a prompt for a run is a `before_agent_start` handler returning
+    // `systemPrompt`: it lands on `systemPromptOptions.forceSystemPrompt`, which
+    // the request projects as the provider's leading system message. The handler
+    // rides an inline extension on the clone's own resource loader, so it applies
+    // to the clone and nowhere else; that loader also keeps the cwd/agentDir
+    // discovery the session would otherwise do for itself.
+    const systemPrompt = ctx.getSystemPrompt?.();
+    const resourceLoader = new DefaultResourceLoader({
+      cwd: ctx.cwd,
+      agentDir: getAgentDir(),
+      extensionFactories: [
+        (pi) => {
+          pi.on("before_agent_start", () => (systemPrompt ? { systemPrompt } : undefined));
+        },
+      ],
+    });
+    const created = await runInChildSessionContext(async () => {
+      await resourceLoader.reload();
+      return createAgentSession({
         cwd: ctx.cwd,
         // Nothing about the copy is worth persisting, and an in-memory manager
         // is also what keeps the real session untouched.
@@ -156,6 +205,7 @@ export async function runMentionClone(opts: MentionCloneOptions): Promise<Mentio
         ...(thinkingLevel && { thinkingLevel }),
         modelRegistry: ctx.modelRegistry,
         ...(parentModelRuntime !== undefined && { modelRuntime: parentModelRuntime as never }),
+        resourceLoader,
         // An allowlist naming exactly the clone's own tool. NOT `noTools:
         // "all"`, whose doc comment ("start with no tools enabled") reads like
         // it spares custom tools and does not: it resolves to an EMPTY
@@ -166,20 +216,30 @@ export async function runMentionClone(opts: MentionCloneOptions): Promise<Mentio
         // agent-runner's `tools: sessionTools` beside its nested `customTools`.
         tools: [cloneAgentTool.name],
         customTools: [cloneAgentTool],
-      } as Parameters<typeof createAgentSession>[0]),
-    );
+      } as Parameters<typeof createAgentSession>[0]);
+    });
     session = created.session;
 
-    // The clone rebuilds a system prompt from cwd and agentDir, which is close
-    // but not the live one — extensions contribute to it per turn. Copy the
-    // real thing, so the copy reasons under the instructions the user's model
-    // is actually working under.
-    const systemPrompt = ctx.getSystemPrompt?.();
-    if (systemPrompt) session.agent.state.systemPrompt = systemPrompt;
-
-    // The conversation itself. Pushed rather than assigned so the array the
-    // session was built around stays the one it goes on using.
-    session.agent.state.messages.push(...conversation.messages);
+    // The conversation itself, seeded through the session's own `SessionManager`.
+    // Since 0.87.0 that manager is canonical for an `AgentSession`'s provider
+    // context — the session projects the request from it — so appending here is
+    // what puts the parent's transcript in front of the model. Writing to
+    // `agent.state.messages` instead is discarded before the turn. Seeding after
+    // construction (rather than handing the entries to `SessionManager.inMemory`
+    // up front) keeps the clone a NEW session to `createAgentSession`, so its
+    // model/thinking resolution is unchanged.
+    //
+    // `buildSessionContext` folds compaction and branch entries into
+    // `compactionSummary`/`branchSummary` messages. `appendMessage`'s signature
+    // does not name those two — its doc steers them to `appendCompaction()` and
+    // an `appendBranchSummary()` that does not exist — but it stores them as
+    // message entries all the same, and `sessionEntryToContextMessages` returns a
+    // message entry verbatim, so the model sees the same summary message either
+    // way. Only the throwaway clone's entry organisation differs, and nothing
+    // reads it back.
+    for (const message of conversation.messages) {
+      session.sessionManager.appendMessage(message as Parameters<typeof session.sessionManager.appendMessage>[0]);
+    }
 
     // User text first, reminder after — the order Claude Code's attachment
     // renderer produces, where the reminder trails the message it is about.

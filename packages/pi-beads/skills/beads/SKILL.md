@@ -30,6 +30,10 @@ live umbrella path, prefix routes, and current default-create repo for this sess
 ## The tools
 High-frequency subset — see the pi-beads README for the full reference (all 23 tools).
 
+> **Reaching these tools:** every `beads_*` tool has `codemode`/`deferred` exposure, so it is
+> **not** in your tool list. Call them from a `codemode` script — `await tools.beads_ready({ ... })` —
+> and find the deferred ones with `await searchTools("beads")` or by filtering `ALL_TOOLS`.
+
 ### Read — always span ALL repos (from the aggregate by default)
 | tool | use |
 |---|---|

@@ -8,11 +8,12 @@ Guidance for AI coding agents working in this repo.
 packages/
 ├── ayu/         – Ayu color scheme for Pi (Day, Dusk, Dark)
 ├── bifrost/     – Custom provider for Bifrost AI gateway
+├── codemode-bootstrap/ – Activates pi's `codemode` tool for every session (see docs/superpowers/specs/2026-09-30-codemode-adoption-design.md)
 ├── hashline-edit/ – Hash-anchored read/edit tool override, with opt-in grep
 ├── langfuse/    – Langfuse observability with Superpowers phase metadata
 ├── statusline/  – Single-line statusline footer with ayu/tokyo-night/classic presets
 ├── pi-beads/    – Fork of abix5/pi-beads (beads_* tools), wisp (--ephemeral) support
-├── pi-subagents/  – Squashed git subtree of tintinweb/pi-subagents; upstream-tracked (do not hand-edit); synced nightly via .github/workflows/sync-pi-subagents.yml (opens a review PR). Manual sync: `git subtree pull --prefix packages/pi-subagents <url> master --squash`. The bot branch is persistent and never force-pushed; see .github/workflows/ci.yml for the manifest/dep-mirror/typecheck gate on PRs to main.
+├── pi-subagents/  – Vendored fork of tintinweb/pi-subagents; this repo owns it and edits it directly (no upstream sync, no subtree). Local divergences are recorded in docs/pi-subagents-local-patch.md. See .github/workflows/ci.yml for the manifest/dep-mirror/package-gate checks on PRs to main.
 └── pi-superpowers-plus/ – Vendored Superpowers skills + set_phase + beads-molecule-widget extensions + agent templates
 ```
 
@@ -68,14 +69,13 @@ real gate — `biome check .` from the installed `node_modules`, as `npm test` r
 reported 4 errors (3 formatting, plus `noAssignInExpressions`) that had already been pushed.
 Run `npm test` at the root, or install first and use the local binary.
 
-### Sync-loop + dep-mirror checks (root)
+### Dep-mirror checks (root)
 
-The sync simulation and dep-mirror gate are root-level scripts. `npm test` (above) covers the
-packages; these are separate and still run directly (they are also CI jobs):
+The dep-mirror gate is a root-level script. `npm test` (above) covers the packages; this is
+separate and still runs directly (it is also a CI job):
 
 ```bash
 npm install --no-save semver@^7 --prefix /tmp/depsmirror --silent
-bash scripts/sim/simulate-sync.sh
 NODE_PATH=/tmp/depsmirror/node_modules node scripts/ci/check-deps-mirror.mjs
 NODE_PATH=/tmp/depsmirror/node_modules node --test scripts/ci/check-deps-mirror.test.mjs
 ```

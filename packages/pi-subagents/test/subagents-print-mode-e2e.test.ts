@@ -15,7 +15,7 @@
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import type { Context } from "@earendil-works/pi-ai";
+import { getCurrentSystemPrompt, getCurrentTools, type TranscriptContext } from "@earendil-works/pi-ai";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   agentCall,
@@ -94,7 +94,7 @@ describe.skipIf(LIVE)("subagents print-mode e2e (scripted faux, real pi-mono)", 
         // NON-circular: the parent's final answer echoes whatever the child's
         // result actually was in context. If the child output didn't reach the
         // parent, this returns CHILD_MISSING and the responseText assertion fails.
-        parentFinal: (ctx: Context) => {
+        parentFinal: (ctx: TranscriptContext) => {
           const childOut = [...ctx.messages]
             .reverse()
             .find((m) => m.role === "toolResult" && (m as { toolName?: string }).toolName === "Agent");
@@ -128,8 +128,8 @@ describe.skipIf(LIVE)("subagents print-mode e2e (scripted faux, real pi-mono)", 
     //   - WITH the hold, the parent loop blocks in waitForAll() until the child
     //     finishes → the child's own model turn actually runs (≥3 calls).
     const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
-    const respond = async (ctx: Context) => {
-      const isParent = (ctx.tools ?? []).some((t) => t.name === "Agent");
+    const respond = async (ctx: TranscriptContext) => {
+      const isParent = getCurrentTools(ctx.messages).some((t) => t.name === "Agent");
       if (!isParent) {
         await sleep(80); // child takes long enough that a non-held parent exits first
         return "CHILD_BG_RAN";
@@ -187,8 +187,8 @@ describe.skipIf(LIVE)("subagents print-mode e2e (scripted faux, real pi-mono)", 
         }),
         parentFinal: "Reported.",
         // The child reflects whether the frontmatter body reached its own prompt.
-        subagent: (ctx: Context) =>
-          `child saw: ${ctx.systemPrompt?.includes(MARKER) ? MARKER : "MISSING"}`,
+        subagent: (ctx: TranscriptContext) =>
+          `child saw: ${getCurrentSystemPrompt(ctx.messages).includes(MARKER) ? MARKER : "MISSING"}`,
       }),
     });
 
@@ -221,8 +221,8 @@ describe.skipIf(LIVE)("subagents print-mode e2e (scripted faux, real pi-mono)", 
           run_in_background: false,
         }),
         parentFinal: "Reported.",
-        subagent: (ctx: Context) =>
-          `child saw: ${ctx.systemPrompt?.includes(MARKER) ? MARKER : "MISSING"}`,
+        subagent: (ctx: TranscriptContext) =>
+          `child saw: ${getCurrentSystemPrompt(ctx.messages).includes(MARKER) ? MARKER : "MISSING"}`,
       }),
     });
 
@@ -337,6 +337,10 @@ describe.runIf(LIVE)("subagents print-mode e2e (live LLM, opt-in)", () => {
           "Spawn a general-purpose subagent IN THE BACKGROUND (run_in_background: true) whose " +
           "only task is to reply with the exact word BGPONG. After it finishes, use the " +
           "get_subagent_result tool to fetch its result, then tell me exactly what it said.",
+        // get_subagent_result is `codemode` exposure now — registered, not declared
+        // to the model. This smoke asks the model to call it directly by name, so
+        // activate it explicitly (see the activateTools note in the runner).
+        activateTools: ["get_subagent_result"],
         timeoutMs: LIVE_TIMEOUT,
       });
       const calls = agentToolCalls(run.parentSession);
@@ -389,6 +393,9 @@ describe.runIf(LIVE)("subagents print-mode e2e (live LLM, opt-in)", () => {
           "   working directory in one line.",
           "Finish with: 'SELF-SMOKE COMPLETE' followed by the PASS/FAIL lines.",
         ].join("\n"),
+        // Step 2 scripts a direct get_subagent_result call, and that tool is
+        // `codemode` exposure now — activate it so the model can see it.
+        activateTools: ["get_subagent_result"],
         timeoutMs: SELF_SMOKE_TIMEOUT,
       });
 

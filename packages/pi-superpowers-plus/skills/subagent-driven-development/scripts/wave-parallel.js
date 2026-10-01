@@ -81,9 +81,9 @@ const REVIEW_SCHEMA = {
 const implementPrompt = (item) => [
   'You are implementing Task N. The covering-test command below is your hard exit criterion — do not report done until it passes (a non-zero exit fails you).',
   '',
-  'Task bead (the exact task text): beads_show({ id: "' + item.taskBeadId + '", full: true }).',
+  'Task bead (the exact task text), from a codemode script: return await tools.beads_show({ id: "' + item.taskBeadId + '", full: true }). The beads_* tools have code-mode exposure, so they are not in your declared tool list — reach them through `codemode`.',
   'Report file (write your full report there; return the path): ' + (ARGS.reportDir ?? '.') + '/' + item.taskBeadId + '-report.md',
-  'Global Constraints (attention lens): beads_show({ id: "' + ARGS.gateBeadId + '", full: true }).',
+  'Global Constraints (attention lens), from a codemode script: return await tools.beads_show({ id: "' + ARGS.gateBeadId + '", full: true }).',
   '',
   'Work on the SHARED branch. Commit exactly your own files (git add <your files>, one commit at the end); retry once after ~2s if a commit fails with an index.lock error. Never merge, rebase, or push.',
   ...(item.gate
@@ -96,8 +96,8 @@ const implementPrompt = (item) => [
 const reviewPrompt = (item) => [
   "You are reviewing one task's wave implementation: spec compliance, then code quality. This is a task-scoped gate, not a merge review.",
   '',
-  'Task bead (the exact task text): beads_show({ id: "' + item.taskBeadId + '", full: true }).',
-  'Global Constraints (attention lens): beads_show({ id: "' + ARGS.gateBeadId + '", full: true }).',
+  'Task bead (the exact task text), from a codemode script: return await tools.beads_show({ id: "' + item.taskBeadId + '", full: true }). The beads_* tools have code-mode exposure, so they are not in your declared tool list — reach them through `codemode`.',
+  'Global Constraints (attention lens), from a codemode script: return await tools.beads_show({ id: "' + ARGS.gateBeadId + '", full: true }).',
   '',
   'Build the scoped review package yourself (resolve HEAD yourself):',
   // Every path is single-quoted so spaces cannot split args; the shape guard

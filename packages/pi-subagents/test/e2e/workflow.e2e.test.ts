@@ -21,7 +21,7 @@
 import { existsSync, mkdirSync, mkdtempSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { fauxText, fauxToolCall } from "@earendil-works/pi-ai";
+import { fauxText, fauxToolCall, getCurrentSystemPrompt, getCurrentTools } from "@earendil-works/pi-ai";
 import { afterEach, describe, expect, it } from "vitest";
 import { encodeCwd } from "../../src/output-file.js";
 import { readJournal } from "../../src/workflow/journal.js";
@@ -99,13 +99,17 @@ describe("Workflow end to end", () => {
     const run = await runPrintMode({
       prompt: "run the workflow",
       cwd,
+      // SubagentWorkflow is `deferred` exposure: registered, not declared to the
+      // model. This suite scripts the direct call a production model now makes
+      // from a codemode script, so it activates the tool to match.
+      activateTools: ["SubagentWorkflow"],
       maxModelCalls: 32,
       live: false, // scripted on purpose: a real model would not emit the tool call
       respond: context => {
-        const isParent = (context.tools ?? []).some(t => t.name === "SubagentWorkflow");
+        const isParent = getCurrentTools(context.messages).some(t => t.name === "SubagentWorkflow");
         if (!isParent) {
           childPrompts.push(asText(context));
-          childSystemPrompts.push(context.systemPrompt ?? "");
+          childSystemPrompts.push(getCurrentSystemPrompt(context.messages));
           return fauxText("SUBAGENT-DONE");
         }
         return asText(context).includes("Task ID")
@@ -183,16 +187,17 @@ describe("Workflow end to end", () => {
     const run = await runPrintMode({
       prompt: "run the saved workflow",
       cwd,
+      activateTools: ["SubagentWorkflow"],
       maxModelCalls: 32,
       live: false, // scripted on purpose: a real model would not emit the tool call
       respond: context => {
-        const isParent = (context.tools ?? []).some(t => t.name === "SubagentWorkflow");
+        const isParent = getCurrentTools(context.messages).some(t => t.name === "SubagentWorkflow");
         if (!isParent) {
           const seen = asText(context);
           childPrompts.push(seen);
           // Answer through the injected tool exactly once, then stop — a model
           // that kept calling it every turn would just spin.
-          const alreadyAnswered = (context.tools ?? []).length > 0 && /Recorded\./.test(seen);
+          const alreadyAnswered = getCurrentTools(context.messages).length > 0 && /Recorded\./.test(seen);
           return alreadyAnswered
             ? fauxText("done")
             : fauxToolCall("StructuredOutput", { files: ["a.ts", "b.ts"] }, { id: "so-1" });
@@ -231,10 +236,11 @@ describe("Workflow end to end", () => {
     const run = await runPrintMode({
       prompt: "run the broken workflow",
       cwd: workflowProject(),
+      activateTools: ["SubagentWorkflow"],
       maxModelCalls: 12,
       live: false, // scripted on purpose: a real model would not emit the tool call
       respond: context => {
-        const isParent = (context.tools ?? []).some(t => t.name === "SubagentWorkflow");
+        const isParent = getCurrentTools(context.messages).some(t => t.name === "SubagentWorkflow");
         if (!isParent) {
           childPrompts.push(asText(context));
           return fauxText("SUBAGENT-DONE");
@@ -330,6 +336,9 @@ describe.runIf(LIVE)("Workflow end to end (live LLM, opt-in)", () => {
           "Pass it as the `name` parameter — do not write a script of your own. " +
           "Then tell me the task id it returned.",
         cwd,
+        // See the scripted suites above: the tool is `deferred` now, so a
+        // smoke that asks a real model to call it by name must declare it.
+        activateTools: ["SubagentWorkflow"],
         timeoutMs: LIVE_TIMEOUT,
       });
 
@@ -380,6 +389,9 @@ describe.runIf(LIVE)("Workflow end to end (live LLM, opt-in)", () => {
           script,
         ].join("\n"),
         cwd,
+        // See the scripted suites above: the tool is `deferred` now, so a
+        // smoke that asks a real model to call it by name must declare it.
+        activateTools: ["SubagentWorkflow"],
         timeoutMs: LIVE_TIMEOUT,
       });
 
@@ -429,6 +441,9 @@ describe.runIf(LIVE)("Workflow end to end (live LLM, opt-in)", () => {
           script,
         ].join("\n"),
         cwd,
+        // See the scripted suites above: the tool is `deferred` now, so a
+        // smoke that asks a real model to call it by name must declare it.
+        activateTools: ["SubagentWorkflow"],
         timeoutMs: LIVE_TIMEOUT,
       });
 

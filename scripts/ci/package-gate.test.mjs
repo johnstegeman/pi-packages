@@ -185,6 +185,7 @@ test('selectGate: the real package manifests select the recorded composed gate',
   const gates = Object.fromEntries(discoverGated(PACKAGES_DIR).map((pkg) => [pkg.name, pkg.gate]));
   assert.deepEqual(gates, {
     bifrost: 'npm test',
+    'codemode-bootstrap': 'npm test',
     'hashline-edit': 'npm run check',
     langfuse: 'npm run typecheck && npm test',
     'pi-beads': 'npm test',

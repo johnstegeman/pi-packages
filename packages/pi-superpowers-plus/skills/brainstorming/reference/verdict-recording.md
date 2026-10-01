@@ -1,5 +1,10 @@
 # Design Verdict Recording
 
+> **Reaching beads tools:** every `beads_*` tool has `codemode`/`deferred` exposure, so
+> none is in your tool list. Call them from a `codemode` script —
+> `await tools.beads_update({ ... })` — and find the deferred ones with
+> `await searchTools("beads")`. The call shapes below are that script's arguments.
+
 Edge cases for recording the verdict on the `design-approved` step. The Approved and
 Changes-requested commands are in `SKILL.md`; this file covers the surrounding procedure.
 

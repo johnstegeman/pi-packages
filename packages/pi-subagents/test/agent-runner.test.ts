@@ -5,6 +5,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const {
   createAgentSession,
+  createCodemodeExtension,
   defaultResourceLoaderCtor,
   loaderExtensionsRef,
   getAgentDir,
@@ -15,6 +16,9 @@ const {
   settingsManagerGetSessionDir,
 } = vi.hoisted(() => ({
   createAgentSession: vi.fn(),
+  // A distinguishable stub so the loader options can be inspected for the
+  // codemode factory the runner is expected to inject.
+  createCodemodeExtension: vi.fn(() => ({ name: "codemode-extension" })),
   defaultResourceLoaderCtor: vi.fn(),
   loaderExtensionsRef: {
     current: { extensions: [], errors: [], runtime: {} } as {
@@ -33,6 +37,7 @@ const {
 
 vi.mock("@earendil-works/pi-coding-agent", () => ({
   createAgentSession,
+  createCodemodeExtension,
   // Identity, as pi's own is: `defineTool` exists for the type inference, and
   // the structured-output tool is built through it.
   defineTool: (definition: unknown) => definition,
@@ -1697,6 +1702,53 @@ describe("agent-runner async extension tool registration", () => {
     expect(createAgentSession.mock.calls[0][0].tools).toEqual(["read"]);
     expect(session.setActiveToolsByName).not.toHaveBeenCalled();
     expect(session.agent.beforeToolCall).toBeUndefined();
+  });
+});
+
+// ─── codemode activation in subagent sessions ──────────────────────────
+// An SDK-constructed loader never loads the CLI's built-in codemode extension
+// (SDK sessions do not), so the runner injects it as an inline factory. These
+// tests observe the loader's real constructor options and the session's active
+// tool set — never the source text of agent-runner.ts.
+describe("subagent codemode activation", () => {
+  it("passes the codemode extension factory to the subagent session loader", async () => {
+    const { session } = createSession("OUT");
+    createAgentSession.mockResolvedValue({ session });
+
+    await runAgent(ctx, "Explore", "go", { pi });
+
+    const factories = lastLoaderOpts().extensionFactories as Array<{ name?: string }>;
+    expect(Array.isArray(factories)).toBe(true);
+    expect(factories.some((f) => f?.name === "codemode-extension")).toBe(true);
+  });
+
+  it("keeps codemode loaded and active when extensions: is a name allowlist", async () => {
+    // The failure the Task 1 spike measured. `extensions:` is an allowlist, so
+    // extensionsOverride filters the inline codemode entry (an unnamed inline
+    // factory canonicalizes to `<inline:N>`) out of the LOADED set — before
+    // inScope() can see it, and before readmitToolNames (which only re-admits
+    // names already in session.getAllTools()) can rescue it. The `ext:` selector
+    // then makes inScope()'s opt-in branch skip it a second time, so one run
+    // exercises both halves of the fix.
+    vi.mocked(getConfig).mockReturnValueOnce(makeConfig({ extensions: ["mcp"] }));
+    vi.mocked(getAgentConfig).mockReturnValueOnce(
+      makeAgentConfig({ extensions: ["mcp"], extSelectors: ["ext:mcp"] }),
+    );
+    vi.mocked(getToolNamesForType).mockReturnValueOnce(BUILTINS_7);
+    // This mock loader does not run extensionFactories, so pre-register what the
+    // real loader produces for the runner's unnamed inline factory: the SDK names
+    // an unnamed inline entry `<inline:N>` by its index in the array.
+    withExtensions({ "<inline:1>": ["codemode"], "/ext/mcp.ts": ["mcp_tool"] });
+    const { session } = createSession("OK");
+    createAgentSession.mockResolvedValue({ session });
+
+    await runAgent(ctx, "Explore", "go", { pi });
+
+    // Loaded — the name allowlist must not filter our own injected factory out.
+    expect(loaderExtensionsRef.current.extensions.map((e) => e.path)).toContain("<inline:1>");
+    // Active — the factory's canonical name can never appear in an `ext:` selector,
+    // so readmitToolNames is the only path that keeps codemode in the active set.
+    expect(lastToolsPassed()).toContain("codemode");
   });
 });
 

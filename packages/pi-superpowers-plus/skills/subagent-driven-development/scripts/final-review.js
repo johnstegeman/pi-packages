@@ -121,7 +121,7 @@ const requirement = (dimension) => {
     'What was implemented:',
     (ARGS.description ?? ''),
     '',
-    'Read the plan Global Constraints (they are the attention lens): beads_show({ id: "' + ARGS.gateBeadId + '", full: true }).',
+    'Read the plan Global Constraints (they are the attention lens), from a codemode script: return await tools.beads_show({ id: "' + ARGS.gateBeadId + '", full: true }). The beads_* tools have code-mode exposure, so they are not in your declared tool list — reach them through `codemode`.',
     '',
     'YOUR LENS — ' + dimension + ':',
     FOCUS[dimension],

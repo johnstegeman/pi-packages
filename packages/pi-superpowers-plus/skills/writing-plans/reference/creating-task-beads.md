@@ -1,5 +1,10 @@
 # Creating Tasks as Beads
 
+> **Reaching beads tools:** every `beads_*` tool has `codemode`/`deferred` exposure, so
+> none is in your tool list. Call them from a `codemode` script —
+> `await tools.beads_update({ ... })` — and find the deferred ones with
+> `await searchTools("beads")`. The call shapes below are that script's arguments.
+
 Once the task breakdown is authored and has passed the
 lifecycle-duplicate check (Self-Review item 4), create the real task beads under the
 `implement` step with **one `beads_create_list` call**. The `tasks` array order IS the plan

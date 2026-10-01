@@ -58,7 +58,7 @@ test('extra root deps are ignored', () => {
   assert.equal(code, 0);
 });
 
-test('empty subtree deps pass', () => {
+test('empty package deps pass', () => {
   const { code } = runInScratch({ rootDeps: MIRRORED, subDeps: {} });
   assert.equal(code, 0);
 });

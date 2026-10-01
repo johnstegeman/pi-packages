@@ -1,3 +1,8 @@
+> **Superseded (2026-09-30):** pi-subagents is now a vendored fork this repo owns; there is no
+> upstream sync, so the `scripts/sim/simulate-sync.sh` / `scripts/sync/sync-subtree.sh` steps
+> and `.github/workflows/sync-pi-subagents.yml` referenced below no longer exist. This design is
+> kept as a dated record of what was done at the time.
+
 # Reconcile deferred items, unimplemented promises, and upstream adoption — Design
 
 **Bead:** `pi-packages-3iej.8` (Superpowers stack remediation, task 8)

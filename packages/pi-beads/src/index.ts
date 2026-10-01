@@ -72,6 +72,59 @@ const TOOL = {
   molReady: "beads_mol_ready",
 };
 
+// ---- code-mode exposure ---------------------------------------------------
+// Design: docs/superpowers/specs/2026-09-30-codemode-adoption-design.md
+// Every beads tool leaves `direct` exposure. The codemode tool lists these under
+// one namespace; `deferred` tools are reachable only through `searchTools()` /
+// `ALL_TOOLS` inside a script, which keeps them out of its inline token budget.
+export const BEADS_NAMESPACE = {
+  name: "beads",
+  description: "Beads issue tracker — umbrella aggregate across all repos",
+} as const;
+
+/** Listed by the codemode tool, subject to its inline budget. */
+export const BEADS_CODEMODE_TOOLS = [
+  "beads_ready",
+  "beads_list",
+  "beads_show",
+  "beads_deps",
+  "beads_create",
+  "beads_create_list",
+  "beads_update",
+  "beads_close",
+  "beads_comment",
+  "beads_comments",
+  "beads_dep",
+  "beads_undep",
+] as const;
+
+/** Reachable only via searchTools()/ALL_TOOLS inside a codemode script. */
+export const BEADS_DEFERRED_TOOLS = [
+  "beads_reopen",
+  "beads_promote",
+  "beads_gate_create",
+  "beads_gate_resolve",
+  "beads_mol_pour",
+  "beads_mol_show",
+  "beads_mol_current",
+  "beads_mol_ready",
+  "beads_memories",
+  "beads_stale",
+  "beads_lint",
+] as const;
+
+export const BEADS_TOOL_EXPOSURE: Record<string, "codemode" | "deferred"> =
+  Object.fromEntries([
+    ...BEADS_CODEMODE_TOOLS.map((n) => [n, "codemode"] as const),
+    ...BEADS_DEFERRED_TOOLS.map((n) => [n, "deferred"] as const),
+  ]);
+
+/** Spread into every `pi.registerTool({...})` definition in this file. */
+const beadsExposure = (name: string) => ({
+  exposure: BEADS_TOOL_EXPOSURE[name],
+  namespace: BEADS_NAMESPACE,
+});
+
 // Type allowlists, enforced before the value reaches bd (a typo must not
 // silently persist a junk edge; bd itself accepts arbitrary --type strings).
 // Verified against `bd link --help` / `bd gate create --help` on bd 1.2.2.
@@ -446,6 +499,15 @@ export default function piBeadsLean(pi: any) {
     return JSON.stringify(arr.filter((r: any) => r?.is_template !== true));
   }
 
+  // Structured counterpart of `fmtRows`'s envelope handling: bd may return a bare
+  // array or `{issues:[...]}` (e.g. `list --parent`). Keeps the structured payload
+  // array-shaped so it agrees with the text and with READ_SCHEMAS.issues.
+  const issueArray = (json: string) => {
+    const p = jparse(json);
+    if (Array.isArray(p)) return p;
+    return Array.isArray(p?.issues) ? p.issues : [];
+  };
+
   // Select-and-claim core shared by `beads_ready` and `beads_close`'s claimNext.
   // `filtered` is already-template-stripped `bd ready --json`. It does NOT emit —
   // each caller decides when (beads_close batches one emit per repo).
@@ -656,10 +718,52 @@ export default function piBeadsLean(pi: any) {
       .trim();
   }
 
-  const textResult = (text: string) => ({
+  const textResult = (text: string, structuredContent?: unknown) => ({
     content: [{ type: "text", text: clean(text) }],
     details: {},
+    ...(structuredContent === undefined ? {} : { structuredContent }),
   });
+
+  // `outputSchema` tools must always set structuredContent, including failures.
+  // Not a pass-through alias: the check is what makes the name a contract, and a
+  // caller that forgets it fails loudly here instead of shipping a result that
+  // violates the schema pi declared to the model. (A throw inside a tool surfaces
+  // as an error tool result, so this can only fire on a programming mistake.)
+  const jsonResult = (text: string, structuredContent: unknown) => {
+    if (structuredContent === undefined) {
+      throw new Error("jsonResult requires structuredContent — the tool declares an outputSchema");
+    }
+    return textResult(text, structuredContent);
+  };
+
+  const ISSUE_SCHEMA = {
+    type: "object",
+    properties: {
+      id: { type: "string" },
+      title: { type: "string" },
+      status: { type: "string" },
+      priority: { type: "number" },
+      issue_type: { type: "string" },
+      dependency_count: { type: "number" },
+      labels: { type: "array", items: { type: "string" } },
+      assignee: { type: "string" },
+    },
+    required: ["id"],
+    additionalProperties: true,
+  };
+  const ERROR_PROP = { error: { type: "string" } };
+  const OBJECT = { type: "object", additionalProperties: true };
+  const ISSUE_LIST = { type: "array", items: ISSUE_SCHEMA };
+
+  const READ_SCHEMAS = {
+    issues: { type: "object", properties: { ...ERROR_PROP, issues: ISSUE_LIST }, additionalProperties: true },
+    show: { type: "object", properties: { ...ERROR_PROP, issue: ISSUE_SCHEMA, children: OBJECT }, additionalProperties: true },
+    deps: { type: "object", properties: { ...ERROR_PROP, blocked: { type: "boolean" }, nodes: { type: "array", items: OBJECT }, by_id: OBJECT }, additionalProperties: true },
+    comments: { type: "object", properties: { ...ERROR_PROP, comments: { type: "array", items: OBJECT } }, additionalProperties: true },
+    memories: { type: "object", properties: { ...ERROR_PROP, memories: OBJECT }, additionalProperties: true },
+    lint: { type: "object", properties: { ...ERROR_PROP, lint: OBJECT }, additionalProperties: true },
+    molecule: { type: "object", properties: { ...ERROR_PROP, molecule: OBJECT }, additionalProperties: true },
+  } as const;
 
   // ---- lean prime block (injected once per segment) ----
   async function buildPrimeBlock(): Promise<string | null> {
@@ -740,6 +844,8 @@ export default function piBeadsLean(pi: any) {
   // ============ tools (read) — always against the umbrella aggregate ============
   pi.registerTool({
     name: TOOL.ready,
+    ...beadsExposure(TOOL.ready),
+    outputSchema: READ_SCHEMAS.issues,
     label: "Beads ready",
     description:
       "List beads issues that are ready to work (open, unblocked) across ALL repos, newest-priority first. Compact output; id prefix shows the owning project.",
@@ -771,35 +877,45 @@ export default function piBeadsLean(pi: any) {
     async execute(_id: string, params: any) {
       await ensureTopology();
       const scope = resolveRepoTarget(params?.repo) ?? umbrella;
-      if (params?.repo && !resolveRepoTarget(params.repo))
-        return textResult(
-          `unknown repo '${params.repo}' (known: ${knownRepos()})`,
-        );
+      if (params?.repo && !resolveRepoTarget(params.repo)) {
+        const msg = `unknown repo '${params.repo}' (known: ${knownRepos()})`;
+        return jsonResult(msg, { error: msg });
+      }
       await ensureFresh();
       const claim = params?.claim === true || params?.claim === "true";
       const rargs = ["ready", "--json", "--include-ephemeral", "-n", String(params?.limit ?? 15)];
       if (params?.label) rargs.push("--label", String(params.label));
       if (params?.labelAny) rargs.push("--label-any", String(params.labelAny));
       const r = await bd(rargs, scope);
-      if (!r.ok) return textResult(`bd ready failed: ${r.err}`);
+      if (!r.ok) {
+        const msg = `bd ready failed: ${r.err}`;
+        return jsonResult(msg, { error: msg });
+      }
       // bd applies `-n <limit>` BEFORE this client-side filter, so a limited window can
       // under-report when template rows occupy slots (and `claim:true` with a very small
       // limit can find nothing even though real work exists). Accepted: at the default
       // limit and with typically one template head this is negligible.
       const filtered = stripTemplates(r.out);
-      if (!claim) return textResult(fmtRows(filtered));
+      // issueArray, not `jparse(filtered) ?? []`: stripTemplates fails OPEN, so a
+      // parseable non-array payload would otherwise land an object under an
+      // `issues` key that READ_SCHEMAS declares as an array. Same helper (and
+      // same double-parse saving) as the other structured reads.
+      const structured = { issues: issueArray(filtered) };
+      if (!claim) return jsonResult(fmtRows(filtered), structured);
       // Select client-side so a template head can never be claimed. The owning-repo
       // `bd update <id> --claim` is the sole durable claim path (it also emits
       // beads:changed once); nothing mutates the aggregate read-replica.
       const cn = await claimHead(filtered);
-      if (cn.error) return textResult(cn.error);
+      if (cn.error) return jsonResult(cn.error, { error: cn.error });
       if (cn.id && cn.dir) await afterWrite(cn.dir);
-      return textResult(fmtRows(filtered));
+      return jsonResult(fmtRows(filtered), structured);
     },
   });
 
   pi.registerTool({
     name: TOOL.list,
+    ...beadsExposure(TOOL.list),
+    outputSchema: READ_SCHEMAS.issues,
     label: "Beads list",
     description:
       "List beads issues across ALL repos, optionally filtered by status (open,in_progress,blocked,deferred,closed). Compact output; id prefix shows the owning project.",
@@ -835,10 +951,10 @@ export default function piBeadsLean(pi: any) {
     async execute(_id: string, params: any) {
       await ensureTopology();
       const scoped = params?.repo ? resolveRepoTarget(params.repo) : null;
-      if (params?.repo && !scoped)
-        return textResult(
-          `unknown repo '${params.repo}' (known: ${knownRepos()})`,
-        );
+      if (params?.repo && !scoped) {
+        const msg = `unknown repo '${params.repo}' (known: ${knownRepos()})`;
+        return jsonResult(msg, { error: msg });
+      }
       await ensureFresh();
       const args = ["list", "--json", "-n", String(params?.limit ?? 30)];
       if (params?.status) args.push("--status", String(params.status));
@@ -847,13 +963,18 @@ export default function piBeadsLean(pi: any) {
       if (params?.mol)
         args.push("--all", "--parent", String(params.mol), "--include-gates");
       const r = await bd(args, scoped ?? umbrella);
-      if (!r.ok) return textResult(`bd list failed: ${r.err}`);
-      return textResult(fmtRows(r.out));
+      if (!r.ok) {
+        const msg = `bd list failed: ${r.err}`;
+        return jsonResult(msg, { error: msg });
+      }
+      return jsonResult(fmtRows(r.out), { issues: issueArray(r.out) });
     },
   });
 
   pi.registerTool({
     name: TOOL.show,
+    ...beadsExposure(TOOL.show),
+    outputSchema: READ_SCHEMAS.show,
     label: "Beads show",
     description:
       "Show essential details of one beads issue (status, priority, type, description, dependency counts). Works for any repo by id.",
@@ -867,13 +988,16 @@ export default function piBeadsLean(pi: any) {
     },
     async execute(_id: string, params: any) {
       await ensureTopology();
-      if (!params?.id) return textResult("id is required");
+      if (!params?.id) return jsonResult("id is required", { error: "id is required" });
       const full = params.full === true || params.full === "true";
       await ensureFresh();
       const r = await bd(["show", String(params.id), "--json"], umbrella);
-      if (!r.ok) return textResult(`bd show failed: ${r.err}`);
+      if (!r.ok) {
+        const msg = `bd show failed: ${r.err}`;
+        return jsonResult(msg, { error: msg });
+      }
       const o = jparse(r.out);
-      if (!o) return textResult(r.out.trim());
+      if (!o) return jsonResult(r.out.trim(), { error: r.out.trim() });
       let childInfo: { done: number; total: number; openIds: string[] } | null =
         null;
       const obj = Array.isArray(o) ? o[0] : o;
@@ -890,12 +1014,14 @@ export default function piBeadsLean(pi: any) {
           };
         }
       }
-      return textResult(fmtShow(obj, childInfo, full));
+      return jsonResult(fmtShow(obj, childInfo, full), { issue: obj, children: childInfo ?? undefined });
     },
   });
 
   pi.registerTool({
     name: TOOL.deps,
+    ...beadsExposure(TOOL.deps),
+    outputSchema: READ_SCHEMAS.deps,
     label: "Beads dependencies",
     description:
       "Inspect dependencies across ALL repos: blockers (what must finish first) or dependents (what this blocks). Pass ONE id to get the blocker/dependent tree; pass SEVERAL ids to get one compact line each (ideal for triaging a set of epics). Read-only.",
@@ -916,11 +1042,11 @@ export default function piBeadsLean(pi: any) {
     },
     async execute(_id: string, params: any) {
       await ensureTopology();
-      if (!params?.ids) return textResult("ids is required");
+      if (!params?.ids) return jsonResult("ids is required", { error: "ids is required" });
       const ids = String(params.ids)
         .split(/[\s,]+/)
         .filter(Boolean);
-      if (ids.length === 0) return textResult("no valid ids");
+      if (ids.length === 0) return jsonResult("no valid ids", { error: "no valid ids" });
       const up = /^(dependents|up|blocks)$/i.test(
         String(params?.direction ?? ""),
       );
@@ -932,10 +1058,15 @@ export default function piBeadsLean(pi: any) {
           ["dep", "tree", ids[0], "--direction", dir, "--json"],
           umbrella,
         );
-        if (!r.ok) return textResult(`bd dep tree failed: ${errText(r)}`);
+        if (!r.ok) {
+          const msg = `bd dep tree failed: ${errText(r)}`;
+          return jsonResult(msg, { error: msg });
+        }
         const arr = jparse(r.out);
-        if (!Array.isArray(arr) || arr.length <= 1)
-          return textResult(`${ids[0]} ${label}: (none)`);
+        if (!Array.isArray(arr) || arr.length <= 1) {
+          const msg = `${ids[0]} ${label}: (none)`;
+          return jsonResult(msg, { blocked: false, nodes: [] });
+        }
         const body = arr
           .map(
             (n: any) =>
@@ -945,9 +1076,10 @@ export default function piBeadsLean(pi: any) {
         const blocked =
           dir === "down" &&
           arr.some((n: any) => (n.depth || 0) > 0 && n.status !== "closed");
-        return textResult((blocked ? "BLOCKED\n" : "") + body);
+        return jsonResult((blocked ? "BLOCKED\n" : "") + body, { blocked, nodes: arr });
       }
       const lines: string[] = [];
+      const by_id: Record<string, unknown> = {};
       for (const id of ids) {
         const r = await bd(
           ["dep", "list", id, "--direction", dir, "--json"],
@@ -955,17 +1087,19 @@ export default function piBeadsLean(pi: any) {
         );
         const arr = jparse(r.out);
         const items = Array.isArray(arr) ? arr : [];
+        by_id[id] = items;
         lines.push(
           `${id} ${label}: ${items.length ? items.map((x: any) => `${x.id}[${x.status}]`).join(", ") : "(none)"}`,
         );
       }
-      return textResult(lines.join("\n"));
+      return jsonResult(lines.join("\n"), { by_id });
     },
   });
 
   // ============ tools (write) — routed to the owning repo, then aggregate refreshed ============
   pi.registerTool({
     name: TOOL.create,
+    ...beadsExposure(TOOL.create),
     label: "Beads create",
     description:
       "Create a beads issue in the OWNING repo. Pass `repo` (folder name or id prefix) to choose the project; if omitted, the repo containing the session cwd is used. Returns the new id. Use BEFORE starting non-trivial work.",
@@ -1041,6 +1175,7 @@ export default function piBeadsLean(pi: any) {
 
   pi.registerTool({
     name: TOOL.createList,
+    ...beadsExposure(TOOL.createList),
     label: "Beads create list",
     description:
       "Create a gate bead (optional) and then a sequence of task beads under one parent, each via a sequential `bd create --parent` call so ids come out parent.1..N in declared order, then wire the blocks-chain (every task → gate; task N → task N-1). One call replaces N beads_create + beads_dep + beads_gate_create rounds. Tasks array order is the plan order. Returns `gate:` (task bead) and `human-gate:` ids when a gate is requested, then `t1:..tN:` in plan order. Partial failures report ids created so far.",
@@ -1177,6 +1312,7 @@ export default function piBeadsLean(pi: any) {
 
   pi.registerTool({
     name: TOOL.update,
+    ...beadsExposure(TOOL.update),
     label: "Beads update",
     description:
       "Update a beads issue: status (open|in_progress|blocked|deferred|closed), priority (0-4), title, claim (assignee=you + status=in_progress), setMetadata, and/or description. Auto-routed to the owning repo by id prefix.",
@@ -1282,6 +1418,7 @@ export default function piBeadsLean(pi: any) {
 
   pi.registerTool({
     name: TOOL.close,
+    ...beadsExposure(TOOL.close),
     label: "Beads close",
     description:
       "Close one or more beads issues by id (any repos). Run this when work is done before reporting completion. Auto-routed to owning repos by id prefix.",
@@ -1400,6 +1537,7 @@ export default function piBeadsLean(pi: any) {
 
   pi.registerTool({
     name: TOOL.reopen,
+    ...beadsExposure(TOOL.reopen),
     label: "Beads reopen",
     description:
       "Reopen one or more closed beads issues by id. Auto-routed to owning repos by id prefix.",
@@ -1451,6 +1589,7 @@ export default function piBeadsLean(pi: any) {
 
   pi.registerTool({
     name: TOOL.promote,
+    ...beadsExposure(TOOL.promote),
     label: "Beads promote",
     description:
       "Promote a wisp (ephemeral issue) to a permanent bead, preserving its id and links. Routed to the owning repo by id prefix.",
@@ -1481,6 +1620,8 @@ export default function piBeadsLean(pi: any) {
 
   pi.registerTool({
     name: TOOL.memories,
+    ...beadsExposure(TOOL.memories),
+    outputSchema: READ_SCHEMAS.memories,
     label: "Beads memories",
     description:
       "Persistent memories injected at prime time: action=remember|recall|list|forget. All run against the umbrella so they surface in every session.",
@@ -1497,42 +1638,59 @@ export default function piBeadsLean(pi: any) {
     async execute(_id: string, params: any) {
       await ensureTopology();
       const action = String(params?.action ?? "").toLowerCase();
-      if (!["remember", "recall", "list", "forget"].includes(action))
-        return textResult(`invalid action '${params?.action}' (allowed: remember|recall|list|forget)`);
+      if (!["remember", "recall", "list", "forget"].includes(action)) {
+        const msg = `invalid action '${params?.action}' (allowed: remember|recall|list|forget)`;
+        return jsonResult(msg, { error: msg });
+      }
       await ensureFresh();
       if (action === "remember") {
-        if (!params?.content) return textResult("content is required for remember");
+        if (!params?.content)
+          return jsonResult("content is required for remember", { error: "content is required for remember" });
         const args = ["remember", String(params.content)];
         if (params.key) args.push("--key", String(params.key));
         const r = await bd(args, umbrella);
-        if (!r.ok) return textResult(`bd remember failed: ${r.err}`);
+        if (!r.ok) {
+          const msg = `bd remember failed: ${r.err}`;
+          return jsonResult(msg, { error: msg });
+        }
         await afterWrite(umbrella);
-        return textResult(r.out.trim() || "remembered");
+        return jsonResult(r.out.trim() || "remembered", { memories: jparse(r.out) ?? {} });
       }
       if (action === "recall") {
-        if (!params?.key) return textResult("key is required for recall");
+        if (!params?.key) return jsonResult("key is required for recall", { error: "key is required for recall" });
         const r = await bd(["recall", String(params.key), "--json"], umbrella);
-        if (!r.ok) return textResult(`bd recall failed: ${r.err}`);
-        return textResult(fmtMemories(r.out));
+        if (!r.ok) {
+          const msg = `bd recall failed: ${r.err}`;
+          return jsonResult(msg, { error: msg });
+        }
+        return jsonResult(fmtMemories(r.out), { memories: jparse(r.out) ?? {} });
       }
       if (action === "forget") {
-        if (!params?.key) return textResult("key is required for forget");
+        if (!params?.key) return jsonResult("key is required for forget", { error: "key is required for forget" });
         const r = await bd(["forget", String(params.key)], umbrella);
-        if (!r.ok) return textResult(`bd forget failed: ${r.err}`);
+        if (!r.ok) {
+          const msg = `bd forget failed: ${r.err}`;
+          return jsonResult(msg, { error: msg });
+        }
         await afterWrite(umbrella);
-        return textResult(r.out.trim() || "forgotten");
+        return jsonResult(r.out.trim() || "forgotten", { memories: jparse(r.out) ?? {} });
       }
       const args = ["memories"];
       if (params?.query) args.push(String(params.query));
       args.push("--json");
       const r = await bd(args, umbrella);
-      if (!r.ok) return textResult(`bd memories failed: ${r.err}`);
-      return textResult(fmtMemories(r.out));
+      if (!r.ok) {
+        const msg = `bd memories failed: ${r.err}`;
+        return jsonResult(msg, { error: msg });
+      }
+      return jsonResult(fmtMemories(r.out), { memories: jparse(r.out) ?? {} });
     },
   });
 
   pi.registerTool({
     name: TOOL.stale,
+    ...beadsExposure(TOOL.stale),
+    outputSchema: READ_SCHEMAS.issues,
     label: "Beads stale",
     description:
       "List stale issues (not updated recently) across ALL repos — abandoned in_progress work is visible at session start.",
@@ -1548,21 +1706,28 @@ export default function piBeadsLean(pi: any) {
       await ensureTopology();
       if (params?.status) {
         const st = String(params.status);
-        if (!["open", "in_progress", "blocked", "deferred"].includes(st))
-          return textResult(`invalid status '${st}' (allowed: open|in_progress|blocked|deferred)`);
+        if (!["open", "in_progress", "blocked", "deferred"].includes(st)) {
+          const msg = `invalid status '${st}' (allowed: open|in_progress|blocked|deferred)`;
+          return jsonResult(msg, { error: msg });
+        }
       }
       await ensureFresh();
       const args = ["stale", "--json", "-n", String(params?.limit ?? 50)];
       if (params?.days !== undefined && params?.days !== null) args.push("-d", String(params.days));
       if (params?.status) args.push("-s", String(params.status));
       const r = await bd(args, umbrella);
-      if (!r.ok) return textResult(`bd stale failed: ${r.err}`);
-      return textResult(fmtRows(r.out));
+      if (!r.ok) {
+        const msg = `bd stale failed: ${r.err}`;
+        return jsonResult(msg, { error: msg });
+      }
+      return jsonResult(fmtRows(r.out), { issues: issueArray(r.out) });
     },
   });
 
   pi.registerTool({
     name: TOOL.lint,
+    ...beadsExposure(TOOL.lint),
+    outputSchema: READ_SCHEMAS.lint,
     label: "Beads lint",
     description:
       "Check issues for missing recommended sections (e.g. Acceptance Criteria). Pass ids to lint specific issues, or status/type filters to lint a set.",
@@ -1579,28 +1744,34 @@ export default function piBeadsLean(pi: any) {
       const ids = params?.ids ? String(params.ids).split(/[\s,]+/).filter(Boolean) : [];
       if (params?.status) {
         const st = String(params.status);
-        if (!["open", "in_progress", "blocked", "deferred", "closed", "all"].includes(st))
-          return textResult(
-            `invalid status '${st}' (allowed: open|in_progress|blocked|deferred|closed|all)`
-          );
+        if (!["open", "in_progress", "blocked", "deferred", "closed", "all"].includes(st)) {
+          const msg = `invalid status '${st}' (allowed: open|in_progress|blocked|deferred|closed|all)`;
+          return jsonResult(msg, { error: msg });
+        }
       }
       if (params?.type) {
         const ty = String(params.type);
         if (!["bug", "task", "feature", "epic", "chore"].includes(ty))
-          return textResult(`invalid type '${ty}' (allowed: bug|task|feature|epic|chore)`);
+          return jsonResult(`invalid type '${ty}' (allowed: bug|task|feature|epic|chore)`, {
+            error: `invalid type '${ty}' (allowed: bug|task|feature|epic|chore)`
+          });
       }
       await ensureFresh();
       const args = ["lint", ...ids, "--json"];
       if (params?.status) args.push("--status", String(params.status));
       if (params?.type) args.push("--type", String(params.type));
       const r = await bd(args, umbrella);
-      if (!r.ok) return textResult(`bd lint failed: ${r.err}`);
-      return textResult(fmtLint(r.out));
+      if (!r.ok) {
+        const msg = `bd lint failed: ${r.err}`;
+        return jsonResult(msg, { error: msg });
+      }
+      return jsonResult(fmtLint(r.out), { lint: jparse(r.out) ?? {} });
     },
   });
 
   pi.registerTool({
     name: TOOL.gateCreate,
+    ...beadsExposure(TOOL.gateCreate),
     label: "Beads gate create",
     description:
       "Create an async gate that blocks an issue until resolved (bd gate resolve/beads_gate_resolve). Routed to the owning repo by the blocked issue's id prefix.",
@@ -1639,6 +1810,7 @@ export default function piBeadsLean(pi: any) {
 
   pi.registerTool({
     name: TOOL.gateResolve,
+    ...beadsExposure(TOOL.gateResolve),
     label: "Beads gate resolve",
     description:
       "Resolve a human gate (unblocks dependents) and close the gated step(s) it was blocking in one call, so dependents' later beads_close never fails with 'blocked by open issues'.",
@@ -1697,6 +1869,7 @@ export default function piBeadsLean(pi: any) {
 
   pi.registerTool({
     name: TOOL.molPour,
+    ...beadsExposure(TOOL.molPour),
     label: "Beads molecule pour",
     description:
       "Instantiate a proto formula as a persistent molecule (bd mol pour). Prints the root issue id from bd's output. Repo-scoped like beads_create.",
@@ -1750,6 +1923,8 @@ export default function piBeadsLean(pi: any) {
 
   pi.registerTool({
     name: TOOL.molShow,
+    ...beadsExposure(TOOL.molShow),
+    outputSchema: READ_SCHEMAS.molecule,
     label: "Beads molecule show",
     description: "Show a molecule/proto's structure (bd mol show <id> --json). Read-only.",
     parameters: {
@@ -1759,16 +1934,21 @@ export default function piBeadsLean(pi: any) {
     },
     async execute(_id: string, params: any) {
       await ensureTopology();
-      if (!params?.id) return textResult("id is required");
+      if (!params?.id) return jsonResult("id is required", { error: "id is required" });
       await ensureFresh();
       const r = await bd(["mol", "show", String(params.id), "--json"], umbrella);
-      if (!r.ok) return textResult(`bd mol show failed: ${r.err}`);
-      return textResult(r.out.trim());
+      if (!r.ok) {
+        const msg = `bd mol show failed: ${r.err}`;
+        return jsonResult(msg, { error: msg });
+      }
+      return jsonResult(r.out.trim(), { molecule: jparse(r.out) ?? {} });
     },
   });
 
   pi.registerTool({
     name: TOOL.molCurrent,
+    ...beadsExposure(TOOL.molCurrent),
+    outputSchema: READ_SCHEMAS.molecule,
     label: "Beads molecule current",
     description: "Show the current position in a molecule's workflow (bd mol current <id> --json). Read-only.",
     parameters: {
@@ -1778,16 +1958,22 @@ export default function piBeadsLean(pi: any) {
     },
     async execute(_id: string, params: any) {
       await ensureTopology();
-      if (!params?.id) return textResult("id is required");
+      if (!params?.id) return jsonResult("id is required", { error: "id is required" });
       await ensureFresh();
       const r = await bd(["mol", "current", String(params.id), "--json"], umbrella);
-      if (!r.ok) return textResult(`bd mol current failed: ${r.err}`);
-      return textResult(r.out.trim());
+      if (!r.ok) {
+        const msg = `bd mol current failed: ${r.err}`;
+        return jsonResult(msg, { error: msg });
+      }
+      const mo = jparse(r.out);
+      return jsonResult(r.out.trim(), { molecule: (Array.isArray(mo) ? mo[0] : mo) ?? {} });
     },
   });
 
   pi.registerTool({
     name: TOOL.molReady,
+    ...beadsExposure(TOOL.molReady),
+    outputSchema: READ_SCHEMAS.molecule,
     label: "Beads molecule ready",
     description:
       "Show the ready frontier of one molecule's steps (bd ready --mol <id>): which steps/tasks are unblocked right now. Accepts a molecule id or a step id (e.g. the implement step with task children). Read-only; aggregate-aware; id prefix shows the owning project.",
@@ -1801,7 +1987,7 @@ export default function piBeadsLean(pi: any) {
     },
     async execute(_id: string, params: any) {
       await ensureTopology();
-      if (!params?.id) return textResult("id is required");
+      if (!params?.id) return jsonResult("id is required", { error: "id is required" });
       await ensureFresh();
       // Deliberate asymmetry with beads_ready: this tool is scoped to ONE molecule and
       // MUST return a template's steps, so it deliberately does NOT call stripTemplates.
@@ -1810,14 +1996,18 @@ export default function piBeadsLean(pi: any) {
       const args = ["ready", "--mol", String(params.id), "--json"];
       if (params?.limit) args.push("-n", String(params.limit));
       const r = await bd(args, umbrella);
-      if (!r.ok) return textResult(`bd ready --mol failed: ${r.err}`);
+      if (!r.ok) {
+        const msg = `bd ready --mol failed: ${r.err}`;
+        return jsonResult(msg, { error: msg });
+      }
       const o = jparse(r.out);
-      return textResult(o ? fmtMolReady(o, params?.limit) : r.out.trim());
+      return jsonResult(o ? fmtMolReady(o, params?.limit) : r.out.trim(), { molecule: (Array.isArray(o) ? o[0] : o) ?? {} });
     },
   });
 
   pi.registerTool({
     name: TOOL.dep,
+    ...beadsExposure(TOOL.dep),
     label: "Beads dependency",
     description:
       "Add a dependency: 'blocker' blocks 'issue' (issue depends on blocker). Both must live in the same repo; routed by the issue's id prefix.",
@@ -1864,6 +2054,7 @@ export default function piBeadsLean(pi: any) {
 
   pi.registerTool({
     name: TOOL.undep,
+    ...beadsExposure(TOOL.undep),
     label: "Beads unlink dependency",
     description:
       "Remove a dependency: the issue will no longer depend on blocker. Both ids must be in the same repo; routed by the issue id prefix.",
@@ -1905,6 +2096,7 @@ export default function piBeadsLean(pi: any) {
 
   pi.registerTool({
     name: TOOL.comment,
+    ...beadsExposure(TOOL.comment),
     label: "Beads comment",
     description: "Add a progress note/comment to an issue in its owning repo.",
     parameters: {
@@ -1933,6 +2125,8 @@ export default function piBeadsLean(pi: any) {
 
   pi.registerTool({
     name: TOOL.comments,
+    ...beadsExposure(TOOL.comments),
+    outputSchema: READ_SCHEMAS.comments,
     label: "Beads comments",
     description:
       "Read the comments on one beads issue in time order. Works for any repo by id; use after beads_comment to read back SDD blocker/revision context.",
@@ -1943,11 +2137,14 @@ export default function piBeadsLean(pi: any) {
     },
     async execute(_id: string, params: any) {
       await ensureTopology();
-      if (!params?.id) return textResult("id is required");
+      if (!params?.id) return jsonResult("id is required", { error: "id is required" });
       await ensureFresh();
       const r = await bd(["comments", String(params.id), "--json"], umbrella);
-      if (!r.ok) return textResult(`bd comments failed: ${r.err}`);
-      return textResult(fmtComments(r.out));
+      if (!r.ok) {
+        const msg = `bd comments failed: ${r.err}`;
+        return jsonResult(msg, { error: msg });
+      }
+      return jsonResult(fmtComments(r.out), { comments: issueArray(r.out) });
     },
   });
 

@@ -151,6 +151,16 @@ describe("issue #174: foreground agent that hits max_turns", () => {
     expect(out).not.toContain("Agent not found");
     expect(out).toContain("THE-RESULT-PAYLOAD");
 
+    // The structured payload mirrors the text — this is the `outputSchema`
+    // shape the codemode path reads, and it has to be set on the resolved
+    // path too, not only on the not-found one. It also proves the usage
+    // wrapper preserves it (it spreads the result).
+    expect((read as any).structuredContent).toEqual({
+      agentId: id,
+      status: "steered",
+      result: "THE-RESULT-PAYLOAD",
+    });
+
     await lifecycle.get("session_shutdown")?.({}, ctx());
   });
 

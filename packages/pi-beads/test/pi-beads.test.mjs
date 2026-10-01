@@ -138,6 +138,11 @@ case "$1" in
   ready)
     if [ "$2" = "--mol" ]; then
       MOLP="proj"; [ "$MODE" = "umbrella" ] && MOLP="umb"
+      if [ "\${FAKE_BD_READY_MOL_ARRAY:-0}" = "1" ]; then
+        # defensive-symmetry shape: real bd returns an OBJECT here, but fmtMolReady tolerates an array
+        printf '[{"molecule_id":"%s-m0","molecule_title":"Demo Mol","ready_steps":1,"total_steps":4,"steps":[{"issue":{"id":"%s-t1","priority":1,"status":"open","title":"Task one"}}]}]\n' "$MOLP" "$MOLP"
+        exit 0
+      fi
       case "$3" in
         *empty*)
           printf '{"molecule_id":"%s-m0","molecule_title":"Empty Mol","ready_steps":0,"total_steps":3,"steps":null}\n' "$MOLP" ;;
@@ -161,6 +166,10 @@ case "$1" in
     fi
     if [ "\${FAKE_BD_READY_WRAPPED:-0}" = "1" ]; then
       printf '%s\n' '{"issues":[{"id":"superpowers-workflow.explore","priority":2,"status":"open","title":"Explore project context: {{topic}}","is_template":true},{"id":"proj-1a2","priority":1,"status":"open","title":"Repo work"}]}'
+      exit 0
+    fi
+    if [ "\${FAKE_BD_READY_OBJECT:-0}" = "1" ]; then
+      printf '%s\n' '{"meta":{"total":0}}'
       exit 0
     fi
     if [ "\${FAKE_BD_READY_OK:-0}" = "1" ]; then
@@ -220,6 +229,11 @@ case "$1" in
           exit 0 ;;
       esac
       printf '%s\n' '{"issues":[{"id":"proj-xpl","title":"Explore project context: FIXEDTOPIC","issue_type":"task"},{"id":"proj-clr","title":"Ask clarifying questions","issue_type":"task"},{"id":"proj-app","title":"Propose approaches","issue_type":"task"},{"id":"proj-des","title":"Present design sections","issue_type":"task"},{"id":"proj-apr","title":"User approves design","issue_type":"task"},{"id":"proj-g1","title":"Gate: human","issue_type":"gate"},{"id":"proj-wsp","title":"Write spec to docs/superpowers/specs/","issue_type":"task"},{"id":"proj-srv","title":"Spec self-review","issue_type":"task"},{"id":"proj-sap","title":"User reviews written spec","issue_type":"task"},{"id":"proj-g2","title":"Gate: human","issue_type":"gate"},{"id":"proj-imp","title":"Implement FIXEDTOPIC","issue_type":"task"},{"id":"proj-ver","title":"Verify","issue_type":"task"},{"id":"proj-smt","title":"Smoke test / manual QA sign-off","issue_type":"task"},{"id":"proj-g3","title":"Gate: human","issue_type":"gate"},{"id":"proj-fin","title":"Finish development branch","issue_type":"task"}],"dependencies":[{"depends_on_id":"proj-g1","issue_id":"proj-apr","type":"blocks"},{"depends_on_id":"proj-g2","issue_id":"proj-sap","type":"blocks"},{"depends_on_id":"proj-g3","issue_id":"proj-smt","type":"blocks"}]}'
+      exit 0
+    fi
+    if [ "$2" = "current" ]; then
+      # real bd returns a top-level ARRAY (len=1) for mol current
+      printf '%s\n' '[{"molecule_id":"proj-m0","molecule_title":"Demo Mol","ready_steps":2,"total_steps":4,"steps":[{"issue":{"id":"proj-t1","priority":1,"status":"open","title":"Task one"}}]}]'
       exit 0
     fi
     echo "ok"; exit 0
@@ -394,6 +408,11 @@ case "$1" in
     echo "ok"; exit 0
     ;;
   comments)
+    if [ "\${FAKE_BD_COMMENTS_ENVELOPE:-0}" = "1" ]; then
+      # latent envelope shape (real bd returns a bare array): bd's envelope key is issues
+      printf '%s\n' '{"issues":[{"author":"alice","created_at":"2026-09-14T10:00:00Z","text":"first"}]}'
+      exit 0
+    fi
     printf '%s\n' '[{"author":"alice","created_at":"2026-09-14T10:00:00Z","text":"first"},{"author":"bob","created_at":"2026-09-14T11:00:00Z","text":"second"}]'
     exit 0
     ;;
@@ -1156,6 +1175,23 @@ test("single-repo: beads_comments reads comments and never emits", async () => {
   assert.match(r.content[0].text, /second/);
 });
 
+test("single-repo: beads_comments unwraps an enveloped comments response", async () => {
+  // real bd returns a bare array; this drives the latent {issues:[...]} envelope so the
+  // structured payload stays array-shaped (the text path fmtComments does not normalise).
+  process.env.FAKE_BD_COMMENTS_ENVELOPE = "1";
+  try {
+    const s = await openSession("single", repoDir);
+    resetLog();
+    const r = await s.byName.get("beads_comments").execute("c", { id: "proj-1a2" });
+    assert.ok(okResult(r), JSON.stringify(r));
+    assert.ok(Array.isArray(r.structuredContent.comments), "comments must be an array");
+    assert.equal(r.structuredContent.comments[0]?.text, "first");
+    assert.equal(s.emitted.length, 0, "a read must not emit");
+  } finally {
+    delete process.env.FAKE_BD_COMMENTS_ENVELOPE;
+  }
+});
+
 test("single-repo: beads_promote routes by prefix and emits", async () => {
   const s = await openSession("single", repoDir);
   resetLog();
@@ -1391,6 +1427,26 @@ test("single-repo: beads_ready filters templates from an {issues:[...]} envelope
   }
 });
 
+test("single-repo: beads_ready keeps structuredContent.issues array-shaped on a non-array payload", async () => {
+  // stripTemplates fails OPEN, so a parseable object carrying no `issues` key
+  // passes through untouched. structuredContent must still be array-shaped:
+  // READ_SCHEMAS.issues declares an array, and an object here is the shape
+  // mismatch the other structured reads already normalise away.
+  process.env.FAKE_BD_READY_OBJECT = "1";
+  try {
+    const s = await openSession("single", repoDir);
+    resetLog();
+    const r = await s.byName.get("beads_ready").execute("c", { limit: 5 });
+    assert.ok(okResult(r), JSON.stringify(r));
+    assert.ok(
+      Array.isArray(r.structuredContent.issues),
+      `issues must be an array even when the payload is not; got ${JSON.stringify(r.structuredContent.issues)}`,
+    );
+  } finally {
+    delete process.env.FAKE_BD_READY_OBJECT;
+  }
+});
+
 test("single-repo: beads_ready fails open on an unparseable payload", async () => {
   process.env.FAKE_BD_READY_OK = "1";
   try {
@@ -1402,6 +1458,43 @@ test("single-repo: beads_ready fails open on an unparseable payload", async () =
   } finally {
     delete process.env.FAKE_BD_READY_OK;
   }
+});
+
+test("single-repo: read tools declare outputSchema and only read tools carry structuredContent", async () => {
+  const { byName } = makePi();
+  const read = [
+    "beads_ready", "beads_list", "beads_show", "beads_deps", "beads_comments",
+    "beads_memories", "beads_stale", "beads_lint", "beads_mol_show",
+    "beads_mol_current", "beads_mol_ready",
+  ];
+  for (const n of read) assert.ok(byName.get(n).outputSchema, `${n} must declare outputSchema`);
+  for (const [n, t] of byName) {
+    if (!read.includes(n)) assert.equal(t.outputSchema, undefined, `${n} must not declare outputSchema`);
+  }
+});
+
+test("single-repo: beads_ready returns structuredContent (issues array) and an error object on failure", async () => {
+  const s = await openSession("single", repoDir);
+  resetLog();
+  const ready = s.byName.get("beads_ready");
+  const r = await ready.execute("t1", {});
+  assert.ok(okResult(r), JSON.stringify(r));
+  assert.ok(r.structuredContent, "beads_ready must set structuredContent");
+  assert.ok(Array.isArray(r.structuredContent.issues), "issues must be an array");
+  assert.ok(
+    r.structuredContent.issues.some((i) => i.id === "proj-1a2"),
+    "the real row must be present in structuredContent",
+  );
+  assert.ok(
+    r.structuredContent.issues.every((i) => i.is_template !== true),
+    "template rows must be absent from structuredContent",
+  );
+  // pi requires a tool declaring outputSchema to set structuredContent on EVERY
+  // path, so the validation/failure path must carry { error } too.
+  const bad = await ready.execute("t1", { repo: "nope" });
+  assert.ok(bad.structuredContent, "the unknown-repo path must set structuredContent");
+  assert.equal(typeof bad.structuredContent.error, "string");
+  assert.equal(bad.structuredContent.error, bad.content[0].text);
 });
 
 test("single-repo: beads_mol_ready still returns a template molecule's steps", async () => {
@@ -1687,6 +1780,13 @@ test("single-repo: beads_list formats object-shape --parent output (normalizes {
   const r = await s.byName.get("beads_list").execute("c", { mol: "proj-m1" });
   assert.ok(okResult(r), JSON.stringify(r));
   assert.match(r.content[0].text, /proj-m1-imp/);
+  // the fixture returns a `{issues:[...],meta:{...}}` envelope for --parent; the
+  // structured payload must be array-shaped (agrees with the text and READ_SCHEMAS.issues)
+  assert.ok(Array.isArray(r.structuredContent.issues), "enveloped list must yield an issues array");
+  assert.ok(
+    r.structuredContent.issues.some((i) => i.id === "proj-m1-imp"),
+    "the enveloped row must be present in structuredContent",
+  );
 });
 
 test("single-repo: beads_list mol resolves closed labeled steps too (--all)", async () => {
@@ -1712,6 +1812,40 @@ test("single-repo: beads_mol_ready digest (ready + empty) without emitting", asy
   assert.match(t2, /molecule: proj-m0 — Empty Mol · 0\/3 ready/);
   assert.match(t2, /no ready steps \(all blocked or completed\)/);
   assert.equal(s.emitted.length, 0);
+});
+
+test("single-repo: beads_mol_current normalises the array envelope into an object", async () => {
+  // real `bd mol current <id> --json` returns a top-level ARRAY (len=1); the declared
+  // schema says molecule is an OBJECT, so the payload must unwrap it (fmtMolReady's
+  // `Array.isArray(obj) ? obj[0] : obj` convention) while the text stays raw bd JSON.
+  const s = await openSession("single", repoDir);
+  resetLog();
+  const r = await s.byName.get("beads_mol_current").execute("c", { id: "proj-m1" });
+  assert.ok(okResult(r), JSON.stringify(r));
+  findInvocation(["mol", "current", "proj-m1", "--json"]);
+  const m = r.structuredContent?.molecule;
+  assert.ok(m && typeof m === "object" && !Array.isArray(m), "molecule must be a non-array object");
+  assert.equal(m.molecule_id, "proj-m0");
+  assert.match(r.content[0].text, /proj-m0/, "text output stays the raw bd JSON");
+  assert.equal(s.emitted.length, 0, "a read must not emit");
+});
+
+test("single-repo: beads_mol_ready unwraps an array response into an object", async () => {
+  // real bd 1.3.0 returns an OBJECT for ready --mol, but fmtMolReady already tolerates
+  // an array; the structured payload must match that tolerance (same as beads_mol_current).
+  process.env.FAKE_BD_READY_MOL_ARRAY = "1";
+  try {
+    const s = await openSession("single", repoDir);
+    resetLog();
+    const r = await s.byName.get("beads_mol_ready").execute("c", { id: "proj-m1" });
+    assert.ok(okResult(r), JSON.stringify(r));
+    const m = r.structuredContent?.molecule;
+    assert.ok(m && typeof m === "object" && !Array.isArray(m), "molecule must be a non-array object");
+    assert.equal(m.molecule_id, "proj-m0");
+    assert.equal(s.emitted.length, 0, "a read must not emit");
+  } finally {
+    delete process.env.FAKE_BD_READY_MOL_ARRAY;
+  }
 });
 
 test("single-repo: beads_mol_ready limit truncates the step rows client-side", async () => {

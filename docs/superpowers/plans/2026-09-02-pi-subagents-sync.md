@@ -1,3 +1,6 @@
+> **Superseded (2026-09-30):** pi-subagents is now a vendored fork this repo owns; there is no
+> upstream sync. This plan is kept as a dated record of what was done at the time.
+
 # pi-subagents Sync Implementation Plan
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use `/skill:subagent-driven-development` (recommended) or `/skill:executing-plans` to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.

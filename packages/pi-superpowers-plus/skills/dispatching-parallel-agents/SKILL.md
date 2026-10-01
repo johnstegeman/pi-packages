@@ -8,6 +8,11 @@ disable-model-invocation: true
 
 # Dispatching Parallel Agents
 
+> **Reaching the result tools:** `Agent` stays direct, but `get_subagent_result` and
+> `steer_subagent` have `codemode` exposure, so they are not in your tool list. Call them
+> from a `codemode` script — `return await tools.get_subagent_result({ agent_id: ..., wait: true });`.
+> The call shapes below are that script's arguments.
+
 ## Overview
 
 You delegate tasks to specialized agents with isolated context. By precisely crafting their instructions and context, you ensure they stay focused and succeed at their task. They should never inherit your session's context or history — you construct exactly what they need. This also preserves your own context for coordination work.

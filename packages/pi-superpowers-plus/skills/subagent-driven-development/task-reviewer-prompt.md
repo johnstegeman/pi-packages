@@ -20,12 +20,15 @@ Dispatch a subagent with this prompt:
     ## What Was Requested
 
     call set_phase({ phase: "development" }).
-    Read your task bead: beads_show({ id: "<TASK_ID>", full: true }).
-    It contains the exact, full text of the task.
+    Read your task bead, from a codemode script:
+    `return await tools.beads_show({ id: "<TASK_ID>", full: true });`
+    It contains the exact, full text of the task. (The beads_* tools have
+    code-mode exposure, so they are not in your declared tool list — reach
+    them through `codemode`.)
 
     The canonical Global Constraints for this plan live in the plan-approval
-    gate bead's description (writing-plans populated it). Read it now:
-    beads_show({ id: "[GATE_ID]", full: true }).
+    gate bead's description (writing-plans populated it). Read it now, in a
+    codemode script: `return await tools.beads_show({ id: "[GATE_ID]", full: true });`.
     Those constraints bind the task under review.
 
     ## What the Implementer Claims They Built

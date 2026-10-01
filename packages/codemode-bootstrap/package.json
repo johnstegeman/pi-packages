@@ -1,0 +1,14 @@
+{
+  "name": "pi-codemode-bootstrap",
+  "version": "0.1.0",
+  "description": "Activate pi's codemode tool for every session",
+  "type": "module",
+  "license": "MIT",
+  "keywords": ["pi-package"],
+  "main": "./index.ts",
+  "exports": "./index.ts",
+  "engines": { "node": ">=22.6.0" },
+  "scripts": { "test": "node test/activator.test.mjs" },
+  "pi": { "extensions": ["./index.ts"] },
+  "peerDependencies": { "@earendil-works/pi-coding-agent": "*" }
+}

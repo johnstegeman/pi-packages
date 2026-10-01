@@ -17,22 +17,52 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 // Hoisted: vi.mock's factory is lifted above the imports, so it cannot close
 // over ordinary top-level consts.
-const { buildSessionContext, createAgentSession, inMemory } = vi.hoisted(() => ({
+const { buildSessionContext, createAgentSession } = vi.hoisted(() => ({
   buildSessionContext: vi.fn(),
   createAgentSession: vi.fn(),
-  inMemory: vi.fn(),
 }));
 
 vi.mock("@earendil-works/pi-coding-agent", async () => {
   const actual = await vi.importActual<any>("@earendil-works/pi-coding-agent");
+  // A stand-in for pi's loader that runs the inline extension factories the
+  // module registers — the part the module relies on. The rest of the loader
+  // (cwd/agentDir discovery, skills, context files) is pi's business and runs
+  // for real in test/e2e/mention-clone-seeding.e2e.test.ts.
+  class InlineOnlyResourceLoader {
+    readonly opts: any;
+    private readonly extensions: any[] = [];
+    constructor(options: any) {
+      this.opts = options;
+    }
+    async reload() {
+      for (const factory of this.opts.extensionFactories ?? []) {
+        const handlers = new Map<string, Array<(...args: any[]) => any>>();
+        await factory({
+          on: (event: string, handler: (...args: any[]) => any) => {
+            handlers.set(event, [...(handlers.get(event) ?? []), handler]);
+            return () => {};
+          },
+        });
+        this.extensions.push({ path: "<inline:mention-clone-test>", handlers });
+      }
+    }
+    getExtensions() {
+      return { extensions: this.extensions, errors: [], runtime: {} };
+    }
+  }
   return {
     ...actual,
     buildSessionContext,
     createAgentSession,
-    SessionManager: { ...actual.SessionManager, inMemory },
+    DefaultResourceLoader: InlineOnlyResourceLoader,
+    getAgentDir: () => "/mock/agent-dir",
+    // The REAL `SessionManager` stays in place: `appendMessage` +
+    // `buildSessionProjection` are the canonical seeding path, and the
+    // assertions below read that real projection.
   };
 });
 
+import { SessionManager } from "@earendil-works/pi-coding-agent";
 import { agentMentionReminder } from "../src/mention.js";
 import { runMentionClone } from "../src/mention-clone.js";
 
@@ -44,8 +74,6 @@ const CONVERSATION = [
 
 beforeEach(() => {
   createAgentSession.mockReset();
-  inMemory.mockReset();
-  inMemory.mockReturnValue({ kind: "in-memory-session-manager" } as any);
   buildSessionContext.mockReset();
   buildSessionContext.mockReturnValue({ messages: CONVERSATION, thinkingLevel: "high", model: null } as any);
 });
@@ -91,6 +119,51 @@ function visibleTools(opts: any): any[] {
   );
 }
 
+/** Every `before_agent_start` handler the loader holds, run the way Pi runs them. */
+function forcedSystemPrompt(loader: any): string | undefined {
+  let forced: string | undefined;
+  for (const extension of loader?.getExtensions?.().extensions ?? []) {
+    for (const handler of extension.handlers.get("before_agent_start") ?? []) {
+      const result = handler(
+        { type: "before_agent_start", prompt: "", systemPrompt: "", systemPromptOptions: {} },
+        {},
+      );
+      if (typeof result?.systemPrompt === "string") forced = result.systemPrompt;
+    }
+  }
+  return forced;
+}
+
+/**
+ * What Pi hands the provider for a session: the `SessionManager`'s projection,
+ * with every system message collapsed into one head when a `before_agent_start`
+ * handler forced a prompt (`_installAgentForcedPromptProjection`).
+ *
+ * This is the point of the harness. `runMentionClone` used to seed
+ * `agent.state.messages` directly; a fake that reads that array back asserts the
+ * module's own writes and passes against a clone that seeds NOTHING — which is
+ * exactly what 0.99.1 shipped. The projection is the source Pi reads instead.
+ */
+function providerMessages(session: any): any[] {
+  const projection = session.sessionManager.buildSessionProjection().messages;
+  const forced = forcedSystemPrompt(session.createdWith?.resourceLoader);
+  if (forced === undefined) return projection;
+  return [
+    { role: "system", content: forced, timestamp: 0 },
+    ...projection.filter((message: any) => message.role !== "system"),
+  ];
+}
+
+/** role + flattened text — the shape the assertions below read. */
+function shape(messages: any[]): Array<[string, string]> {
+  return messages.map((message) => [
+    message.role,
+    typeof message.content === "string"
+      ? message.content
+      : (message.content as Array<{ text?: string }>).map((block) => block.text ?? "").join(""),
+  ]);
+}
+
 /**
  * Stand in for `createAgentSession`. `turn` receives the clone's single custom
  * tool and plays the part of the model deciding what to do with it — and only
@@ -99,18 +172,24 @@ function visibleTools(opts: any): any[] {
  */
 function cloneSession(turn?: (tool: any) => Promise<void> | void) {
   const session = {
-    agent: { state: { systemPrompt: "rebuilt-from-cwd", messages: [] as any[] } },
+    // Deliberately NOT where the assertions read: see providerMessages above.
+    agent: { state: { messages: [] as any[] } },
+    providerMessages: [] as any[],
     prompt: vi.fn(async () => {}),
     dispose: vi.fn(),
   } as any;
   createAgentSession.mockImplementation(async (opts: any) => {
     const tools = visibleTools(opts);
-    session.prompt.mockImplementation(async () => {
+    session.createdWith = opts;
+    session.sessionManager = opts.sessionManager;
+    session.prompt.mockImplementation(async (text: string) => {
+      // Pi persists the user prompt before it builds the request.
+      opts.sessionManager.appendMessage({ role: "user", content: [{ type: "text", text }], timestamp: 0 });
+      session.providerMessages = providerMessages(session);
       // No tool, no tool call: the model can only answer in prose.
       if (tools.length === 0) return;
       await turn?.(tools[0]);
     });
-    session.createdWith = opts;
     return { session };
   });
   return session;
@@ -137,9 +216,14 @@ describe("cloning the conversation", () => {
 
     await runMentionClone(opts());
 
-    expect(session.agent.state.messages).toEqual([
-      { role: "user", content: [{ type: "text", text: "hi" }] },
-      { role: "assistant", content: [{ type: "text", text: "hello" }] },
+    // The forced live prompt leads; the conversation follows it; the mention
+    // trails. Asserted on the provider-facing projection, not on the array the
+    // module writes — see providerMessages.
+    expect(shape(session.providerMessages)).toEqual([
+      ["system", "the live system prompt"],
+      ["user", "hi"],
+      ["assistant", "hello"],
+      ["user", `find the flaky test\n\n${agentMentionReminder("Explore")}`],
     ]);
   });
 
@@ -153,9 +237,11 @@ describe("cloning the conversation", () => {
     await runMentionClone(o);
 
     expect(buildSessionContext).toHaveBeenCalledWith([{ type: "message" }], "leaf-1");
-    expect(createAgentSession.mock.calls[0][0].sessionManager).toEqual({
-      kind: "in-memory-session-manager",
-    });
+    // A real in-memory SessionManager: the seeding path, and no session file to
+    // read back from or write to.
+    const built = createAgentSession.mock.calls[0][0];
+    expect(built.sessionManager).toBeInstanceOf(SessionManager);
+    expect(built.sessionManager.getSessionFile()).toBeFalsy();
   });
 
   it("thinks at the level the session is really on", async () => {
@@ -192,8 +278,12 @@ describe("cloning the conversation", () => {
     const result = await runMentionClone(o);
 
     expect(result).toEqual({ spawned: true });
-    expect(session.agent.state.messages).toEqual([]);
-    expect(session.agent.state.systemPrompt).toBe("the live system prompt");
+    // No history was carried, so the forced prompt leads and the mention is all
+    // that follows it.
+    expect(shape(session.providerMessages)).toEqual([
+      ["system", "the live system prompt"],
+      ["user", `find the flaky test\n\n${agentMentionReminder("Explore")}`],
+    ]);
   });
 
   it("carries the live system prompt rather than the one it rebuilt", async () => {
@@ -203,7 +293,31 @@ describe("cloning the conversation", () => {
 
     await runMentionClone(opts());
 
-    expect(session.agent.state.systemPrompt).toBe("the live system prompt");
+    expect(session.providerMessages[0]).toMatchObject({ role: "system", content: "the live system prompt" });
+    // Exactly one system message: the forced head, with no rebuilt prompt left
+    // standing alongside it.
+    expect(session.providerMessages.filter((message: any) => message.role === "system")).toHaveLength(1);
+  });
+
+  it("carries a compaction summary, which appendMessage's signature does not name", async () => {
+    // A long parent conversation reaches the clone through `buildSessionContext`
+    // as a `compactionSummary` message, not as loose turns. It is the densest part
+    // of the context and must survive the seeding.
+    buildSessionContext.mockReturnValue({
+      messages: [{ role: "compactionSummary", summary: "everything before this", tokensBefore: 10, timestamp: 1 }],
+      thinkingLevel: "high",
+      model: null,
+    } as any);
+    const session = cloneSession(callsAgent());
+
+    await runMentionClone(opts());
+
+    expect(session.providerMessages.map((message: any) => message.role)).toEqual([
+      "system",
+      "compactionSummary",
+      "user",
+    ]);
+    expect(session.providerMessages[1].summary).toBe("everything before this");
   });
 
   it("inherits the parent's model, thinking level and providers", async () => {

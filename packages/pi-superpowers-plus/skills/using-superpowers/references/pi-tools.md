@@ -17,6 +17,21 @@ pi install git:github.com/johnstegeman/pi-packages
 
 There is **no fallback** if the tools aren't present (they ship in the monorepo install) — skills reference the tools directly. For each tool's full parameter schema, see the package's own README (linked above); skills show the concrete call shapes you'll use day to day.
 
+> **Reaching these tools (code-mode exposure).** All 23 `beads_*` tools are registered with
+> `codemode`/`deferred` exposure, so **none appears in your tool list** — and neither do
+> `get_subagent_result`, `steer_subagent` or `SubagentWorkflow` from pi-subagents
+> (`Agent` stays direct). Read a skill's `beads_show({ ... })`-style call shape as the
+> arguments to make from inside a `codemode` script:
+>
+> ```js
+> return await tools.beads_show({ id: "<task-id>", full: true });
+> ```
+>
+> Deferred tools are reachable the same way; find them with `await searchTools("beads")` or
+> by filtering `ALL_TOOLS`. `codemode` itself is direct when the monorepo install is present
+> (the bundled `pi-codemode-bootstrap` extension activates it). Every call shape in the
+> skills below is written in the shorter direct form — wrap it in a script as above.
+
 - **Pass `ephemeral: true` to `beads_create` for wisps** (session phase bookkeeping — excluded from sync, purged via `bd purge` when closed); omit it for persistent issues (durable plan-step work).
 - **Repo routing:** omit `repo` on `beads_create` to target the session cwd's repo; from an umbrella root, pass the owning repo explicitly (`repo` is required there). Skills never hardcode a repo name.
 - **Structural workflow:** brainstorm → design → plan → implement → verify → finish is

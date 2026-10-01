@@ -47,14 +47,15 @@ import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import {
   type AssistantMessage,
-  type Context,
   type FauxContentBlock,
   type FauxResponseStep,
   fauxAssistantMessage,
   fauxText,
   fauxToolCall,
+  getCurrentTools,
   type Model,
   type ToolCall,
+  type TranscriptContext,
 } from "@earendil-works/pi-ai";
 import {
   type AgentSession,
@@ -85,11 +86,17 @@ export type FauxReply = string | FauxContentBlock | FauxContentBlock[] | Assista
 
 /**
  * A context-branching responder. Invoked once per model call (parent OR child)
- * with that call's own `Context`, so it can decide what to emit from the prompt
- * it sees — order-independent, unlike a flat FIFO `steps` list.
+ * with that call's own transcript context, so it can decide what to emit from
+ * the prompt it sees — order-independent, unlike a flat FIFO `steps` list.
+ *
+ * Pi 0.86.0 normalized provider input to `TranscriptContext`: the prompt and
+ * tool declarations ride in the transcript's system messages, so there is no
+ * `tools` / `systemPrompt` field. Read them with
+ * `getCurrentTools(context.messages)` and
+ * `getCurrentSystemPrompt(context.messages)`.
  */
 export type FauxResponder = (
-  context: Context,
+  context: TranscriptContext,
   state: { callCount: number },
 ) => FauxReply | Promise<FauxReply>;
 
@@ -147,6 +154,18 @@ export interface RunPrintModeOptions {
    * which is worse than not running them: it hides a real regression in noise.
    */
   live?: { provider: string; model: string } | false;
+  /**
+   * Extra tool names to activate on the parent session after boot.
+   *
+   * pi only auto-activates `direct`/`model-only` tools, so the subagents tools
+   * this package moved to `codemode`/`deferred` exposure (`SubagentWorkflow`,
+   * `get_subagent_result`, `steer_subagent`) are registered but *not* declared
+   * to the model. In production the model reaches them from a codemode script;
+   * a suite that scripts a direct call by name has to activate it here.
+   * Activation is explicit and legal for any non-`hidden` tool, so the tool is
+   * declared exactly as it was before the exposure change.
+   */
+  activateTools?: string[];
 }
 
 export interface PrintModeRun {
@@ -189,10 +208,10 @@ export function agentCall(
 }
 
 function resolveReply(
-  reply: FauxReply | ((ctx: Context) => FauxReply),
-  ctx: Context,
+  reply: FauxReply | ((ctx: TranscriptContext) => FauxReply),
+  ctx: TranscriptContext,
 ): FauxReply {
-  return typeof reply === "function" ? (reply as (c: Context) => FauxReply)(ctx) : reply;
+  return typeof reply === "function" ? (reply as (c: TranscriptContext) => FauxReply)(ctx) : reply;
 }
 
 /**
@@ -205,12 +224,12 @@ function resolveReply(
  * Each route may be a value or a `(ctx) => value` function.
  */
 export function routeBySession(routes: {
-  parentInitial: FauxReply | ((ctx: Context) => FauxReply);
-  parentFinal?: FauxReply | ((ctx: Context) => FauxReply);
-  subagent: FauxReply | ((ctx: Context) => FauxReply);
+  parentInitial: FauxReply | ((ctx: TranscriptContext) => FauxReply);
+  parentFinal?: FauxReply | ((ctx: TranscriptContext) => FauxReply);
+  subagent: FauxReply | ((ctx: TranscriptContext) => FauxReply);
 }): FauxResponder {
   return (context) => {
-    const isParent = (context.tools ?? []).some((t) => t.name === "Agent");
+    const isParent = getCurrentTools(context.messages).some((t) => t.name === "Agent");
     if (!isParent) return resolveReply(routes.subagent, context);
     const spawned = context.messages.some(
       (m) => m.role === "toolResult" && (m as { toolName?: string }).toolName === "Agent",
@@ -450,6 +469,24 @@ export async function runPrintMode(options: RunPrintModeOptions): Promise<PrintM
     }
     if (ownsCwd) rmSync(cwd, { recursive: true, force: true });
   };
+
+  // Declare any codemode/deferred tool the suite scripts a direct call to. pi
+  // silently drops names it doesn't know, so a typo would otherwise become a
+  // no-op and surface later as a misleading `Tool not found`. Verify each name
+  // actually became active, and tear the session down before failing loudly.
+  if (options.activateTools?.length) {
+    session.setActiveToolsByName([...session.getActiveToolNames(), ...options.activateTools]);
+    const active = new Set(session.getActiveToolNames());
+    const missing = options.activateTools.filter((name) => !active.has(name));
+    if (missing.length > 0) {
+      unsubscribe();
+      options.signal?.removeEventListener("abort", onAbort);
+      await dispose();
+      throw new Error(
+        `runPrintMode: activateTools named tool(s) pi does not know (or that are hidden): ${missing.join(", ")}`
+      );
+    }
+  }
 
   // --- drive the turn under a wall-clock guard ---
   let timer: ReturnType<typeof setTimeout> | undefined;
