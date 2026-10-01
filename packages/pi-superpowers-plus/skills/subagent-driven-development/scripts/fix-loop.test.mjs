@@ -129,6 +129,30 @@ test("behavior: passed round returns passed:true", async () => {
   assert.equal(calls, 2, 'fix + re-review agents');
 })
 
+test("behavior: the re-review package ends at the runtime HEAD, so the fix commit is in the diff", async () => {
+  // The fix agent commits INSIDE this round, so a package built to the
+  // dispatch-time `head` would omit the very commit the re-review exists to
+  // judge — a vacuous re-review that still reports clean. The range must end at
+  // the runtime HEAD, which only the reviewer's own shell can resolve.
+  const args = { ...passedArgs, fixBase: 'aaaaaaa', head: 'bbbbbbb' }
+  const prompts = []
+  const agent = async (prompt, opts) => { prompts.push({ prompt, label: opts?.label ?? '' }); return 'done' }
+  await runWorkflow(src, { args, agent })
+
+  const reReview = prompts.find((p) => p.label === 're-review')
+  assert.ok(reReview, 'the re-review agent must have run')
+  const toRuntimeHead = `${args.reviewPackage} ${args.taskBeadId} ${args.fixBase} HEAD`
+  const toStaleHead = `${args.reviewPackage} ${args.taskBeadId} ${args.fixBase} ${args.head}`
+  assert.ok(
+    reReview.prompt.includes(toRuntimeHead),
+    `the re-review package must be built to the runtime HEAD; expected:\n  ${toRuntimeHead}`,
+  );
+  assert.ok(
+    !reReview.prompt.includes(toStaleHead),
+    'the re-review package must not end at the dispatch-time head — the fix commit would be missing from the diff',
+  );
+})
+
 test("behavior: gate-failed round returns passed:false with reason", async () => {
   // first gated 'fix' call fails (null); the resume (ungated 'fix') succeeds;
   // the re-gated 'verify' call fails (null) -> the round is dropped and the
