@@ -82,7 +82,73 @@ Covered by `test/tool-exposure.test.ts` (instantiates the real extension with a 
 inspects the registered tool objects) and by the `structuredContent` assertion in
 `test/foreground-result-retrieval.test.ts`.
 
-### The mention clone's transcript seeding
+## Divergence 4 — codemode activation in subagent sessions (Task 7)
+
+`src/agent-runner.ts` builds every subagent session's `DefaultResourceLoader`, and an
+SDK-constructed loader never loads the CLI's built-in codemode extension. pi-packages ships
+tools with `codemode`/`deferred` exposure, which a subagent can only reach through codemode,
+so the runner now injects the factory itself and makes sure it survives the agent's own
+`extensions:`/`tools:` filtering. Four edits, each bracketed by the marker:
+
+1. **Load it** — `extensionFactories: [createCodemodeExtension()]` on the subagent loader
+   (`agent-runner.ts:766`).
+2. **Keep it loaded under an `extensions:` name allowlist** — the `extensionsOverride`
+   predicate (`agent-runner.ts:751`) exempts `<inline:*>` entries. Inline factories are
+   injected by the runner, not discovered from disk, so the disk-extension allowlist does
+   not govern them. Without this, a name allowlist filtered the codemode entry out of the
+   loaded set — an unnamed inline factory canonicalizes to `<inline:N>`, which no name
+   matches — and no later stage could re-admit a tool that never loaded.
+3. **Re-admit it into the active set** — `readmitToolNames` at the
+   `installExtensionToolScope` call site gains `"codemode"`. When the agent's `tools:`
+   carries any `ext:` selector, `inScope()`'s opt-in branch admits only *named*
+   extensions, and codemode's canonical name can never appear in one.
+4. **Enforce the scope on the nested path** — the tool-scope veto is registered as an
+   extension `tool_call` handler (`createToolScopeVeto`, `agent-runner.ts`) in addition to
+   the existing `session.agent.beforeToolCall` wrap. Loading codemode is what made this
+   necessary: before Task 7 no subagent could run a script, so no call could bypass the
+   scope. It can now, and the two existing enforcement points do not cover it:
+
+   - `beforeToolCall` is a property on the `Agent` instance. The nested path never consults
+     it — `ctx.executeTool()` reaches `AgentSession._executeNestedToolCall`, whose
+     `runToolCall` is handed the session's own `_beforeToolCall`, which dispatches extension
+     `tool_call` handlers and nothing else. A wrap of the property is invisible there.
+   - The active set cannot bound it either. `_getCallableTools()` returns the active `direct`
+     tools **plus every registered `codemode`/`deferred` tool regardless of the active set**,
+     which is exactly the set a script sees. An `ext:<ext>/<tool>` narrowing (or the `ext:`
+     opt-in flip) re-narrows the active set, so a deferred tool it excluded stays callable
+     from a script.
+
+   The fix re-asserts the same `inScope()` predicate at call time on that path. The factory
+   runs at `loader.reload()`, before the session exists and before `inScope()` is
+   computable, so it reads the predicate through a holder `installExtensionToolScope` fills
+   in; until then it is a no-op (no prompt can run before the scope is installed, and
+   `noExtensions` sessions are gated at registration by `excludeTools`). Both paths stay
+   covered — the `beforeToolCall` wrap is kept, not replaced.
+
+   Pinned by `test/e2e/codemode-nested-scope.e2e.test.ts`, which drives a real codemode
+   script (real QuickJS executor, real session) against an agent narrowed by
+   `ext:ext-veto-nested.mjs/probe_allowed` and asserts the excluded deferred tool is refused
+   while the in-scope one still runs. The spec's risk table records the interaction as R8.
+
+**Rejected alternative, for the record:** `additionalExtensionPaths: ["builtin:codemode"]`
+does not work. The `builtin:<name>` code is supplied by the CLI when *it* constructs the
+loader; a loader we construct has no code behind the name, so the entry is silently ignored
+(`docs/sdk.md:112` implies otherwise; `docs/sdk.md:116` is the accurate statement). Measured
+by the plan's spike, recorded in the design spec's §2.
+
+A fifth, comment-only edit belongs to this divergence: the `getAllTools`/`setActiveTools`
+`catch` in `src/index.ts` (`:2660`) said the APIs are "unavailable in some hosts (print mode,
+RPC)". That is over-conservative — a bound print-mode session exposes both — and the
+corrected design spec cites the comment, so it now names the real case: a host that loads
+extension definitions without ever binding a session (standalone `discoverAndLoadExtensions`),
+where the throwing stubs exist only until `core.bindCore` runs.
+
+Files: `src/agent-runner.ts`, `src/index.ts`. Covered by `test/agent-runner.test.ts`'s
+"subagent codemode activation" block, which asserts on the loader's constructor options and
+on the session's active tool names — not on source text.
+
+
+## Divergence 5 — the mention clone's transcript seeding (0.99.1 port fallout)
 
 `src/mention-clone.ts` seeds its throwaway session through that session's own
 `SessionManager` — canonical for an `AgentSession`'s provider context since
@@ -102,50 +168,11 @@ opposite of what the module exists to do. The suite stayed green because nothing
 covered the seeding: the old fake session asserted on the array the module
 happened to write to, which passes against a clone that seeds nothing.
 
-Covered now by `test/mention-clone.test.ts` (reads the projection the session
-hands the provider, not the module's own writes) and
-`test/e2e/mention-clone-seeding.e2e.test.ts` (a real `AgentSession` driven
-through a faux provider, asserting on the transcript the provider was actually
-handed).
-
-## Divergence 4 — codemode activation in subagent sessions (Task 7)
-
-`src/agent-runner.ts` builds every subagent session's `DefaultResourceLoader`, and an
-SDK-constructed loader never loads the CLI's built-in codemode extension. pi-packages ships
-tools with `codemode`/`deferred` exposure, which a subagent can only reach through codemode,
-so the runner now injects the factory itself and makes sure it survives the agent's own
-`extensions:`/`tools:` filtering. Three edits, each bracketed by the marker:
-
-1. **Load it** — `extensionFactories: [createCodemodeExtension()]` on the subagent loader
-   (`agent-runner.ts:766`).
-2. **Keep it loaded under an `extensions:` name allowlist** — the `extensionsOverride`
-   predicate (`agent-runner.ts:751`) exempts `<inline:*>` entries. Inline factories are
-   injected by the runner, not discovered from disk, so the disk-extension allowlist does
-   not govern them. Without this, a name allowlist filtered the codemode entry out of the
-   loaded set — an unnamed inline factory canonicalizes to `<inline:N>`, which no name
-   matches — and no later stage could re-admit a tool that never loaded.
-3. **Re-admit it into the active set** — `readmitToolNames` at the
-   `installExtensionToolScope` call site (`agent-runner.ts:1059`) gains `"codemode"`. When
-   the agent's `tools:` carries any `ext:` selector, `inScope()`'s opt-in branch admits only
-   *named* extensions, and codemode's canonical name can never appear in one.
-
-**Rejected alternative, for the record:** `additionalExtensionPaths: ["builtin:codemode"]`
-does not work. The `builtin:<name>` code is supplied by the CLI when *it* constructs the
-loader; a loader we construct has no code behind the name, so the entry is silently ignored
-(`docs/sdk.md:112` implies otherwise; `docs/sdk.md:116` is the accurate statement). Measured
-by the plan's spike, recorded in the design spec's §2.
-
-A fourth, comment-only edit belongs to this divergence: the `getAllTools`/`setActiveTools`
-`catch` in `src/index.ts` (`:2660`) said the APIs are "unavailable in some hosts (print mode,
-RPC)". That is over-conservative — a bound print-mode session exposes both — and the
-corrected design spec cites the comment, so it now names the real case: a host that loads
-extension definitions without ever binding a session (standalone `discoverAndLoadExtensions`),
-where the throwing stubs exist only until `core.bindCore` runs.
-
-Files: `src/agent-runner.ts`, `src/index.ts`. Covered by `test/agent-runner.test.ts`'s
-"subagent codemode activation" block, which asserts on the loader's constructor options and
-on the session's active tool names — not on source text.
-
+Files: `src/mention-clone.ts` only. Covered by `test/mention-clone.test.ts`
+(reads the projection the session hands the provider, not the module's own
+writes) and `test/e2e/mention-clone-seeding.e2e.test.ts` (a real `AgentSession`
+driven through a faux provider, asserting on the transcript the provider was
+actually handed).
 
 ## In-code marker convention
 
