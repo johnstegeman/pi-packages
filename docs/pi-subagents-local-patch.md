@@ -121,9 +121,14 @@ so the runner now injects the factory itself and makes sure it survives the agen
    The fix re-asserts the same `inScope()` predicate at call time on that path. The factory
    runs at `loader.reload()`, before the session exists and before `inScope()` is
    computable, so it reads the predicate through a holder `installExtensionToolScope` fills
-   in; until then it is a no-op (no prompt can run before the scope is installed, and
-   `noExtensions` sessions are gated at registration by `excludeTools`). Both paths stay
-   covered — the `beforeToolCall` wrap is kept, not replaced.
+   in. Until it is filled the handler is fail-open for **direct** calls — no prompt can run
+   before the scope is installed, and pi's own `beforeToolCall` dispatcher emits this handler
+   for direct calls too, so blocking them would freeze every `noExtensions` session — and
+   fail-**closed** for **nested** ones: a session that never installs a scope is exactly
+   `noExtensions`/`isolated`, where no script should reach a tool at all. The registration
+   gate (`tools:` → `allowedToolNames`) is therefore defense in depth, not the only thing
+   standing between a script and an out-of-scope tool. Both paths stay covered — the
+   `beforeToolCall` wrap is kept, not replaced.
 
    Pinned by `test/e2e/codemode-nested-scope.e2e.test.ts`, which drives a real codemode
    script (real QuickJS executor, real session) against an agent narrowed by
