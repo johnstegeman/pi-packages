@@ -115,7 +115,11 @@ const reReviewPrompt = [
   '**Head at dispatch:** ' + ARGS.head + ' — the fix agent commits INSIDE this round, so this is NOT the head you review',
   '',
   'Build the scoped review package yourself. End the range at the runtime HEAD: the fix commit sits on top of the dispatch-time head, so a package built to that stale head would omit the very change you are judging.',
-  '  ' + ARGS.reviewPackage + ' ' + ARGS.taskBeadId + ' ' + ARGS.fixBase + ' HEAD',
+  // Every operand is single-quoted so a path containing a space cannot split the
+  // command into two args, matching wave-parallel.js. All three are
+  // controller-supplied — a skill path, a bead id, a SHA — so none can carry a quote.
+  '  ' + "'" + ARGS.reviewPackage + "' '" + ARGS.taskBeadId + "' '" + ARGS.fixBase + "' HEAD",
+  'If that command reports `0 commit(s)`, STOP: the fix agent did not commit, so there is no fix to judge. Report the round as failed and do not verdict findings against an empty diff.',
   'Read the printed diff file once. Do not re-run git commands beyond that script. Your review is READ-ONLY: do not mutate the working tree, the index, HEAD, or branch state.',
   '',
   'Findings under verification:',
