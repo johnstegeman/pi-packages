@@ -45,6 +45,49 @@ function test(name, fn) {
   }
 }
 
+// --- tool surfaces vs the schemas -------------------------------------------
+const piBeadsLean = (await import("../src/index.ts")).default;
+const registeredTools = [];
+piBeadsLean({
+  events: { emit: () => {} },
+  on: () => {},
+  registerTool: (t) => registeredTools.push(t),
+  registerCommand: () => {},
+});
+const propsOf = (name) =>
+  Object.keys(registeredTools.find((t) => t.name === name)?.parameters?.properties ?? {});
+
+// Fields that exist only on beads_create. There is no update counterpart, so passing one
+// to beads_update is dropped on a direct call (pi strips undeclared arguments) and
+// rejected by the tool's own guard from a script - which is why the asymmetry is
+// declared here rather than discovered later.
+const CREATE_ONLY = ["repo", "design", "ephemeral"];
+
+// Create fields whose update counterpart is a different name rather than absent. `labels`
+// is one comma-separated string on create; update splits it into `addLabels`/
+// `removeLabels`. Naming it here keeps CREATE_ONLY honest (labels IS updatable) while still
+// forcing the asymmetry to be declared instead of discovered.
+const RENAMED_ON_UPDATE = { labels: ["addLabels", "removeLabels"] };
+
+test("beads_update covers every beads_create field or declares it create-only", () => {
+  const create = propsOf("beads_create");
+  const update = propsOf("beads_update");
+  const covered = (k) =>
+    update.includes(k) ||
+    CREATE_ONLY.includes(k) ||
+    (RENAMED_ON_UPDATE[k]?.every((u) => update.includes(u)) ?? false);
+  assert.deepEqual(
+    create.filter((k) => !covered(k)),
+    [],
+    "beads_create fields with no beads_update counterpart and no CREATE_ONLY entry",
+  );
+});
+
+test("CREATE_ONLY is not a hiding place: those fields really are create-only", () => {
+  const update = propsOf("beads_update");
+  assert.deepEqual(CREATE_ONLY.filter((k) => update.includes(k)), [], "a CREATE_ONLY field is also on beads_update");
+});
+
 test("toolMap exposes the expected 23 tools", () => {
   assert.equal(tools.length, 23, `src/index.ts toolMap has ${tools.length} tools`);
 });

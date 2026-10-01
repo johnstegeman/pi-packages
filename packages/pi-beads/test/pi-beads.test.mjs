@@ -1094,6 +1094,22 @@ test("single-repo: beads_update claim/setMetadata/description/title plumbing", a
   assert.equal(s.emitted.length, before + 1);
 });
 
+test("single-repo: beads_update applies type and acceptance", async () => {
+  const s = await openSession("single", repoDir);
+  const before = s.emitted.length;
+  resetLog();
+  const r = await s.byName.get("beads_update").execute("c", {
+    id: "proj-1a2",
+    title: "Re-scoped",
+    type: "bug",
+    acceptance: "- [ ] a criterion",
+  });
+  assert.ok(okResult(r), JSON.stringify(r));
+  findInvocation(["update", "proj-1a2", "--title", "Re-scoped", "--type", "bug", "--acceptance", "- [ ] a criterion"]);
+  assert.equal(invocations().filter((inv) => inv[0] === "update").length, 1, "exactly one bd update");
+  assert.equal(s.emitted.length, before + 1);
+});
+
 test("single-repo: beads_update rejects an undeclared argument without touching bd", async () => {
   const s = await openSession("single", repoDir);
   const before = s.emitted.length;

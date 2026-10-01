@@ -1370,7 +1370,7 @@ export default function piBeadsLean(pi: any) {
     ...beadsExposure(TOOL.update),
     label: "Beads update",
     description:
-      "Update a beads issue: status (open|in_progress|blocked|deferred|closed), priority (0-4), title, claim (assignee=you + status=in_progress), setMetadata, and/or description. Auto-routed to the owning repo by id prefix.",
+      "Update a beads issue: status (open|in_progress|blocked|deferred|closed), priority (0-4), title, type, acceptance, claim (assignee=you + status=in_progress), setMetadata, description, labels, notes, and/or parent. Auto-routed to the owning repo by id prefix.",
     parameters: {
       type: "object",
       properties: {
@@ -1402,6 +1402,11 @@ export default function piBeadsLean(pi: any) {
         claim: { type: "boolean", description: "Atomically claim the issue (assignee=you, status=in_progress)" },
         setMetadata: { type: "string", description: "key=value metadata to set (comma-separated for multiple, e.g. review.verdict=done,foo=bar)" },
         description: { type: "string", description: "Replace the issue's description body" },
+        type: {
+          type: "string",
+          description: "New type (task|bug|feature|chore|epic|decision|spike|story|milestone; passed to bd update --type)",
+        },
+        acceptance: { type: "string", description: "Acceptance criteria (bd update --acceptance)" },
       },
       required: ["id"],
     },
@@ -1437,9 +1442,11 @@ export default function piBeadsLean(pi: any) {
         }
       }
       if (params.description !== undefined) args.push("--description", String(params.description));
+      if (params.type) args.push("--type", String(params.type));
+      if (params.acceptance !== undefined) args.push("--acceptance", String(params.acceptance));
       if (args.length === 2)
         return textResult(
-          "nothing to update (pass status, priority, title, parent, notes, label changes, claim, setMetadata, or description)",
+          "nothing to update (pass status, priority, title, parent, notes, label changes, claim, setMetadata, description, type, or acceptance)",
         );
       const r = await bd(args, repoDir);
       if (!r.ok) return textResult(`bd update failed: ${r.err}`);
