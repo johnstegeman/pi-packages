@@ -187,3 +187,6 @@ Superseded by [2026-10-01-final-review-verify-per-location-design.md](2026-10-01
   keeps the losing phrasings in `alsoDescribed` rather than dropping them.
 - **§5 "one refuter per surviving finding."** Still true, but "finding" now means a merged location,
   so a lens-level duplicate of the same location no longer earns its own refuter.
+- **Trigger (Design decisions table).** Deferred minors are no longer a trigger for the workflow
+  path. Passing that list to the finders is what produced the 21 re-statements; the controller
+  triages the minors instead.

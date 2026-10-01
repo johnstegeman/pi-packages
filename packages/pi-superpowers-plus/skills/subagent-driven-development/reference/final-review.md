@@ -1,6 +1,6 @@
 # Final review: workflow path, args, and findings audit
 
-- **Workflow path** (preferred when `SubagentWorkflow` is present and the branch is large or broad — multi-file, many commits, security-sensitive, or deferred minors to triage): invoke the skill's final-review workflow:
+- **Workflow path** (preferred when `SubagentWorkflow` is present and the branch is large or broad — multi-file, many commits, security-sensitive): invoke the skill's final-review workflow: Deferred minors are never a reason to take this path — the controller triages them (rule 1 below).
 
       SubagentWorkflow({
         scriptPath: "<skill-scripts-dir>/final-review.js", // the dir containing this skill's scripts/ (e.g. packages/pi-superpowers-plus/skills/subagent-driven-development/scripts/)
