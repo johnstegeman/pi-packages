@@ -33,7 +33,7 @@ from any recent change.
 
 ### 2. 5ov5 — `beads_update` silently drops fields it does not declare
 
-`beads_update` declares ten properties and reads only those. `beads_create` accepts `type`
+`beads_update` declares twelve properties and reads only those. `beads_create` accepts `type`
 and `acceptance`; `beads_update` accepts neither, and `bd update` supports both
 (`bd update --help`: `-t, --type`, `--acceptance`). A caller that passes `type: "bug"` to
 `beads_update` gets `✓ Updated issue: …` with every *declared* field applied and `type`
@@ -89,11 +89,11 @@ existing arguments change meaning, and no new runtime dependency is introduced.
 | D5 | The guard asserts its own non-vacuity (pack list non-empty and contains `src/index.ts`; closure has ≥ 2 modules) | A regex that silently matched nothing would otherwise make the static half pass while asserting nothing. |
 | D6 | Undeclared-key rejection is one **registration wrapper**, applied to the write tools, deriving accepted keys from each tool's own `parameters.properties` | Closes the class, not the instance (5ov5's own "fix options" #1), with no second list to keep in sync. Reads are excluded: they carry no write risk, so widening the behaviour change buys nothing. |
 | D7 | The wrapper rejects **top-level** keys only; nested objects (a `tasks[]` item in `beads_create_list`) are out of scope | Nested item keys are a different surface with no schema to derive from; guarding them would mean a second declaration. Stated in the code comment so it is a known limit, not an oversight. |
-| D8 | The rejection is a `textResult` prefixed `beads_update: unknown argument(s) …`, matching how every other pi-beads validation error surfaces, and it emits no `beads:changed` | Consistency with `title is required` / `unknown repo for id '…'`; the prefix plus the accepted-set listing makes it unmistakable, and no write means no emit. |
+| D8 | The rejection is a `textResult` of the form `<tool>: unknown argument(s): <keys> (accepted: <keys>)`, matching how every other pi-beads validation error surfaces, and it emits no `beads:changed` | Consistency with `title is required` / `unknown repo for id '…'`; naming the tool, the offenders and the accepted set makes it unmistakable, and no write means no emit. |
 | D9 | `acceptance` is applied on `!== undefined` (empty string clears it, matching `description` in the same tool); `type` on truthiness (matching `beads_create`) | Each field keeps the semantics of its existing counterpart, so update does not become a third dialect. |
 | D10 | No allowlist on `type` in `beads_update` | `beads_create` passes `type` through and lets `bd` reject junk; adding validation to update only would create the very asymmetry this design removes. |
 | D11 | The create/update field sets are documented in a new README subsection and pinned by a test that reads both the README and the schemas | 5ov5's AC4 asks for the asymmetry to be visible; a doc block nothing checks is how the asymmetry returns. |
-| D12 | Delivery as **one PR on `fix/bckf_5ov5`**, one commit per bug, plus the docs commit folded into each | The two bugs are independent and separately revertable; the branch already exists for exactly this pairing. |
+| D12 | Delivery as **two commits, one per bug**, each carrying its own tests and docs, on the existing `fix/bckf_5ov5` branch (the design spec is already committed as `6bdb20e`) | The two bugs are independent and separately revertable; the branch exists for exactly this pairing. |
 
 ## Design
 
@@ -107,8 +107,8 @@ existing arguments change meaning, and no new runtime dependency is introduced.
 New `packages/pi-beads/test/packaging.test.mjs`, in the dependency-free `node:assert` style
 of the rest of the suite, deriving its inputs from the manifest so it cannot drift:
 
-- **Entry points:** `pi.extensions` plus `main` (both `./src/index.ts` /
-  `./src/cost-tracking.ts` here).
+- **Entry points:** `pi.extensions`, `main` and `exports` (here `./src/index.ts` and
+  `./src/cost-tracking.ts`).
 - **Static half:** walk the transitive relative-import graph of the entry points
   (`import … from "…"`, `export … from "…"`, bare `import "…"`, dynamic `import("…")`;
   `./`- and `../`-prefixed specifiers only — `node:` builtins and bare specifiers are not
@@ -146,14 +146,14 @@ const WRITE_TOOLS = new Set<string>([
   TOOL.comment, TOOL.reopen, TOOL.promote, TOOL.gateCreate, TOOL.gateResolve, TOOL.molPour,
 ]);
 
-const guardUnknownKeys = (def) => ({ ...def, async execute(id, params) { … } });
+const guardUnknownKeys = (def) => ({ ...def, async execute(id, params) { /* reject, else delegate */ } });
 ```
 
 - Declared keys are `Object.keys(def.parameters?.properties ?? {})`; if a definition declares
   no properties the wrapper is a pass-through.
 - Unknown top-level keys ⇒ return before the tool body runs, so no `bd` invocation and no
   `beads:changed` emit:
-  `unknown argument(s) for beads_update: typoKey (accepted: id, status, priority, title, parent, notes, appendNotes, addLabels, removeLabels, claim, setMetadata, description, type, acceptance)`
+  `beads_update: unknown argument(s): typoKey (accepted: id, status, priority, title, parent, notes, appendNotes, addLabels, removeLabels, claim, setMetadata, description, type, acceptance)`
 - Applied by wrapping each write tool's registration: `pi.registerTool(guardUnknownKeys({ … }))`.
   Reads are untouched.
 - The comment above `guardUnknownKeys` carries the Context §3 probe table and states the two
@@ -173,7 +173,7 @@ const guardUnknownKeys = (def) => ({ ...def, async execute(id, params) { … } }
   beside the beads tool list — pi strips arguments a tool does not declare before the tool
   runs on the model path, so an undeclared field is a silent no-op there and the surface is
   the only contract.
-- **Drift guards** (both in existing suites, no new script):
+- **Drift guards** (both in `test/tool-surface.test.mjs`, no new script):
   - `test/tool-surface.test.mjs`: the new README field table must name every property declared
     in `beads_create`'s and `beads_update`'s schemas, and must not list a create-only field on
     the update row. (Same regex-over-names technique the file already uses for tool names.)
@@ -190,7 +190,7 @@ In `test/pi-beads.test.mjs`, using the existing fake-`bd` fixture (argv is asser
 1. `beads_update` argv plumbing: `{ id, type: "bug", acceptance: "…" }` →
    `update <id> --type bug --acceptance …`, exactly one `bd` invocation, exactly one
    `beads:changed` emit.
-2. Guard fires, per write tool: one case on `beads_update` (`typoKey`) and one on a second
+2. Guard fires: one case on `beads_update` (`typoKey`) and one on a second
    write tool (`beads_close` with `reson`) — error names the offending key, lists the accepted
    set, **zero** `bd` invocations, zero emits. The second case proves the wrapper is generic
    rather than a hand-written check in one tool.
@@ -199,21 +199,21 @@ In `test/pi-beads.test.mjs`, using the existing fake-`bd` fixture (argv is asser
 
 ## Alternatives considered
 
-- **Root-level packaging check for every package with a `files` array** (Q2 option B/C).
+- **Root-level packaging check for every package with a `files` array.**
   Rejected: the class is not demonstrated anywhere but pi-beads, and the change would add a
   `scripts/ci/` script, its self-test and CI wiring for one package's bug.
 - **Add only the missing filename to `files`.** Rejected (D1): fixes today's instance and
   leaves the next `src/*.ts` file with the same fate.
-- **`beads_update` gains `type`/`acceptance` with no guard** (5ov5 option B). Rejected: a
+- **`beads_update` gains `type`/`acceptance` with no guard.** Rejected: a
   typo'd key from a codemode script still returns success silently, which is the reported
   failure mode with a different field name.
-- **Single source of truth for the whole tool surface** (approaches option 2): one table the
+- **Single source of truth for the whole tool surface:** one table the
   schemas, the guard and the docs all read. Rejected for this change: it touches all 23
   registrations and the docs pipeline, and the parity test in Part 3 already catches the drift
   class at a fraction of the diff.
 - **Throwing instead of returning an error text** (D8). Rejected: pi-beads surfaces every
   validation error as a `textResult`; a lone throw would be the inconsistency.
-- **Guarding all 23 tools, reads included** (Q3 option C). Rejected: no write risk on reads,
+- **Guarding all 23 tools, reads included.** Rejected: no write risk on reads,
   so it widens a behaviour change for uniformity alone.
 
 ## Risks
@@ -231,7 +231,7 @@ In `test/pi-beads.test.mjs`, using the existing fake-`bd` fixture (argv is asser
 - `npm test` at the repo root (node 22 via mise) — runs the package gate self-test and every
   package gate, including pi-beads' new `test/packaging.test.mjs`.
 - `node scripts/ci/package-gate.mjs pi-beads` for the package in isolation.
-- TDD evidence, recorded in the plan's ledger: `test/packaging.test.mjs` red (both halves)
+- TDD evidence, recorded in the plan's ledger (`.superpowers/sdd/<mol>/progress.md`):
   before the `files` change; the guard tests red before `guardUnknownKeys`; `beads_update`
   `--type`/`--acceptance` argv test red before the two fields exist.
 - `npm pack --dry-run --json` on the finished tree lists `src/lock-retry.ts`, and the
