@@ -293,12 +293,55 @@ assertion.
   instantiates the real extension with a mock `pi` and inspects the tool objects pi would
   actually receive — `pi-subagents`' `test/tool-exposure.test.ts` is the model. A
   source-text assertion cannot show what pi gets, so none is used.
-- **Recorded measurement.** Before/after assembled declaration payload using the chars/4
-  heuristic — the same method and caveat as the `tool-description-mode-compact` spec —
-  recorded here as an estimate, not asserted.
-- **Manual end-to-end.** One session performing a beads read and write entirely through a
-  codemode script, an `Agent` dispatch plus `get_subagent_result`, and a **subagent**
-  reaching a beads tool through codemode. Transcript evidence recorded.
+- **Recorded measurement (taken 2026-10-01, at `11f2271`).** chars/4 heuristic, the same method and
+  caveat as the `tool-description-mode-compact` spec; recorded as an estimate, not asserted.
+  The two sides were measured at different levels of rigour, and that is stated rather than
+  smoothed over.
+
+  **Removed from every session's declarations**
+
+  | item | chars | est. tokens | how measured |
+  |---|---|---|---|
+  | `pi-beads`, all 23 tools (description + parameter schema) | 13,046 | **3,262** | exact — the real registered tool objects |
+  | `SubagentWorkflow` description | 19,527 | **4,881** | the repo's own prior measurement, confirmed fixed/unreducible |
+  | `get_subagent_result` + `steer_subagent` descriptions | 1,183 | **~300** | exact from source; their parameter schemas are small and not counted |
+  | **total** | | **~8,400** | |
+
+  **Added**
+
+  | item | chars | est. tokens | how measured |
+  |---|---|---|---|
+  | the `codemode` tool declaration | 5,016 | **1,254** | exact — from a real session transcript |
+  | appended `declare const tools: {...}` sample per remaining declared tool | 380 each | **~95 each** | exact — 29 samples averaged from a real transcript |
+
+  A top-level session declares roughly ten tools after this change (`read`, `bash`, `edit`,
+  `write`, hashline-edit's `read`/`edit`/`grep`, `set_phase`, `Agent`, `codemode`), so the
+  appended samples add roughly **~950** est. tokens. **Net ≈ 6,200 est. tokens per session**,
+  dominated by `SubagentWorkflow` — the one item `toolDescriptionMode` provably could not
+  touch. The added side scales with the number of tools left declared, so the net narrows on a
+  configuration that declares many tools.
+
+  Two caveats, stated because they bound the claim: the appended-sample figure comes from a
+  subagent transcript with 30 declared tools (a top-level session declares fewer, so it is an
+  average, not a per-session count), and the helper tools' parameter schemas are excluded from
+  the removed side, making the net slightly conservative.
+- **Manual end-to-end (taken 2026-10-01, at `11f2271`).**
+  - *Top level, verified.* A real `pi -p` session with the worktree's `codemode-bootstrap` +
+    `pi-beads` (plus `builtin:codemode`, and `-e` for `bifrost` because `-ne` drops the
+    provider) was asked to run `return (await tools.beads_ready({ limit: 3 })).output` through
+    the codemode tool. It returned real beads rows — so the activator turned codemode on and a
+    `beads_*` tool was reachable through a script. The write tools share that path and were not
+    exercised by mutating beads state; their exposure is pinned by the registration-time test.
+  - *Subagent, verified.* Task 7's probe: a real subagent reached codemode and returned `ok`,
+    corroborated by the persisted session's 30-tool `toolsAdded` list ending in `codemode`.
+  - *Subagent reaching a codemode-exposed `beads_*` tool — deferred to the smoke test.* A
+    subagent's own loader discovers extensions from the **installed** clone, so this cannot be
+    shown from the worktree: it needs the package installed (`pi update` after the branch
+    lands). The mechanism it depends on is covered above; the installed-state assertion belongs
+    to the human smoke test.
+  - *Scope veto, verified.* `test/e2e/codemode-nested-scope.e2e.test.ts` drives a real codemode
+    script from an agent narrowed by `ext:<ext>/<tool>` and shows the excluded tool is refused —
+    RED before the fix (the excluded tool executed), GREEN after.
 - **Gates.** `npm test` at root, with `codemode-bootstrap` present in the inventory
   (`node scripts/ci/package-gate.mjs --list`).
 
