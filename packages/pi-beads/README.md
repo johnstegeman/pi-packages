@@ -130,9 +130,9 @@ MCP transport, and what comes back is a digest rather than raw JSON.
 | `beads_deps` | Blockers or dependents: a tree for one id, compact lines for several |
 | `beads_stale` | Stale issues (not updated recently); surfaces abandoned work; optional `days`, `status` (`open\|in_progress\|blocked\|deferred`), `limit` |
 | `beads_lint` | Check issues for missing template sections (e.g. Acceptance Criteria); optional `ids`, `status`, `type` filters |
-| `beads_create` | Create an issue in the right repository (`repo` is a folder name or a prefix), return its id; optional `acceptance` maps to `bd create --acceptance` |
+| `beads_create` | Create an issue in the right repository (`repo` is a folder name or a prefix), return its id; optional `type` and `acceptance` (`bd create --acceptance`) |
 | `beads_create_list` | Create an optional gate bead + its human gate, then the task beads sequentially under one parent in declared (plan) order, then wire the blocks-chain; each task may carry `acceptance` (`--acceptance`); returns `gate:`/`human-gate:` ids and `t1:..tN:` in plan order |
-| `beads_update` | Status, priority, title, parent, notes, labels; plus `claim`, `setMetadata` (`key=value,...`), `description` (replaces the body); routed by id prefix |
+| `beads_update` | Status, priority, title, **type**, parent, notes, labels; plus `acceptance` (`bd update --acceptance`), `claim`, `setMetadata` (`key=value,...`), `description` (replaces the body); routed by id prefix |
 | `beads_close` | Close one or more ids, with a reason; optional `continue`, `suggestNext`, `noAuto` map to the matching `bd close` flags, and `claimNext` claims the next ready issue **client-side, with template protos excluded** |
 | `beads_reopen` | Reopen one or more closed ids, with an optional reason |
 | `beads_dep` | Add a dependency (blocker blocks issue) within one repository; `type` is `blocks\|tracks\|related\|parent-child\|discovered-from` |
@@ -147,6 +147,19 @@ MCP transport, and what comes back is a digest rather than raw JSON.
 | `beads_mol_ready` | Show the ready frontier of one molecule's steps (`bd ready --mol <id>`); accepts a molecule or a step id, read-only; aggregate-aware |
 | `beads_promote` | Promote a wisp (ephemeral issue) to a permanent bead |
 | `beads_memories` | Persistent memories (remember/recall/list/forget); injected at prime time |
+
+### `beads_create` vs `beads_update` fields
+
+<!-- fields:surface-table: kept in sync with the schemas by test/tool-surface.test.mjs -->
+| tool | fields |
+|---|---|
+| `beads_create` | `title`, `repo`, `type`, `priority`, `description`, `acceptance`, `parent`, `labels`, `notes`, `design`, `ephemeral` |
+| `beads_update` | `id`, `status`, `priority`, `title`, `parent`, `notes`, `appendNotes`, `addLabels`, `removeLabels`, `claim`, `setMetadata`, `description`, `type`, `acceptance` |
+
+`repo`, `design` and `ephemeral` are create-only. On a direct call pi strips any argument a
+tool does not declare, so a field missing from a surface is silently unusable there; from a
+codemode script the tool's own guard rejects it by name. Either way the two surfaces must not
+drift - which is what the table above and its test are for.
 
 On current bd (1.2.2) `bd gate resolve` already closes the gate bead — it is
 `bd close <gate>` under a more explicit name. `beads_gate_resolve` then looks up

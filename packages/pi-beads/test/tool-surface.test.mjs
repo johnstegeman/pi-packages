@@ -109,6 +109,31 @@ test("beads_ready docs state the template exclusion", () => {
   }
 });
 
+const FIELD_TABLE_MARKER = "<!-- fields:surface-table";
+
+function readmeFieldRow(tool) {
+  const lines = readme.split("\n");
+  const start = lines.findIndex((l) => l.includes(FIELD_TABLE_MARKER));
+  assert.notEqual(start, -1, "README is missing the field-surface table marker");
+  const row = lines.slice(start).find((l) => new RegExp(`^\\|\\s*\`${tool}\``).test(l));
+  assert.ok(row, `README field table has no row for ${tool}`);
+  return row;
+}
+
+test("the README field table names every declared field of both surfaces", () => {
+  for (const tool of ["beads_create", "beads_update"]) {
+    const row = readmeFieldRow(tool);
+    const missing = propsOf(tool).filter((k) => !row.includes(`\`${k}\``));
+    assert.deepEqual(missing, [], `${tool}: fields missing from the README field table`);
+  }
+});
+
+test("the README field table keeps create-only fields off the update row", () => {
+  const row = readmeFieldRow("beads_update");
+  const leaked = CREATE_ONLY.filter((k) => row.includes(`\`${k}\``));
+  assert.deepEqual(leaked, [], "create-only fields must not appear on the beads_update row");
+});
+
 if (failures) {
   console.error(`\ntool-surface: ${failures} test(s) failed`);
   process.exit(1);

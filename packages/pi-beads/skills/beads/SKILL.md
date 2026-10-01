@@ -55,7 +55,7 @@ Reads are already cross-repo — **do not** shell out to raw `bd list`, `bd dep 
 |---|---|
 | `beads_create({ title, repo?, type?, priority?, description?, acceptance?, parent?, labels?, notes?, design?, ephemeral? })` | create in the owning repo; `parent` must be in the same repo; `acceptance` passes `--acceptance` (the task's acceptance criteria, so `bd lint` is clean); `ephemeral: true` (or `"true"`) passes `--ephemeral`, creating a wisp |
 | `beads_create_list({ parent, gate?, tasks })` | create an optional gate bead + human gate, then each task bead in plan order under `parent`, then wire the blocks-chain; each `tasks[]` item may carry `acceptance` (`--acceptance`) so every task bead passes `bd lint` |
-| `beads_update({ id, status?, priority?, title?, parent?, notes?, appendNotes?, addLabels?, removeLabels? })` | update one issue; auto-routed by id prefix |
+| `beads_update({ id, status?, priority?, title?, type?, acceptance?, parent?, notes?, appendNotes?, addLabels?, removeLabels? })` | update one issue; auto-routed by id prefix; `type`/`acceptance` mirror create's (`bd update --type` / `--acceptance`) |
 | `beads_close({ ids, reason?, continue?, suggestNext?, claimNext?, noAuto? })` | close one or many (ids space/comma separated); `continue` auto-advances to the next molecule step, `suggestNext` shows newly unblocked issues, `claimNext` claims the next highest-priority ready issue (chosen client-side with template protos excluded), `noAuto` shows the next step without claiming it |
 | `beads_reopen({ ids, reason? })` | reopen one or more closed ids, with an optional reason |
 | `beads_dep({ issue, blocker })` | `blocker` must be done before `issue` |
