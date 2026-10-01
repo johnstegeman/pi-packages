@@ -96,6 +96,17 @@ test("no sandbox-forbidden globals", () => {
   }
 });
 
+test("coupling: the guard's `0 commit(s)` signal is the one review-package actually prints", () => {
+  // The guard tells the re-reviewer to stop when the package reports an empty
+  // range. That instruction is only worth anything while review-package keeps
+  // printing the signal it names, and nothing else couples the two: reword the
+  // echo line and the guard would point at something the reviewer never sees,
+  // with every other test still green.
+  const rp = readFileSync(join(dirname(fileURLToPath(import.meta.url)), 'review-package'), 'utf8');
+  assert.match(rp, /commit\(s\)/, 'review-package must keep printing `N commit(s)` — the guard names that signal');
+  assert.match(src, /0 commit\(s\)/, 'the guard must keep naming the signal review-package prints');
+});
+
 test("script parses as valid JS (vm: runtime wrapper compile)", () => {
   // Bare `node --check` is not a valid parse gate for this format: the
   // pi-subagents loader strips the `export ` keyword (extractMeta) and then
@@ -172,6 +183,11 @@ test("behavior: the re-review prompt guards against a fix that never committed",
     reReview.prompt,
     /do not verdict findings against an empty diff/i,
     'the prompt must tell the reviewer to stop rather than verdict findings',
+  );
+  assert.match(
+    reReview.prompt,
+    /FAILED — the fix agent did not commit/,
+    'the closing contract must offer a FAILED state, or the guard has no legal expression in the mandated final message',
   );
 })
 

@@ -117,9 +117,12 @@ const reReviewPrompt = [
   'Build the scoped review package yourself. End the range at the runtime HEAD: the fix commit sits on top of the dispatch-time head, so a package built to that stale head would omit the very change you are judging.',
   // Every operand is single-quoted so a path containing a space cannot split the
   // command into two args, matching wave-parallel.js. All three are
+  // controller-supplied — a skill path, a bead id, a SHA — so a quote in one is
+  // assumed impossible, not enforced; it would fail loudly, as this bug did.
+  // command into two args, matching wave-parallel.js. All three are
   // controller-supplied — a skill path, a bead id, a SHA — so none can carry a quote.
   '  ' + "'" + ARGS.reviewPackage + "' '" + ARGS.taskBeadId + "' '" + ARGS.fixBase + "' HEAD",
-  'If that command reports `0 commit(s)`, STOP: the fix agent did not commit, so there is no fix to judge. Report the round as failed and do not verdict findings against an empty diff.',
+  'If that command reports `0 commit(s)`, STOP: the fix agent did not commit, so there is no fix to judge. Do not verdict findings against an empty diff — close with **Fix round: FAILED** instead (the closing contract below carries that state).',
   'Read the printed diff file once. Do not re-run git commands beyond that script. Your review is READ-ONLY: do not mutate the working tree, the index, HEAD, or branch state.',
   '',
   'Findings under verification:',
@@ -132,7 +135,7 @@ const reReviewPrompt = [
   'Issues entirely outside the fix diff: list under Out-of-Scope Observations — non-blocking, do not extend the loop.',
   'Tests: the implementer re-ran the covering tests and the gate command passed — verify the claims against the diff. Do not re-run the suite unless reading the code raises a specific doubt.',
   '',
-  "Your final message is the report itself: begin directly with the first finding's verdict — no preamble. End with: **Fix round:** [All findings addressed, no new Critical/Important breakage | Findings remain open] — list the open ones.",
+  "Your final message is the report itself: begin directly with the first finding's verdict — no preamble. End with: **Fix round:** [All findings addressed, no new Critical/Important breakage | Findings remain open | FAILED — the fix agent did not commit, so no verdicts are possible] — list the open ones.",
 ].join('\n')
 
 async function reReviewStage(prev) {
