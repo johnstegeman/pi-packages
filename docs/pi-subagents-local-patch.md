@@ -150,7 +150,9 @@ where the throwing stubs exist only until `core.bindCore` runs.
 
 Files: `src/agent-runner.ts`, `src/index.ts`. Covered by `test/agent-runner.test.ts`'s
 "subagent codemode activation" block, which asserts on the loader's constructor options and
-on the session's active tool names — not on source text.
+on the session's active tool names — not on source text — and by the tool-scope veto test in
+its "agent-runner async extension tool registration" block (`:1551`; the test is at `:1713`),
+which drives the veto factory through those same loader constructor options.
 
 
 ## Divergence 5 — the mention clone's transcript seeding (0.99.1 port fallout)

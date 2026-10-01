@@ -16,6 +16,10 @@ final review).
 
 ### 1. The package gate's own test suite is run by nothing
 
+**Fixed by this plan — landed in Task 1 (commits `45bf4cd`, `ce11000`).** The paragraph below
+describes the gap as it stood when this design was written. Root `npm test` now runs this file
+first and the `gate-selftest` CI job runs it too — see "Part 1 — wire the self-test" below.
+
 `scripts/ci/package-gate.test.mjs` (45 tests) is invoked by neither root `npm test` nor CI:
 
 - root `package.json` declares `"test": "node scripts/ci/package-gate.mjs --all"`;
@@ -28,6 +32,7 @@ package**; the suite went 44/45 and only a human-run caught it. Nothing in the l
 path could see the failure, and no task in that molecule owned the file.
 
 ### 2. The scope veto's fail-open branch rests on a registration gate
+
 **Fixed by this plan — landed in Task 2 (commit `5bab364`).** The paragraph below describes the
 coupling as it stood when this design was written. The handler now fails closed for nested calls
 while no scope is published, so the registration gate is defense in depth rather than the only
