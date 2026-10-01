@@ -28,6 +28,10 @@ package**; the suite went 44/45 and only a human-run caught it. Nothing in the l
 path could see the failure, and no task in that molecule owned the file.
 
 ### 2. The scope veto's fail-open branch rests on a registration gate
+**Fixed by this plan — landed in Task 2 (commit `5bab364`).** The paragraph below describes the
+coupling as it stood when this design was written. The handler now fails closed for nested calls
+while no scope is published, so the registration gate is defense in depth rather than the only
+guard — see "Part 2 — harden the scope veto" below.
 
 `createToolScopeVeto` (`packages/pi-subagents/src/agent-runner.ts:234`) is the extension
 `tool_call` handler that enforces a subagent's tool scope on the **nested** path — the calls
