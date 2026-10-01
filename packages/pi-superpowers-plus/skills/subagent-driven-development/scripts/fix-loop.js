@@ -9,6 +9,11 @@
 // drops the item, so re-review never runs on an unproven fix.
 // Read-only on beads; only the return envelope persists (the resume journal
 // is session-scoped).
+//
+// `fixBase` is the head the previous review saw. `head` is the head at dispatch,
+// and is used only as a label in the re-review prompt: the re-review package is
+// built to the RUNTIME HEAD, because the fix agent commits inside the round and a
+// package ending at the dispatch-time head would omit the fix it exists to judge.
 
 export const meta = {
   name: 'sdd-fix-loop',
@@ -107,10 +112,10 @@ const reReviewPrompt = [
   'Global Constraints (attention lens), from a codemode script: return await tools.beads_show({ id: "' + ARGS.gateBeadId + '", full: true }).',
   '',
   '**Fix base:** ' + ARGS.fixBase + ' (the head the previous review saw)',
-  '**Head:** ' + ARGS.head,
+  '**Head at dispatch:** ' + ARGS.head + ' — the fix agent commits INSIDE this round, so this is NOT the head you review',
   '',
-  'Build the scoped review package yourself:',
-  '  ' + ARGS.reviewPackage + ' ' + ARGS.taskBeadId + ' ' + ARGS.fixBase + ' ' + ARGS.head,
+  'Build the scoped review package yourself. End the range at the runtime HEAD: the fix commit sits on top of the dispatch-time head, so a package built to that stale head would omit the very change you are judging.',
+  '  ' + ARGS.reviewPackage + ' ' + ARGS.taskBeadId + ' ' + ARGS.fixBase + ' HEAD',
   'Read the printed diff file once. Do not re-run git commands beyond that script. Your review is READ-ONLY: do not mutate the working tree, the index, HEAD, or branch state.',
   '',
   'Findings under verification:',
