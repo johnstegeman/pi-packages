@@ -6,10 +6,11 @@ finding, or a ⚠️ item you confirmed as a real gap.
 Before the loop starts, two routes leave it immediately:
 
 - Record Minor findings in the progress ledger as you go
-  (`Task <N>: minor (deferred): <one-liner>`), and point the final
-  whole-branch review at that list so it can triage which must be fixed
-  before merge. A roll-up nobody reads is a silent discard. Minor findings
-  never enter the loop.
+  (`Task <N>: minor (deferred): <one-liner>`), then **triage that list yourself
+  in the controller** — you hold the ledger and the rulings. The list is not an
+  assignment for the final review's finders (see `reference/final-review.md`,
+  rule 1). A roll-up nobody reads is a silent discard; you are the reader.
+  Minor findings never enter the loop.
 - A finding labeled plan-mandated — or any finding that conflicts with
   what the task text requires — is the human's decision, like any plan
   contradiction: present the finding and the task text, ask which governs.
