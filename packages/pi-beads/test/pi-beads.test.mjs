@@ -1138,6 +1138,17 @@ test("single-repo: the guard runs before the tool's own validation", async () =>
   assert.equal(invocations().length, 0);
 });
 
+// beads_ready mutates with `claim: true` (`bd update <id> --claim`), so it is a write tool
+// and must be guarded like the rest: a typo must not silently drop the filter and claim.
+test("single-repo: beads_ready rejects an undeclared argument instead of claiming", async () => {
+  const s = await openSession("single", repoDir);
+  resetLog();
+  const r = await s.byName.get("beads_ready").execute("c", { claim: true, limt: 5 });
+  const text = r?.content?.[0]?.text ?? "";
+  assert.match(text, /beads_ready: unknown argument\(s\): limt/, text);
+  assert.equal(invocations().length, 0, "an undeclared argument must not reach bd");
+});
+
 test("single-repo: beads_dep --type plumbing and default (no --type)", async () => {
   const s = await openSession("single", repoDir);
   resetLog();

@@ -57,10 +57,20 @@ piBeadsLean({
 const propsOf = (name) =>
   Object.keys(registeredTools.find((t) => t.name === name)?.parameters?.properties ?? {});
 
+// Non-vacuity: `propsOf` returns [] for a name the capture never saw, so every assertion
+// built on it below would pass while asserting nothing (the discipline the packaging guard
+// carries too). Fail loudly here instead.
+for (const tool of ["beads_create", "beads_update"]) {
+  assert.ok(
+    propsOf(tool).length > 0,
+    `the registration capture yielded no declared properties for ${tool}`
+  );
+}
+
 // Fields that exist only on beads_create. There is no update counterpart, so passing one
-// to beads_update is dropped on a direct call (pi strips undeclared arguments) and
-// rejected by the tool's own guard from a script - which is why the asymmetry is
-// declared here rather than discovered later.
+// to beads_update is unusable on a direct call (pi holds the model to the schema; whether an
+// undeclared key even arrives depends on the provider) and rejected by the tool's own guard
+// from a script - which is why the asymmetry is declared here rather than discovered later.
 const CREATE_ONLY = ["repo", "design", "ephemeral"];
 
 // Create fields whose update counterpart is a different name rather than absent. `labels`

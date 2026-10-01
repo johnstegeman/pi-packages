@@ -126,22 +126,43 @@ const beadsExposure = (name: string) => ({
 });
 
 // ---- undeclared-argument guard ---------------------------------------------
-// A tool's `parameters.properties` is the whole surface a *direct* (model-initiated)
-// call can reach: pi validates the model's arguments against that schema and strips
-// anything undeclared before `execute` runs. Probe, pi 0.99.2 - a tool declaring only
-// `foo`, called with {"foo":"a","bar":"b"}, received {"foo":"a"}, silently; adding
-// `additionalProperties: false` to the schema does not make pi reject instead. So on the
-// direct path an undeclared key never reaches us, and the schema is the only contract.
+// A tool's `parameters.properties` is the contract the *model* is held to, but pi itself
+// does not filter arguments against it: pi 0.99.2's `validateToolArguments`
+// structuredClones the arguments, normalises null-valued *declared* optional keys
+// (`normalizeOptionalNulls`), runs TypeBox `Convert` (declared keys only) and returns the
+// object UNCHANGED as soon as the schema check passes. Nothing deletes an undeclared key.
+// Both paths run through that same function: the direct path via `prepareToolCall`, the
+// codemode nested path via `NestedToolCallRunner._executeNestedToolCall` -> `runToolCall`
+// -> `prepareToolCall`.
 //
-// The codemode nested path is different: `tools.beads_update({ ... })` inside a script
-// hands the object over intact, so an undeclared key DOES arrive - and used to be ignored
-// while the tool answered success (pi-packages-5ov5). This guard closes that path by
-// naming the keys it will not apply. Do not delete it as unreachable: the direct path
-// cannot reach it, the scripted path can, and that is how the bug was found.
+// The probe that looked like pi stripping (pi 0.99.2: a tool declaring only `foo`, called
+// with {"foo":"a","bar":"b"}, received {"foo":"a"}, silently; adding
+// `additionalProperties: false` did not make pi reject either) was measuring the *provider*:
+// pi asks for strict tool sampling via `makeStrictJsonSchema`, which sets
+// `additionalProperties = false` on the schema sent upstream - and that request defaults OFF
+// (`convertResponsesTools`: `defaultStrict = options?.strict === undefined ? false :
+// options.strict`; only `resolveJsonSchemaStrictSampling` on a strict-capable model turns it
+// on). So whether a *direct* call carries an undeclared key depends on the provider/model,
+// and when it does this guard is the only thing that makes the key loud.
+//
+// The codemode nested path is where the bug was found: `tools.beads_update({ ... })` inside
+// a script hands the object over intact, and an undeclared key used to be ignored while the
+// tool answered success (pi-packages-5ov5). This guard closes both paths by naming the keys
+// it will not apply. Do not delete it as unreachable: the scripted path always delivers the
+// object intact, and the direct path can too - that is how the bug was found.
 //
 // Deliberate limits: top-level keys only (a `tasks[]` item in beads_create_list is a
-// nested surface with no schema of its own to derive from), and write tools only.
+// nested surface with no schema of its own to derive from), and write-capable tools only.
+// `beads_memories` is the one mutating tool deliberately left out: it declares an
+// `outputSchema`, which the guard's plain `textResult` rejection would violate; bead
+// pi-packages-7vzw tracks a schema-respecting rejection for it. (`beads_ready` declares an
+// `outputSchema` too and IS in the set, because `claim: true` makes it mutating; its
+// rejection path carries text only - the same 7vzw gap, accepted here so the mutation is
+// guarded.)
 const WRITE_TOOLS = new Set<string>([
+  // `beads_ready` is a read tool except for `claim: true`, which runs
+  // `bd update <id> --claim`; guarded because it can mutate.
+  TOOL.ready,
   TOOL.create,
   TOOL.createList,
   TOOL.update,
@@ -764,13 +785,17 @@ export default function piBeadsLean(pi: any) {
     const run = def.execute.bind(def);
     return {
       ...def,
-      async execute(id: string, params: any) {
+      // Forward the whole argument list: pi calls execute(toolCallId, params, signal,
+      // onUpdate, ctx), and truncating it here would silently drop ctx/signal for the
+      // guarded tools only - the same silent-drop footgun this guard exists to remove.
+      async execute(...args: any[]) {
+        const [, params] = args;
         const unknown = Object.keys(params ?? {}).filter((k) => !allowed.has(k));
         if (unknown.length > 0)
           return textResult(
             `${def.name}: unknown argument(s): ${unknown.join(", ")} (accepted: ${declared.join(", ")})`,
           );
-        return run(id, params);
+        return run(...args);
       },
     };
   }

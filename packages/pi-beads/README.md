@@ -156,10 +156,16 @@ MCP transport, and what comes back is a digest rather than raw JSON.
 | `beads_create` | `title`, `repo`, `type`, `priority`, `description`, `acceptance`, `parent`, `labels`, `notes`, `design`, `ephemeral` |
 | `beads_update` | `id`, `status`, `priority`, `title`, `parent`, `notes`, `appendNotes`, `addLabels`, `removeLabels`, `claim`, `setMetadata`, `description`, `type`, `acceptance` |
 
-`repo`, `design` and `ephemeral` are create-only. On a direct call pi strips any argument a
-tool does not declare, so a field missing from a surface is silently unusable there; from a
-codemode script the tool's own guard rejects it by name. Either way the two surfaces must not
-drift - which is what the table above and its test are for.
+`repo`, `design` and `ephemeral` are create-only; `labels` **is** updatable, but only through
+`addLabels` / `removeLabels` — it has no same-named counterpart. A field missing from a
+surface is unusable on a direct call, but not because pi drops it: pi passes undeclared
+arguments through on both paths, and what keeps them off a direct call is the strict tool
+schema pi asks the provider for — a request that defaults off, so it depends on the model.
+From a codemode script the object arrives intact and the tool's own guard rejects an
+undeclared key by name. Either way the two surfaces must not drift - which is what the table
+above and its test are for.
+
+### Gate resolve and the `beads_close` cascade
 
 On current bd (1.2.2) `bd gate resolve` already closes the gate bead — it is
 `bd close <gate>` under a more explicit name. `beads_gate_resolve` then looks up
