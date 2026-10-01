@@ -32,8 +32,8 @@ script exists.
   runs; `--list --json` is what CI uses to build its matrix.
 - **The gate's own tests:** `node --test scripts/ci/package-gate.test.mjs` (also the
   `gate-selftest` CI job). Among other things it pins the composed gate of **every real
-  package**, so adding a package or changing a gate fails it — the check that would have
-  caught the `codemode-bootstrap` addition while nothing ran this file.
+  package**, so adding a package that declares a `test` script, or changing a gate, fails it —
+  the check that would have caught the `codemode-bootstrap` addition while nothing ran this file.
 
 For each package the gate composes **each declared `check` / `typecheck` / `test` script, at
 least once** — in the order `typecheck`, then lint/`check`, then tests. So a step can run twice: the

@@ -360,7 +360,6 @@ remain `{}`.
 install nothing, while the process-level CLI tests run `npm ci` in a scratch repo against a
 dependency-free lockfile) covering the exported pure functions. Run by root `npm test` and by the
 `gate-selftest` CI job:
-exported pure functions:
 
 | case | assertion |
 |---|---|
