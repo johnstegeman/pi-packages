@@ -356,8 +356,10 @@ remain `{}`.
 
 ## Tests
 
-**New — `scripts/ci/package-gate.test.mjs`** (`node --test`, no installs, no network) covering the
-exported pure functions:
+**New — `scripts/ci/package-gate.test.mjs`** (`node --test`, no network; the pure-function tests
+install nothing, while the process-level CLI tests run `npm ci` in a scratch repo against a
+dependency-free lockfile) covering the exported pure functions. Run by root `npm test` and by the
+`gate-selftest` CI job:
 
 | case | assertion |
 |---|---|

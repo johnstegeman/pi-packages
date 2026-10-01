@@ -225,9 +225,12 @@ export function parseExtSelectors(entries: string[]): {
  * The factory runs at `loader.reload()`, before the session exists and before
  * `inScope()` is computable (it depends on the injected-tool re-admits), so it
  * reads the predicate from a holder {@link installExtensionToolScope} fills in.
- * Until it does, the handler is a no-op: no prompt can run before the scope is
- * installed, and the `noExtensions` sessions that never install one are gated at
- * registration by `excludeTools`.
+ * Until it is filled the handler is fail-open for DIRECT calls — no prompt can
+ * run before the scope is installed, and blocking them would freeze every
+ * `noExtensions` session — and fail-CLOSED for NESTED ones: a session that never
+ * installs a scope is exactly `noExtensions`/`isolated`, where no script should
+ * reach a tool at all. The registration gate (`tools:` -> `allowedToolNames`) is
+ * therefore defense in depth, not the only guard.
  *
  * LOCAL PATCH (pi-packages) — see docs/pi-subagents-local-patch.md (Divergence 4).
  */
@@ -238,7 +241,20 @@ function createToolScopeVeto(holder: { inScope?: () => Set<string> }): InlineExt
     factory: (pi: ExtensionAPI) => {
       pi.on("tool_call", (event) => {
         const inScope = holder.inScope;
-        if (!inScope) return undefined;
+        if (!inScope) {
+          // No scope published means this session skipped installExtensionToolScope —
+          // exactly `noExtensions`/`isolated`. Fail CLOSED for NESTED (script) calls, so
+          // the registration gate is no longer the only thing between a script and an
+          // out-of-scope tool. DIRECT calls must stay allowed: pi's own beforeToolCall
+          // dispatcher emits this handler for them too, and blocking there would freeze
+          // every `noExtensions` session. Unset is transient for extension sessions (no
+          // prompt runs before the scope is installed) and permanent for `noExtensions`.
+          if (!event.parentToolCallId) return undefined;
+          return {
+            block: true,
+            reason: `Tool "${event.toolName}" is not available to this subagent.`,
+          };
+        }
         if (inScope().has(event.toolName)) return undefined;
         return {
           block: true,
@@ -280,7 +296,9 @@ function createToolScopeVeto(holder: { inScope?: () => Set<string> }): InlineExt
  * clears `_eventListeners`, so they die with the session rather than leaking.
  *
  * Only meaningful when extensions are loaded — under `noExtensions`/`isolated` the
- * static `allowedToolNames` allowlist already gates the registry itself.
+ * static `allowedToolNames` allowlist gates the registry itself, and the
+ * {@link createToolScopeVeto} handler fails closed for nested calls, so neither
+ * layer alone is load-bearing.
  */
 export function installExtensionToolScope(
   session: AgentSession,

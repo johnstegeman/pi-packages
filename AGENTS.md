@@ -24,12 +24,16 @@ script exists.
 
 ## Running tests
 
-- **Everything, the way CI runs it:** `npm test` at the repo root. It runs
-  `scripts/ci/package-gate.mjs --all`, the same script the `package-gates` CI job runs per
-  package.
+- **Everything, the way CI runs it:** `npm test` at the repo root. It runs the gate's own
+  test suite (`scripts/ci/package-gate.test.mjs`) and then `scripts/ci/package-gate.mjs --all`,
+  the same script the `package-gates` CI job runs per package.
 - **One package:** `node scripts/ci/package-gate.mjs <package>` (e.g. `... pi-beads`).
 - **The inventory:** `node scripts/ci/package-gate.mjs --list` shows which gate each package
   runs; `--list --json` is what CI uses to build its matrix.
+- **The gate's own tests:** `node --test scripts/ci/package-gate.test.mjs` (also the
+  `gate-selftest` CI job). Among other things it pins the composed gate of **every real
+  package**, so adding a package that declares a `test` script, or changing a gate, fails it —
+  the check that would have caught the `codemode-bootstrap` addition while nothing ran this file.
 
 For each package the gate composes **each declared `check` / `typecheck` / `test` script, at
 least once** — in the order `typecheck`, then lint/`check`, then tests. So a step can run twice: the
