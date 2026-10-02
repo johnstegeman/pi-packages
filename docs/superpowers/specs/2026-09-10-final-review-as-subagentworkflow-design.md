@@ -175,3 +175,18 @@ empty-findings envelope and the verified envelope carry these two fields.
 - Dimension configurability beyond `args` passthrough (defaults are the fixed
   full set; `args.dimensions` can already override per run).
 - Per-finding majority-of-3 verification (decision: one refuter per finding).
+
+## Errata (2026-10-01)
+
+Superseded by [2026-10-01-final-review-verify-per-location-design.md](2026-10-01-final-review-verify-per-location-design.md):
+
+- **§4 key.** The shipped key is the location — `file:line`, and
+  `file:normalize(description)` only for a finding with no `line`. The description left
+  the key because the same item re-reported by several lenses in its own words counted as N
+  findings; on the 2026-10-01 `ci-gate-hardening` run that cost 21 of 33 agents. A merge now
+  keeps the losing phrasings in `alsoDescribed` rather than dropping them.
+- **§5 "one refuter per surviving finding."** Still true, but "finding" now means a merged location,
+  so a lens-level duplicate of the same location no longer earns its own refuter.
+- **Trigger (Design decisions table).** Deferred minors are no longer a trigger for the workflow
+  path. Passing that list to the finders is what produced the 21 re-statements; the controller
+  triages the minors instead.

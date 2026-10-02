@@ -332,7 +332,7 @@ After generating the package, choose the review path:
 
 > **Read now:** [reference/final-review.md](reference/final-review.md) — the final-review workflow payload and args, plus the findings-file audit. Read before choosing the workflow path.
 
-- **Workflow path** (preferred when `SubagentWorkflow` is present and the branch is large or broad — multi-file, many commits, security-sensitive, or deferred minors to triage): invoke the skill's final-review workflow per `reference/final-review.md`.
+- **Workflow path** (preferred when `SubagentWorkflow` is present and the branch is large or broad — multi-file, many commits, security-sensitive): invoke the skill's final-review workflow per `reference/final-review.md`. Deferred minors are never a reason to take this path — the controller triages them (rule 1 in that reference).
 - **Single-reviewer path** (fallback — `SubagentWorkflow` absent, a small plan, or a degraded workflow run): dispatch the `code-reviewer` agent with the [code-reviewer.md](../requesting-code-review/code-reviewer.md) template, passing the printed package path.
 
 ## Integration
