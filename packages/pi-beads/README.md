@@ -165,15 +165,19 @@ From a codemode script the object arrives intact and the tool's own guard reject
 undeclared key by name. Either way the two surfaces must not drift - which is what the table
 above and its test are for.
 
-### Gate resolve and the `beads_close` cascade
+### Gate resolve and close semantics
 
 On current bd (1.2.2) `bd gate resolve` already closes the gate bead — it is
 `bd close <gate>` under a more explicit name. `beads_gate_resolve` then looks up
 the gate's open, non-gate dependents with `bd dep list` and closes each one, so a
 resolved gate never leaves its gated step open to fail a later `beads_close`. If
 that lookup comes back unusable (dep list failed), the tool says so instead of
-reporting a success it did not achieve. Separately, `beads_close` cascades to
-close a parent step once no open task-children remain, never the molecule root.
+reporting a success it did not achieve.
+
+`beads_close` closes exactly the ids you pass and never cascades: closing the last task
+bead under a step leaves that step open. The `implement` step of a `superpowers-workflow`
+molecule is closed explicitly by the controller, after the final whole-branch review
+(`subagent-driven-development` / `executing-plans`).
 
 ## Events
 

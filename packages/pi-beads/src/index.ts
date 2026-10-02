@@ -1485,7 +1485,7 @@ export default function piBeadsLean(pi: any) {
     ...beadsExposure(TOOL.close),
     label: "Beads close",
     description:
-      "Close one or more beads issues by id (any repos). Run this when work is done before reporting completion. Auto-routed to owning repos by id prefix.",
+      "Close one or more beads issues by id (any repos). Run this when work is done before reporting completion. Auto-routed to owning repos by id prefix. Closes exactly the ids you pass — no parent or step is closed automatically.",
     parameters: {
       type: "object",
       properties: {
