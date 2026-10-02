@@ -266,11 +266,11 @@ Prefer `pipeline` unless a stage genuinely needs every prior result *together* �
 
 ### `workflow(nameOrRef, args?)`
 
-Runs a saved workflow inline and returns its value. Pass a name, or `{ scriptPath }`. `args` becomes the child's `args` global.
+Runs a saved workflow inline and returns its value. Pass a name, or `{ scriptPath }`. `args` becomes the child's `args` global, and it must be an object or an array — a JSON-encoded string is rejected, exactly as for the tool's own `args`.
 
 The child runs in the *same* worker and vm context under its own globals, so it shares this run's concurrency cap, agent counter, abort signal, journal and budget by construction — its agents are simply this run's agents, controllable from the same inspector. What it does not share is phase state: the child's phases render as their own `▸ <name>` group.
 
-**One level only** — `workflow()` inside a child throws saying so. An unknown name, an unreadable path, a child carrying no `meta`, or a child that will not parse all throw into the calling script, so `try`/`catch` if you want to handle them. Capped at 256 nested calls per run.
+**One level only** — `workflow()` inside a child throws saying so. An unknown name, an unreadable path, a child carrying no `meta`, a child that will not parse, or an `args` that is not an object or an array all throw into the calling script, so `try`/`catch` if you want to handle them. Capped at 256 nested calls per run.
 
 ### `phase()`, `log()`, `args`, `budget`
 
