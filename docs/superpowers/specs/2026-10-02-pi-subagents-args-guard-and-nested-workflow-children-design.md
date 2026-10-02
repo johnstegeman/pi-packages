@@ -133,7 +133,9 @@ Applied at three sites:
 3. **The worker's nested `workflow(nameOrRef, args)` (`worker-source.ts:648`), before the existing
    `checkBoundary`** — same rule, message labelled with the child:
    `workflow("audit") args must be an object or an array, not a string.` This has to be worker-side:
-   nested child args never cross to the host. `checkBoundary` is unchanged for everything else.
+   nested child args never cross to the host. The worker copy throws a plain `Error` —
+   `WorkflowRuntimeError` does not exist inside the worker source string, exactly as `checkBoundary`
+   already throws a plain `Error` there. `checkBoundary` is unchanged for everything else.
 
 **Deliberately not added:** a copy of the guard inside the worker's top-level `main()`. The runtime
 rejects before the worker is constructed, so it would be unreachable code.
