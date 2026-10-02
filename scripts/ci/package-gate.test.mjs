@@ -5,7 +5,7 @@ import { execFileSync } from 'node:child_process';
 import { cpSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
-import { PACKAGES_DIR, covers, discoverGated, gateSteps, isGated, main, planRun, runGate, selectGate, summarize } from './package-gate.mjs';
+import { PACKAGES_DIR, covers, discoverPackages, gateSteps, isGated, main, planRun, runGate, selectGate, summarize } from './package-gate.mjs';
 
 // ---------- isGated ----------
 test('isGated: only a non-empty test script counts', () => {
@@ -182,7 +182,7 @@ test('gateSteps: splits npm-only gates into argv arrays, one per step', () => {
 
 // Guard against manifest drift: assert the real packages/*, not a frozen copy.
 test('selectGate: the real package manifests select the recorded composed gate', () => {
-  const gates = Object.fromEntries(discoverGated(PACKAGES_DIR).map((pkg) => [pkg.name, pkg.gate]));
+  const gates = Object.fromEntries(discoverPackages(PACKAGES_DIR).map((pkg) => [pkg.name, pkg.gate]));
   assert.deepEqual(gates, {
     bifrost: 'npm test',
     'codemode-bootstrap': 'npm test',
@@ -207,17 +207,24 @@ test('runGate: an un-gated package fails without running anything', () => {
   }
 });
 
-// ---------- discoverGated ----------
+// ---------- discoverPackages ----------
+// A manifest written verbatim instead of JSON.stringify'd, so a test can plant a malformed file.
+// A sentinel rather than a bare string: gatedPackages' values are already strings (test scripts),
+// so "a string means raw" would collide there. `null` still means "no package.json at all".
+const rawManifest = (text) => ({ raw: text });
+const isRaw = (value) => typeof value === 'object' && value !== null && typeof value.raw === 'string';
+
 function scratchPackages(pkgs) {
   const dir = mkdtempSync(join(tmpdir(), 'pkg-gate-'));
   for (const [name, manifest] of Object.entries(pkgs)) {
     mkdirSync(join(dir, name), { recursive: true });
-    if (manifest !== null) writeFileSync(join(dir, name, 'package.json'), JSON.stringify(manifest));
+    if (manifest === null) continue; // no package.json at all
+    writeFileSync(join(dir, name, 'package.json'), isRaw(manifest) ? manifest.raw : JSON.stringify(manifest));
   }
   return dir;
 }
 
-test('discoverGated: sorted, skips non-gated dirs and dirs without a manifest', () => {
+test('discoverPackages: sorted, skips non-gated dirs and dirs without a manifest', () => {
   const dir = scratchPackages({
     zeta: { scripts: { test: 'npm test' } },
     ayu: { scripts: { build: 'tsc' } },
@@ -226,21 +233,81 @@ test('discoverGated: sorted, skips non-gated dirs and dirs without a manifest', 
   });
   try {
     assert.deepEqual(
-      discoverGated(dir).map((p) => p.name),
+      discoverPackages(dir).map((p) => p.name),
       ['alpha', 'zeta'],
     );
-    assert.equal(discoverGated(dir)[0].gate, 'npm run typecheck && npm test');
+    assert.equal(discoverPackages(dir)[0].gate, 'npm run typecheck && npm test');
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
 });
 
-test('discoverGated: the real repo includes the gated packages, excludes ayu, stays sorted', () => {
-  const names = discoverGated(PACKAGES_DIR).map((p) => p.name);
+test('discoverPackages: the real repo includes the gated packages, excludes ayu, stays sorted', () => {
+  const names = discoverPackages(PACKAGES_DIR).map((p) => p.name);
   assert.ok(names.includes('pi-superpowers-plus'));
   assert.ok(names.includes('pi-beads'));
   assert.ok(!names.includes('ayu'), 'ayu declares no test script');
   assert.deepEqual(names, [...names].sort());
+});
+
+// ---------- discovery: an unreadable manifest is one entry, never a thrown scan ----------
+test('discoverPackages: a malformed manifest is an errored entry, not a thrown scan', () => {
+  const dir = scratchPackages({ broken: rawManifest('{ "name": "broken", ') });
+  try {
+    const found = discoverPackages(dir);
+    assert.equal(found.length, 1);
+    assert.equal(found[0].name, 'broken');
+    assert.equal(found[0].gate, null);
+    assert.match(found[0].error, /not valid JSON/);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('discoverPackages: a malformed manifest leaves healthy neighbours unchanged', () => {
+  const dir = scratchPackages({
+    alpha: { scripts: { test: 'vitest run', typecheck: 'tsc --noEmit' } },
+    broken: rawManifest('{ "name": "broken", '),
+    zeta: { scripts: { test: 'npm test' } },
+  });
+  try {
+    const found = discoverPackages(dir);
+    assert.deepEqual(found.map((pkg) => pkg.name), ['alpha', 'broken', 'zeta']);
+    assert.deepEqual(found.map((pkg) => pkg.gate), ['npm run typecheck && npm test', null, 'npm test']);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('discoverPackages: valid JSON of the wrong shape is errored, never dropped', () => {
+  const dir = scratchPackages({
+    array: rawManifest('[]'),
+    empty: rawManifest(''),
+    nul: rawManifest('null'),
+    scalar: rawManifest('"nope"'),
+    scriptsNotObject: rawManifest('{"name":"x","scripts":"biome check ."}'),
+  });
+  try {
+    const found = discoverPackages(dir);
+    assert.deepEqual(found.map((pkg) => pkg.name), ['array', 'empty', 'nul', 'scalar', 'scriptsNotObject']);
+    assert.ok(found.every((pkg) => pkg.gate === null && typeof pkg.error === 'string'));
+    assert.match(found.find((pkg) => pkg.name === 'scriptsNotObject').error, /"scripts" is not an object/);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('discoverPackages: a no-manifest directory and an ungated package still contribute nothing', () => {
+  const dir = scratchPackages({
+    gated: { scripts: { test: 'npm test' } },
+    ungated: { scripts: { build: 'tsc' } },
+    manifestless: null,
+  });
+  try {
+    assert.deepEqual(discoverPackages(dir).map((pkg) => pkg.name), ['gated']);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
 });
 
 // ---------- planRun ----------
