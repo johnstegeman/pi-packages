@@ -228,10 +228,16 @@ payoff is context isolation as much as reach: the exploration runs in the
 child's context and only its synthesized answer returns, keeping the reviewer's
 own window tight. Nested token spend rolls into the reviewer's totals, so
 per-review cost attribution is preserved — there is no per-lookup attribution.
-Workflow children get none of this: SubagentWorkflow-spawned
-agents (`final-review.js` finders, `fix-loop.js` re-reviewers) carry no
-`nestedRuntime`, so `allowed_subagents` is inert there — only direct `Agent`
-dispatches receive nested tools (verified by code trace, l8x9.11).
+Workflow children get the same treatment: the workflow host spawns through the
+same manager a direct `Agent` dispatch uses, so a `SubagentWorkflow`-spawned
+agent whose type declares `allowed_subagents` receives the nested tools too.
+The `final-review.js` finders, the `fix-loop.js` re-reviewers and the
+`wave-parallel.js` task reviewers are all in this class — pinned by pi-subagents'
+`test/e2e/workflow.e2e.test.ts`. The difference is accounting, not capability: a
+workflow counts the agents its *script* launches, so grandchildren a child spawns
+sit outside the run's `agentCount` and its cap and do not appear in its progress
+tree. Nested spend still rolls into the child's totals, so per-review cost
+attribution is unaffected.
 
 **Fail-loud vs lenient dispatch.** With `fallbackSubagent: "none"`, the SDD agents dispatch by exact name only: `implementer`, `task-reviewer`, and `code-reviewer` resolve to the shipped templates, so a typo or an un-copied template fails loudly with the available-type list instead of silently substituting an all-tools agent. That's the point for the read-only reviewers (`code-reviewer`/`task-reviewer` carry only `read, bash, find, grep, ls`). The cost: any custom agent you add must be copied before dispatch works, and a missing template is a hard error rather than a fallback. Skip the strict setting if you prefer lenient dispatch (the pi-subagents default).
 

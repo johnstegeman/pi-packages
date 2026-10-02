@@ -32,11 +32,13 @@ Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   sets `allowed_subagents: Explore` (same bounded contract as `task-reviewer`:
   one `Explore` child per named question, folded into the verdict, `⚠️`
   fallback). The scoped re-review prompt allows the same for finding/fix-diff
-  questions. Workflow children stay inert: SubagentWorkflow-spawned agents
-  (`final-review.js` finders, `fix-loop.js` re-reviewers) carry no
-  `nestedRuntime` — verified by code trace (`agent-manager.ts:800` is the sole
-  construction site) — so the template is inert there, documented fail-closed
-  (l8x9.11). Requires re-copying `agent-templates/code-reviewer.md`.
+  questions. Workflow children behave the same way: the workflow host spawns through
+  `agent-manager.ts:800` too, so a `SubagentWorkflow`-spawned agent whose type
+  declares `allowed_subagents` does receive the nested tools — an earlier
+  revision of this entry claimed the opposite, from a code trace that read the
+  sole construction site as an unreached one. Grandchildren sit outside the run's
+  agent count, cap and progress tree; nested spend still rolls into the child's
+  totals. Pinned by pi-subagents' `test/e2e/workflow.e2e.test.ts`. Requires re-copying `agent-templates/code-reviewer.md`.
 
 ---
 
