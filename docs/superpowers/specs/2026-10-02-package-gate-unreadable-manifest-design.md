@@ -133,10 +133,12 @@ broken package correctly warns as rot instead of silencing it.
 | `--all` | summary table; errored entries are `FAIL` rows | `--- name output tail ---` blocks (the error text for errored entries) + rot warnings | 1 if any FAIL |
 | `<name>` | as `--all`, for that one package | same | 1 if that package errored or failed |
 
-The named-invocation validation loop (`package-gate.mjs:182-186`) accepts a name present in the
-inventory **or** in `skipped`, so `package-gate.mjs broken` reaches `runGate` and reports `FAIL`
-instead of today's `unknown package` → exit 2. A name in none of those is still `unknown package`
-→ exit 2.
+The named-invocation validation loop (`package-gate.mjs:182-186`) already accepts any name present
+in the inventory, so `package-gate.mjs broken` reaches `runGate`. What changes is the *quality* of
+that failure: today the whole run dies during discovery, and once the scan stops throwing but
+before `runGate` is fixed, `runGate` would pass a `null` gate to `gateSteps` and report an
+`ENOENT` tail from a bogus `null` command. After this change it reports `FAIL` with the parse
+error. A name in no part of the inventory is still `unknown package` → exit 2.
 
 ### 3. `runGate` and `summarize`
 
@@ -151,11 +153,13 @@ instead of today's `unknown package` → exit 2. A name in none of those is stil
 ### 4. Tests and RED evidence
 
 **Harness extension.** `scratchPackages`, `gatedPackages` and the process-level `scratchRepo`
-currently write `JSON.stringify(manifest)`, so no existing fixture can express a malformed file.
-Extend all three so a **string** value is written verbatim, `null` still means "no manifest", and
-anything else is `JSON.stringify`'d as today. (`scratchRepo` needs it for the process-level test
-below; it is the only helper that also writes a lockfile, which must stay absent for a broken
-package so nothing is executed.)
+currently write `JSON.stringify(...)`, so no existing fixture can express a malformed file. Add one
+shared sentinel, `rawManifest(text)` → `{ raw: text }` (with `isRaw(value)`), which each helper
+writes **verbatim**; `null` still means "no manifest at all", and anything else is stringified as
+today. A sentinel rather than a bare string, because `gatedPackages`' existing values *are* strings
+(a test-script name), so "string means raw" would collide there. `scratchRepo` and `gatedPackages`
+write **no lockfile** for a raw manifest, so a regression that let `npm ci` run would fail with
+npm's error instead of the parse error the assertions look for.
 
 **New tests, mapped to the acceptance criteria:**
 
@@ -173,9 +177,15 @@ package so nothing is executed.)
 - `main --list --json`: stdout parses as exactly `["alpha"]` — broken excluded, still valid JSON —
   stderr names the broken package, exit 1.
 - `main --all`: healthy package `PASS`, broken package `FAIL`, exit 1, error in the output tail.
-- `main broken` (named): `FAIL`, exit 1, **not** `unknown package`.
+- `main broken` (named): `FAIL`, exit 1, with the parse error in the output tail — not an
+  `ENOENT` tail from a bogus command, which is what a `null` gate reaching the runner produces.
 - Process-level (`scratchRepo` + `runCli`): a truncated manifest beside a healthy package —
   `--all` exits 1 with the healthy package still `PASS`, and `--list --json` output still parses.
+  `runCli` gains `stdout` / `stderr` fields (keeping the historical merged `out` the existing
+  assertions use), so the JSON payload is asserted independently of the stderr signal.
+- The `scratchRepo` / `gatedPackages` fixtures write **no lockfile** for a broken package, so a
+  regression that let `npm ci` run would fail with npm's error rather than the parse error the
+  assertions look for.
 
 **RED evidence is required**, following the convention set by the composition spec: the new tests
 are first run against the pre-fix `discoverGated` and shown failing with the raw `SyntaxError`
