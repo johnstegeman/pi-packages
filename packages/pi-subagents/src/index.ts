@@ -2513,6 +2513,7 @@ Terse command-style prompts produce shallow, generic work.
       const resumeFrom = resolveResumeTarget(params.resumeFromRunId, workflowTasks);
       if (resumeFrom !== undefined && !resumeFrom.ok) return textResult(resumeFrom.message);
 
+      // LOCAL PATCH (pi-packages) — see docs/pi-subagents-local-patch.md
       // Same rationale as the `meta` parse below: a malformed `args` is a
       // caller error the model can fix immediately, and reporting it as a
       // background run that failed a second later would just cost a turn.

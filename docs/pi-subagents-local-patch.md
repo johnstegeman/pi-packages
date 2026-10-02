@@ -194,10 +194,11 @@ input problem. `walk()` permitted it because it returns early for `typeof value 
 `undefined` still means "not provided". The worker's nested `workflow(nameOrRef, args)` gets the
 same rule, because a child's `args` never crosses to the host.
 
-Files: `src/workflow/runtime.ts`, `src/workflow/worker-source.ts` — every changed line is
-bracketed by the marker. Covered by `test/workflow-runtime.test.ts` (the predicate, the
-pre-worker rejection, the nested boundary) and, for the tool-level pre-flight, by
-`test/workflow-tool.test.ts`.
+Files: `src/workflow/runtime.ts`, `src/workflow/worker-source.ts`, `src/index.ts` — every
+changed line is bracketed by the marker. The `src/index.ts` hunk is the tool-level pre-flight
+that reports the same error synchronously, before a run is created. Covered by
+`test/workflow-runtime.test.ts` (the predicate, the pre-worker rejection, the nested boundary)
+and, for the tool-level pre-flight, by `test/workflow-tool.test.ts`.
 
 ## In-code marker convention
 

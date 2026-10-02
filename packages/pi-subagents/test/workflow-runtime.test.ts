@@ -1208,14 +1208,25 @@ describe("nested workflow()", () => {
     expect(JSON.parse(result.value as string)).toEqual([7, "audit"]);
   });
 
-  it("rejects a scalar args at the nested boundary, naming the child", async () => {
-    const stub = nestingHost({ audit: child("audit", "return args;") });
-    const result = await run("return await workflow('audit', 'plain string');", { host: stub.host });
+  it("rejects every scalar at the nested boundary, naming the child", async () => {
+    const cases: [string, string][] = [
+      ["'plain string'", "not string"],
+      ["null", "not null"],
+      ["7", "not number"],
+      ["true", "not boolean"],
+    ];
+    for (const [literal, expected] of cases) {
+      const stub = nestingHost({ audit: child("audit", "return args;") });
+      const result = await run(`return await workflow('audit', ${literal});`, { host: stub.host });
 
-    expect(result.status).toBe("failed");
-    expect(result.error).toContain(
-      'workflow("audit") args must be an object or an array, not string',
-    );
+      expect(result.status).toBe("failed");
+      expect(result.error).toContain(
+        `workflow("audit") args must be an object or an array, ${expected}`,
+      );
+      if (expected === "not string") {
+        expect(result.error).toContain("Pass the value itself, not a JSON-encoded string.");
+      }
+    }
   });
 
   it("shares the parent's agent counter, so ids never collide", async () => {
