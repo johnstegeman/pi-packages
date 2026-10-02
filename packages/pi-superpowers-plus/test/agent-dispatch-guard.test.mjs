@@ -101,7 +101,7 @@ test("the SDD task-reviewer prompt references the nested-lookup path", () => {
   assert.match(src, /nested `Explore` child/i, "task-reviewer-prompt.md must document the nested Explore lookup");
   assert.match(
     src,
-    /nested `Agent` tool is available, report the item as `⚠️`/,
+    /nested `Agent` tool is available,\s+report the item as `⚠️`/,
     "task-reviewer-prompt.md must keep the graceful-degradation fallback",
   );
 });
@@ -135,7 +135,7 @@ test("final-review refuters dispatch the read-only verifier type", () => {
   );
 });
 
-test("nested-lookup claim is conditional on direct dispatch in all four files", () => {
+test("nested-lookup guidance is stated in all four files", () => {
   const files = [
     join(root, "agent-templates", "task-reviewer.md"),
     join(root, "agent-templates", "code-reviewer.md"),
@@ -147,8 +147,12 @@ test("nested-lookup claim is conditional on direct dispatch in all four files", 
     assert.match(src, /nested `Explore` child/i, `${f} must keep the Explore capability`);
     assert.match(
       src,
-      /Under `SubagentWorkflow` the nested `Agent` tool is not available/,
-      `${f} must state the SubagentWorkflow caveat`,
+      /Under `SubagentWorkflow` settle the question yourself/,
+      `${f} must keep the workflow-path guidance`,
+    );
+    assert.ok(
+      !src.includes("the nested `Agent` tool is not available"),
+      `${f} must not claim the nested Agent tool is unavailable under SubagentWorkflow`,
     );
   }
 });

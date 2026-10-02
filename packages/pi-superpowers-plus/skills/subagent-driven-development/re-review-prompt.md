@@ -63,10 +63,10 @@ Dispatch a subagent with this prompt:
     crawling. Treat the child's answer as an unverified claim: the evidence
     weight of a folded verdict rests on your own corroborating reading of the
     diff and code, not the child's word alone.
-    Under `SubagentWorkflow` the nested `Agent` tool is not available — the workflow path
-    exposes no nested delegation; do not attempt it there. If no nested `Agent` tool is available
-    to you, verdict from the diff alone; unresolved items stay
-    `NOT ADDRESSED` / `⚠️` as today.
+    Under `SubagentWorkflow` settle the question yourself: the run does not surface a child's
+    grandchildren in its progress tree or its agent count, so a lookup there is invisible to
+    the run's accounting. If no nested `Agent` tool is available to you, verdict from the diff
+    alone; unresolved items stay `NOT ADDRESSED` / `⚠️` as today.
 
     ## Tests
 

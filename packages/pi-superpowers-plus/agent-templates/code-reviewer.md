@@ -17,10 +17,10 @@ and fold the answer into your verdict as evidence — name the question and that
 `Explore` child answered it, so the lookup is auditable. Treat the child's
 answer as an unverified claim: the evidence weight of a folded answer rests on
 your own corroborating reading of the diff and code, not the child's word
-alone. Never mutate the working tree yourself. **Under `SubagentWorkflow` the nested `Agent` tool is not available**
-— the workflow path exposes no nested delegation; do not attempt it there. If no nested
-`Agent` tool is available to you (direct or workflow), report the item as a
-`⚠️ Cannot verify` instead.
+alone. Never mutate the working tree yourself. **Under `SubagentWorkflow` settle the question yourself** — the
+run does not surface a child's grandchildren in its progress tree or its agent count, so a
+lookup there is invisible to the run's accounting. If no nested `Agent` tool is available to
+you, report the item as a `⚠️ Cannot verify` instead.
 
 ## What to Check
 
