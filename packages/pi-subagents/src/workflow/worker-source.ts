@@ -644,7 +644,22 @@ async function workflowIn(scope, nameOrRef, args) {
   }
 
   const label = ref.name !== undefined ? ref.name : ref.scriptPath;
-  if (args !== undefined) checkBoundary(args, 'workflow("' + label + '") args');
+  // LOCAL PATCH (pi-packages) — see docs/pi-subagents-local-patch.md
+  // Top-level args is checked host-side, before this worker exists
+  // (assertWorkflowArgs in runtime.ts). A child's args never crosses to the
+  // host, so the same shape rule has to live here.
+  if (args !== undefined) {
+    if (args === null || typeof args !== "object") {
+      const argsKind = args === null ? "null" : typeof args;
+      throw new Error(
+        'workflow("' + label + '") args must be an object or an array, not ' +
+          argsKind +
+          "." +
+          (argsKind === "string" ? " Pass the value itself, not a JSON-encoded string." : "")
+      );
+    }
+    checkBoundary(args, 'workflow("' + label + '") args');
+  }
 
   if (nestedCount >= workerData.nestedCap) {
     // Fatal, like the agent cap: a limit that silently drops work would be

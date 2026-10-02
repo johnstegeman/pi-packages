@@ -181,6 +181,24 @@ writes) and `test/e2e/mention-clone-seeding.e2e.test.ts` (a real `AgentSession`
 driven through a faux provider, asserting on the transcript the provider was
 actually handed).
 
+## Divergence 6 — the workflow `args` shape guard (`pi-packages-x33o`)
+
+Upstream accepts any JSON value as a workflow's top-level `args`, a bare string included. A
+caller that passes `args: '{"base":"c311606"}'` gets a string inside the realm, every `args.x`
+is `undefined`, and the run dies at the return marshal with *"Cannot pass undefined across the
+workflow VM boundary (at the workflow result.base)"* — an error that blames the result for an
+input problem. `walk()` permitted it because it returns early for `typeof value === "string"`.
+
+`assertWorkflowArgs` (`src/workflow/runtime.ts`, called from `runWorkflow` immediately before
+`assertBoundarySafe`) rejects anything whose `typeof` is not `"object"`, plus `null`;
+`undefined` still means "not provided". The worker's nested `workflow(nameOrRef, args)` gets the
+same rule, because a child's `args` never crosses to the host.
+
+Files: `src/workflow/runtime.ts`, `src/workflow/worker-source.ts` — every changed line is
+bracketed by the marker. Covered by `test/workflow-runtime.test.ts` (the predicate, the
+pre-worker rejection, the nested boundary) and, for the tool-level pre-flight, by
+`test/workflow-tool.test.ts`.
+
 ## In-code marker convention
 
 Divergence 3 — the code-mode exposure/namespace/outputSchema changes from Task 6 — and
