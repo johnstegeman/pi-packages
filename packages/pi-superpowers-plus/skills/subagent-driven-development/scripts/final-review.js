@@ -169,6 +169,8 @@ const refutation = (f, i) => {
     '',
     'Try to REFUTE it: read the review package at ' + ARGS.packagePath + ' and check whether the finding actually holds against the diff. Default to refuted unless the finding clearly holds. Your reason must name the specific code it does or does not apply to.',
     '',
+    'The phrasings listed between the DATA markers describe one item at one location; your verdict covers them jointly, and if they differ materially your reason must name which phrasing fails.',
+    '',
     'Return the schema object: isReal (false = refuted), reason (your judgment).',
   ]
   return lines.join('\n')

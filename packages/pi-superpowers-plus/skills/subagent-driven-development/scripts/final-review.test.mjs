@@ -415,6 +415,16 @@ test("refutation: the extra phrasings ride inside the DATA boundary", () => {
   assert.ok(begin < extras && extras < end, 'alsoDescribed must sit between the DATA markers')
 })
 
+test('refutation: split-verdict rule is instruction text, outside the DATA block', () => {
+  const body = src.slice(src.indexOf('const refutation'), src.indexOf('const verdictShape'))
+  const begin = body.indexOf('BEGIN VERIFIED FINDING DATA')
+  const end = body.indexOf('END VERIFIED FINDING DATA')
+  const rule = body.indexOf('your verdict covers them jointly')
+  assert.ok(begin !== -1 && end !== -1 && rule !== -1, 'all three markers present')
+  assert.ok(rule > end, 'the split-verdict rule must be instruction text, not DATA')
+  assert.match(body, /if they differ materially your reason must name which phrasing fails\./)
+})
+
 // The line-less branch of dedupeKey keeps the description in the key precisely so a
 // file carrying several line-less findings does not fold them into one row. That
 // non-collapse is a behavior, not a shape: pin it through the harness so a future
