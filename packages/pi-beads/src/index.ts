@@ -1480,29 +1480,6 @@ export default function piBeadsLean(pi: any) {
     },
   });
 
-  /**
-   * After closing childId, decide whether its parent step should close too.
-   * Returns the parent's id to close, or null. Rules: parent must be a task step
-   * (never molecule root, never a gate); it closes only when no open task-child
-   * remains (the just-closed child excluded). Walks one level per call.
-   */
-  async function parentStepToClose(childId: string, repoDir: string): Promise<string | null> {
-    const r = await bd(["dep", "list", childId, "--direction", "down", "--json"], repoDir);
-    const blockers = Array.isArray(jparse(r.out)) ? (jparse(r.out) as any[]) : [];
-    const parent = blockers.find(
-      (b: any) =>
-        b && b.dependency_type === "parent-child" && b.issue_type === "task" && b.status !== "closed",
-    );
-    if (!parent) return null;
-    const k = await bd(["dep", "list", String(parent.id), "--direction", "up", "--json"], repoDir);
-    const children = Array.isArray(jparse(k.out)) ? (jparse(k.out) as any[]) : [];
-    const openTaskChildren = children.filter(
-      (c: any) =>
-        c && c.dependency_type === "parent-child" && c.issue_type === "task" && c.status !== "closed" && c.id !== childId,
-    );
-    return openTaskChildren.length === 0 ? String(parent.id) : null;
-  }
-
   registerTool({
     name: TOOL.close,
     ...beadsExposure(TOOL.close),
@@ -1562,31 +1539,6 @@ export default function piBeadsLean(pi: any) {
         }
         changed = true;
         closedIds.push(...rids);
-        // cascade: closing a task may close its parent step once no open task-children remain
-        for (const cid of rids) {
-          let nxt = await parentStepToClose(cid, dir);
-          while (nxt) {
-            const rc = await bd(["close", nxt], dir);
-            if (!rc.ok) {
-              // A concurrent worker may have closed the parent already; that is
-              // success, not an error. Probe only on failure to keep the happy path
-              // free of extra bd calls.
-              if (/already closed/i.test(rc.err)) break;
-              const st = await bd(["show", nxt, "--json"], dir);
-              const so = jparse(st.out);
-              const sarr = Array.isArray(so) ? so : Array.isArray((so as any)?.issues) ? (so as any).issues : [];
-              const sIssue = sarr.find((x: any) => x && String(x.id) === nxt) ?? sarr[0];
-              if (sIssue && String(sIssue.status) === "closed") break;
-              const msg = `parent cascade: ${nxt} not closed: ${errText(rc)}`;
-              failure = failure ? `${failure}; ${msg}` : msg;
-              break;
-            }
-            changed = true;
-            closedIds.push(nxt);
-            const prev = nxt;
-            nxt = await parentStepToClose(prev, dir);
-          }
-        }
         if (claimNext) {
           const rr = await bd(["ready", "--json", "--include-ephemeral", "-n", "50"], dir);
           if (!rr.ok) {
