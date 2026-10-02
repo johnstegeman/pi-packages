@@ -205,7 +205,7 @@ one reported *only* by `correctness` (the stale design-spec-section analogue) an
 | merged minors carry the union of `dimensions` and `alsoDescribed` holding the other phrasings | §1 |
 | the `correctness`-only finding survives with its canned verdict | AC#4 (dimension independence) |
 | `dimensions: ['correctness','plan','maintainability']` → `finderCalls === 3`, and `finders + refuters + writer === 12` | AC#1 |
-| the writer heredoc still carries **5 raw `find` lines** with all **23** raw reports (21 restatements + 2 genuine), and **8 `verify` lines** | AC#4 (boundary) |
+| the writer heredoc still carries **3 raw `find` lines** with all **15** raw reports of those three lenses (13 restatements + 2 genuine), and **8 `verify` lines** | AC#4 (boundary) |
 | in a separate variant, 4 line-less summary lines stay 4 rows, not 1 | §1 (line-less key), §8 residual |
 
 The existing behavior tests stay as-is and keep passing. The current populated-run fixture
@@ -231,6 +231,10 @@ not absorbed by a coarser key (they become 4 rows → 16 agents). They are a fin
 artifact caused by the same root cause, and rule 1 plus the `dimensions` rule are what
 remove them. The fixture pins their non-collapse so the behavior is tested rather than
 hoped for.
+Confirmed on the change's own final review (2026-10-01, `afb01f9`): one documentation defect was
+verified three times because one lens reported `line: 4` and two reported no line — a lined finding
+and a line-less one cannot merge, and roughly 4 of that run's 18 agents went to the three line-less
+duplicates.
 
 ## 9. Acceptance criteria mapping
 

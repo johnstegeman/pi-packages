@@ -1,6 +1,6 @@
 # Final review: workflow path, args, and findings audit
 
-- **Workflow path** (preferred when `SubagentWorkflow` is present and the branch is large or broad — multi-file, many commits, security-sensitive): invoke the skill's final-review workflow: Deferred minors are never a reason to take this path — the controller triages them (rule 1 below).
+- **Workflow path** (preferred when `SubagentWorkflow` is present and the branch is large or broad — multi-file, many commits, security-sensitive): invoke the skill's final-review workflow:
 
       SubagentWorkflow({
         scriptPath: "<skill-scripts-dir>/final-review.js", // the dir containing this skill's scripts/ (e.g. packages/pi-superpowers-plus/skills/subagent-driven-development/scripts/)
@@ -10,14 +10,20 @@
           head: "<HEAD>",
           description: "<what was implemented — one paragraph from the After-All-Tasks summary>",
           gateBeadId: "<plan-approval-gate-bead-id>",
+          dimensions: ["<optional — the lenses to run; see rule 2>"], // optional: omit for all five; scale to the diff
           findingsFile: "<sdd-workspace>/final-review-<run-id>.jsonl", // absolute path, git-ignored — keeps the run's return envelope compact
         },
       })
 
+  Deferred minors are never a reason to take this path — the controller triages them (rule 1 below).
+
   It runs in the background — wait for the completion notification. Pass `findingsFile` (a FRESH absolute path to a JSONL under the git-ignored sdd workspace — the children append to it, so a stale file for the same range from an earlier run would otherwise merge into the new run) so the workflow persists its findings instead of returning them inline: the run's return value is then the compact envelope `{ findingsFile, count, degraded, dimStatus, refuted, persisted }` (`persisted` tells whether the writer child reported writing the file — the audit below is the real check), and the full per-finding payload is read from the JSONL file — find lines carry `kind: "find"` with the dimension on the line itself (`dimension: <DIM>`) and the schema-validated findings array (each finding item carries `file`, optional `line`, `severity`, `description` — the dimension does not ride per item); verify lines carry `kind: "verify"` with the copied fields `file`, `line`, `severity`, `description` plus the adversarial `verdict { isReal, reason }`. Join verify lines to findings by `file:line` — the script's key is the location; a finding
 with no `line` keeps `file` plus its normalized description. A verify line may carry
 `alsoDescribed`: the other phrasings of the same location, which the refuter judged as one
-item. Findings with `isReal: false` are refuted — not open — unless the refutation's reason is contestable, in which case re-adjudicate it yourself (never silently drop). If the envelope reports `degraded` — set whenever any dimension finder fails (partial or total, e.g. `degraded: "N of M dimension finders failed"`) — or the run errors (or `findingsFile` lines are missing), fall back to the single-reviewer path. When `count === 0` no file is written for a clean run — accept `{ count: 0, degraded: null }` as clean, without file audit and without fallback (the audit applies only when `count > 0`). When `count > 0`, verify the audit trail before adjudicating: `node -e "const fs=require('fs');for(const l of fs.readFileSync(process.argv[1],'utf8').trim().split('\n'))JSON.parse(l);console.log('ok '+process.argv[1])" <findingsFile>` must print ok (every line valid JSON); if it fails, or the line count is less than `count`, treat the run as degraded and fall back to the single-reviewer path.
+item. A verify line's verdict covers every phrasing at that location. If one phrasing fails
+while another holds, the refutation's `reason` must say which — that is a split verdict, and
+the controller re-adjudicates it rather than dropping the finding.
+Findings with `isReal: false` are refuted — not open — unless the refutation's reason is contestable, in which case re-adjudicate it yourself (never silently drop). If the envelope reports `degraded` — set whenever any dimension finder fails (partial or total, e.g. `degraded: "N of M dimension finders failed"`) — or the run errors (or `findingsFile` lines are missing), fall back to the single-reviewer path. When `count === 0` no file is written for a clean run — accept `{ count: 0, degraded: null }` as clean, without file audit and without fallback (the audit applies only when `count > 0`). When `count > 0`, verify the audit trail before adjudicating: `node -e "const fs=require('fs');for(const l of fs.readFileSync(process.argv[1],'utf8').trim().split('\n'))JSON.parse(l);console.log('ok '+process.argv[1])" <findingsFile>` must print ok (every line valid JSON); if it fails, or the line count is less than `count`, treat the run as degraded and fall back to the single-reviewer path.
 
 ## Two caller-side rules (measured: getting them wrong cost 33 agents)
 

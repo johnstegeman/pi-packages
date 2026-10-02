@@ -283,6 +283,7 @@ test("behavior: file-mode envelope is compact + writer prompt carries machine-bu
   for (const line of lines) {
     const obj = JSON.parse(line) // every machine-built line must be valid JSON
     assert.ok(obj.kind === 'find' || obj.kind === 'verify', 'kind must be find|verify');
+    if (obj.kind === 'verify') assert.ok(!('alsoDescribed' in obj), 'a single-phrasing row must not carry alsoDescribed on disk')
     if (obj.kind === 'find') { finds++; assert.ok(Array.isArray(obj.findings)); }
     if (obj.kind === 'verify') { verifies++; assert.ok(obj.verdict && typeof obj.verdict.isReal === 'boolean'); }
   }
@@ -480,6 +481,33 @@ test("behavior: a repeated phrasing appears exactly once in alsoDescribed", asyn
   assert.ok(row, 'the repeated location merged into one row')
   assert.equal(result.findings.length, 1)
   assert.deepEqual([...row.alsoDescribed], ['phrasing B'], 'the repeated phrasing appears exactly once')
+})
+
+test("merge: a severity flip keeps the losing phrasing in alsoDescribed", async () => {
+  const agent = async (prompt, callOpts) => {
+    const label = callOpts?.label ?? ''
+    if (label.startsWith('find:')) {
+      const d = label.slice('find:'.length)
+      if (d === 'correctness') {
+        return { findings: [{ file: 'src/a.js', line: 10, severity: 'minor', description: 'phrasing A' }] }
+      }
+      if (d === 'security') {
+        return { findings: [{ file: 'src/a.js', line: 10, severity: 'critical', description: 'phrasing B' }] }
+      }
+      return { findings: [] }
+    }
+    if (label === 'writer') return 'wrote 2 lines'
+    return { isReal: true, reason: 'holds' }
+  }
+  const result = await runWorkflow(src, {
+    args: { base: 'a', head: 'b', packagePath: '/x', description: 'd', gateBeadId: 'g' },
+    agent,
+  })
+  const row = result.findings.find((f) => f.file === 'src/a.js')
+  assert.equal(result.findings.length, 1)
+  assert.equal(row.severity, 'critical', 'the higher severity wins')
+  assert.equal(row.description, 'phrasing B', 'the winning phrasing becomes the primary')
+  assert.deepEqual([...row.alsoDescribed], ['phrasing A'], 'the losing phrasing survives the flip')
 })
 
 run();
