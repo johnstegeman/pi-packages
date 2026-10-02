@@ -66,9 +66,40 @@ export function selectGate(scripts) {
   return steps.join(' && ');
 }
 
-// Auto-discovery: a package is gated iff it declares a non-empty `test` script, so the
-// list cannot drift from reality and no package can be dropped by forgetting to edit it.
-export function discoverGated(packagesDir = PACKAGES_DIR) {
+// Auto-discovery: the inventory of every directory under packages/ that declares a manifest.
+// A gated package contributes `{ name, dir, gate }`; a package whose manifest cannot be read,
+// parsed, or shaped into a `scripts` object contributes `{ name, dir, gate: null, error }` and
+// fails on its own — one unreadable manifest never aborts the scan and is never silently omitted.
+// Ungated packages and directories with no manifest contribute nothing.
+const oneLine = (text) => String(text).replace(/\s+/g, ' ').trim();
+
+// Read and parse one manifest, or throw a normalized, single-line Error. The shape check covers
+// only the two container levels: `isGated` already treats a non-string `test` as ungated, so
+// `{ scripts: { test: 42 } }` is legitimately an ungated package, not an unreadable manifest.
+function readManifest(dir) {
+  let text;
+  try {
+    text = readFileSync(join(dir, 'package.json'), 'utf8');
+  } catch (err) {
+    throw new Error(`cannot read package.json: ${oneLine(err.message)}`);
+  }
+  let parsed;
+  try {
+    parsed = JSON.parse(text);
+  } catch (err) {
+    throw new Error(`package.json is not valid JSON: ${oneLine(err.message)}`);
+  }
+  if (parsed === null || typeof parsed !== 'object' || Array.isArray(parsed)) {
+    throw new Error('package.json is not an object');
+  }
+  const { scripts } = parsed;
+  if (scripts !== undefined && (scripts === null || typeof scripts !== 'object' || Array.isArray(scripts))) {
+    throw new Error('package.json "scripts" is not an object');
+  }
+  return scripts;
+}
+
+export function discoverPackages(packagesDir = PACKAGES_DIR) {
   if (!existsSync(packagesDir)) return [];
   return readdirSync(packagesDir, { withFileTypes: true })
     .filter((entry) => entry.isDirectory())
@@ -76,34 +107,42 @@ export function discoverGated(packagesDir = PACKAGES_DIR) {
     .sort()
     .flatMap((name) => {
       const dir = join(packagesDir, name);
-      const manifest = join(dir, 'package.json');
-      if (!existsSync(manifest)) return [];
-      const scripts = JSON.parse(readFileSync(manifest, 'utf8')).scripts;
-      return isGated(scripts) ? [{ name, dir, gate: selectGate(scripts) }] : [];
+      if (!existsSync(join(dir, 'package.json'))) return [];
+      try {
+        const scripts = readManifest(dir);
+        return isGated(scripts) ? [{ name, dir, gate: selectGate(scripts) }] : [];
+      } catch (err) {
+        return [{ name, dir, gate: null, error: oneLine(err.message) }];
+      }
     });
 }
 
-// Split the inventory into what will run and what is quarantined, and flag quarantine
-// entries that no longer name a gated package.
-export function planRun(gated, quarantined = QUARANTINED) {
+// Split the inventory into what will run, what is quarantined, and what could not be read, and
+// flag quarantine entries that no longer name a gated package. An unreadable manifest is never
+// quarantinable: it is always reported as a failure, and it never counts as a gated package for
+// rot detection, so quarantining one warns instead of silencing it.
+export function planRun(inventory, quarantined = QUARANTINED) {
   const runnable = [];
   const skipped = [];
-  for (const pkg of gated) {
-    if (Object.hasOwn(quarantined, pkg.name)) skipped.push({ name: pkg.name, reason: quarantined[pkg.name] });
+  const errored = [];
+  for (const pkg of inventory) {
+    if (pkg.gate === null) errored.push({ name: pkg.name, error: pkg.error });
+    else if (Object.hasOwn(quarantined, pkg.name)) skipped.push({ name: pkg.name, reason: quarantined[pkg.name] });
     else runnable.push(pkg.name);
   }
-  const names = new Set(gated.map((pkg) => pkg.name));
+  const names = new Set(inventory.filter((pkg) => pkg.gate !== null).map((pkg) => pkg.name));
   const rotWarnings = Object.keys(quarantined)
     .filter((name) => !names.has(name))
     .map((name) => `${name} is quarantined but is not a gated package; remove the entry.`);
-  return { runnable, skipped, rotWarnings };
+  return { runnable, skipped, errored, rotWarnings };
 }
 
 // Render the always-printed summary table. `failed` drives the process exit code.
 export function summarize(results) {
   const lines = results.map((result) => {
     const status = String(result.status).padEnd(7);
-    const detail = result.status === 'SKIPPED' ? (result.reason ?? '') : (result.gate ?? '');
+    // A FAIL row with no gate is an unreadable manifest: show its error instead of an empty column.
+    const detail = result.status === 'SKIPPED' ? (result.reason ?? '') : (result.gate ?? result.error ?? '');
     const ms = typeof result.ms === 'number' ? `${Math.round(result.ms)}ms` : '';
     return `${status} ${String(result.name).padEnd(20)} ${ms.padStart(8)}  ${detail}`.trimEnd();
   });
@@ -130,11 +169,16 @@ function tail(text) {
 // failure with its output tail attached — an install failure is never a skip.
 export function runGate(name, { packagesDir = PACKAGES_DIR } = {}) {
   const dir = join(packagesDir, name);
-  const gated = discoverGated(packagesDir).find((pkg) => pkg.name === name);
-  if (!gated) {
+  const found = discoverPackages(packagesDir).find((pkg) => pkg.name === name);
+  if (!found) {
     return { name, status: 'FAIL', gate: null, ms: 0, output: `no gate for package: ${name}` };
   }
-  const gate = gated.gate;
+  if (found.gate === null) {
+    // An unreadable manifest is a failure with nothing executed: never a false PASS, never a crash,
+    // and never an npm invocation with a null gate.
+    return { name, status: 'FAIL', gate: null, ms: 0, output: found.error };
+  }
+  const gate = found.gate;
   const started = Date.now();
   const steps = [
     ['npm', ['ci', '--no-audit', '--no-fund']],
@@ -159,19 +203,26 @@ export function runGate(name, { packagesDir = PACKAGES_DIR } = {}) {
 export function main(argv, { out = console.log, err = console.error, packagesDir = PACKAGES_DIR, quarantined = QUARANTINED } = {}) {
   const flags = new Set(argv.filter((arg) => arg.startsWith('--')));
   const names = argv.filter((arg) => !arg.startsWith('--'));
-  const gated = discoverGated(packagesDir);
-  const { runnable, skipped, rotWarnings } = planRun(gated, quarantined);
+  const inventory = discoverPackages(packagesDir);
+  const { runnable, skipped, errored, rotWarnings } = planRun(inventory, quarantined);
   const isSkipped = (name) => skipped.some((entry) => entry.name === name);
+  const errorOf = (name) => errored.find((entry) => entry.name === name)?.error;
 
   if (flags.has('--list')) {
-    if (flags.has('--json')) out(JSON.stringify(runnable));
-    else
-      for (const pkg of gated) {
+    if (flags.has('--json')) {
+      // CI's gates-list job feeds this straight to fromJSON(), so it stays a bare array; the broken
+      // package is signalled on stderr and through the exit code instead.
+      out(JSON.stringify(runnable));
+      for (const entry of errored) err(`FAIL ${entry.name}  ${entry.error}`);
+    } else {
+      for (const pkg of inventory) {
         const skip = skipped.find((entry) => entry.name === pkg.name);
-        out(skip ? `SKIPPED ${pkg.name}  ${skip.reason}` : `${pkg.name}  ${pkg.gate}`);
+        if (pkg.gate === null) out(`FAIL ${pkg.name}  ${pkg.error}`);
+        else out(skip ? `SKIPPED ${pkg.name}  ${skip.reason}` : `${pkg.name}  ${pkg.gate}`);
       }
+    }
     for (const warning of rotWarnings) err(`WARNING: ${warning}`);
-    return 0;
+    return errored.length > 0 ? 1 : 0;
   }
 
   const all = flags.has('--all');
@@ -180,18 +231,19 @@ export function main(argv, { out = console.log, err = console.error, packagesDir
     return 2;
   }
   for (const name of names) {
-    if (gated.some((pkg) => pkg.name === name) || isSkipped(name)) continue;
+    if (inventory.some((pkg) => pkg.name === name) || isSkipped(name)) continue;
     err(`unknown package: ${name}`);
     return 2;
   }
 
-  const targets = all ? runnable : names;
-  const results = targets.map((name) =>
-    isSkipped(name)
-      ? { name, status: 'SKIPPED', reason: skipped.find((entry) => entry.name === name).reason }
-      : runGate(name, { packagesDir }),
-  );
-  if (all) for (const entry of skipped) results.push({ name: entry.name, status: 'SKIPPED', reason: entry.reason });
+  const order = all ? inventory.map((pkg) => pkg.name) : names;
+  const results = order.map((name) => {
+    const error = errorOf(name);
+    // `error` feeds the summary table's detail column; `output` feeds the tail block below.
+    if (error !== undefined) return { name, status: 'FAIL', gate: null, ms: 0, error, output: error };
+    if (isSkipped(name)) return { name, status: 'SKIPPED', reason: skipped.find((entry) => entry.name === name).reason };
+    return runGate(name, { packagesDir });
+  });
 
   const { lines, failed } = summarize(results);
   for (const line of lines) out(line);
