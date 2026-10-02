@@ -316,6 +316,30 @@ const GATED = [
   { name: 'beta', dir: '/x/beta', gate: 'npm test' },
 ];
 
+// An inventory entry whose manifest could not be read: no gate, an error instead.
+const INVENTORY = [
+  { name: 'alpha', dir: '/x/alpha', gate: 'npm test' },
+  { name: 'beta', dir: '/x/beta', gate: 'npm test' },
+  { name: 'broken', dir: '/x/broken', gate: null, error: 'package.json is not valid JSON: nope' },
+];
+
+test('planRun: an unreadable manifest is errored, never runnable, even when quarantined', () => {
+  const plan = planRun(INVENTORY, { broken: 'silence it - bead: pi-packages-zzz' });
+  assert.deepEqual(plan.runnable, ['alpha', 'beta']);
+  assert.deepEqual(plan.skipped, []);
+  assert.deepEqual(plan.errored, [{ name: 'broken', error: 'package.json is not valid JSON: nope' }]);
+  assert.equal(plan.rotWarnings.length, 1);
+  assert.match(plan.rotWarnings[0], /broken is quarantined but is not a gated package/);
+});
+
+test('planRun: a broken manifest alone leaves the other buckets empty, not undefined', () => {
+  const plan = planRun([INVENTORY[2]], {});
+  assert.deepEqual(plan.runnable, []);
+  assert.deepEqual(plan.skipped, []);
+  assert.deepEqual(plan.rotWarnings, []);
+  assert.deepEqual(plan.errored, [{ name: 'broken', error: 'package.json is not valid JSON: nope' }]);
+});
+
 test('planRun: splits runnable from skipped and flags quarantine rot', () => {
   const plan = planRun(GATED, { beta: 'known red - bead: pi-packages-zzz', ghost: 'stale - bead: pi-packages-yyy' });
   assert.deepEqual(plan.runnable, ['alpha']);
@@ -351,6 +375,17 @@ test('summarize: a clean run is all-pass with failed = 0', () => {
   assert.equal(failed, 0);
 });
 
+test('summarize: an errored FAIL row renders its error and counts as failed', () => {
+  const { lines, failed } = summarize([
+    { name: 'alpha', status: 'PASS', gate: 'npm test', ms: 12 },
+    { name: 'broken', status: 'FAIL', gate: null, ms: 0, error: 'package.json is not valid JSON: nope' },
+  ]);
+  assert.equal(failed, 1);
+  assert.equal(lines.length, 2);
+  assert.match(lines[1], /^FAIL\s+broken\b/);
+  assert.ok(lines[1].includes('package.json is not valid JSON: nope'), lines[1]);
+});
+
 
 // ---------- process-level: the real script executed in a scratch repo ----------
 // House pattern (see check-deps-mirror.test.mjs): the script resolves the repo root from
@@ -371,6 +406,12 @@ function scratchRepo(pkgs) {
   for (const [name, testScript] of Object.entries(pkgs)) {
     const pkgDir = join(dir, 'packages', name);
     mkdirSync(pkgDir, { recursive: true });
+    if (isRaw(testScript)) {
+      // No lockfile on purpose: if anything executed this package, npm would fail with a different
+      // error than the parse error the tests assert on.
+      writeFileSync(join(pkgDir, 'package.json'), testScript.raw);
+      continue;
+    }
     if (testScript === null) {
       writeFileSync(join(pkgDir, 'package.json'), JSON.stringify({ name, version: '1.0.0' }));
       continue;
@@ -385,15 +426,19 @@ function scratchRepo(pkgs) {
 }
 
 function runCli(dir, args) {
-  let out = '';
+  let stdout = '';
+  let stderr = '';
   let code = 0;
   try {
-    out = execFileSync('node', ['scripts/ci/package-gate.mjs', ...args], { cwd: dir, encoding: 'utf8' });
+    stdout = execFileSync('node', ['scripts/ci/package-gate.mjs', ...args], { cwd: dir, encoding: 'utf8' });
   } catch (err) {
     code = err.status ?? 1;
-    out = `${err.stdout ?? ''}\n${err.stderr ?? ''}`;
+    stdout = err.stdout ?? '';
+    stderr = err.stderr ?? '';
   }
-  return { code, out };
+  // `out` keeps the merged view the existing assertions were written against; `stdout` and `stderr`
+  // are separate so a JSON payload can be parsed independently of the stderr signal.
+  return { code, out: `${stdout}\n${stderr}`, stdout, stderr };
 }
 
 test('cli --all: a passing package exits 0 and prints PASS', () => {
@@ -488,7 +533,16 @@ function gatedPackages(pkgs) {
   for (const [name, testScript] of Object.entries(pkgs)) {
     const pkgDir = join(dir, name);
     mkdirSync(pkgDir, { recursive: true });
-    writeFileSync(join(pkgDir, 'package.json'), JSON.stringify({ name, version: '1.0.0', scripts: { test: testScript } }));
+    if (isRaw(testScript)) {
+      // No lockfile on purpose: if anything executed this package, npm would fail with a different
+      // error than the parse error the tests assert on.
+      writeFileSync(join(pkgDir, 'package.json'), testScript.raw);
+      continue;
+    }
+    writeFileSync(
+      join(pkgDir, 'package.json'),
+      JSON.stringify({ name, version: '1.0.0', scripts: { test: testScript } }),
+    );
     writeFileSync(join(pkgDir, 'package-lock.json'), minimalLock(name));
   }
   return dir;
@@ -561,6 +615,113 @@ test('main: a stale quarantine key names no gated package and produces a rot WAR
     assert.equal(code, 0);
     assert.ok(cap.err.some((line) => /^WARNING:.*ghost/.test(line)), cap.err.join('\n'));
     assert.equal(cap.out.length, 1, 'the healthy package is still listed');
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+// ---------- an unreadable manifest is a FAIL in every mode ----------
+const BROKEN = rawManifest('{ "name": "broken", ');
+
+test('runGate: a broken manifest fails without executing anything', () => {
+  const dir = scratchPackages({ broken: BROKEN });
+  try {
+    const result = runGate('broken', { packagesDir: dir });
+    assert.equal(result.status, 'FAIL');
+    assert.equal(result.gate, null);
+    assert.match(result.output, /not valid JSON/);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('main --list: an unreadable manifest is a FAIL line naming the error, exit 1', () => {
+  const dir = gatedPackages({ alpha: 'node -e "process.exit(0)"', broken: BROKEN });
+  const cap = capture();
+  try {
+    const code = main(['--list'], { out: cap.outFn, err: cap.errFn, packagesDir: dir });
+    assert.equal(code, 1);
+    assert.ok(cap.out.some((line) => /^alpha\s+npm test$/.test(line)), cap.out.join('\n'));
+    assert.ok(
+      cap.out.some((line) => /^FAIL broken\s+package\.json is not valid JSON/.test(line)),
+      cap.out.join('\n'),
+    );
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('main --list --json: the broken package is on stderr and the payload stays a bare array', () => {
+  const dir = gatedPackages({ alpha: 'node -e "process.exit(0)"', broken: BROKEN });
+  const cap = capture();
+  try {
+    const code = main(['--list', '--json'], { out: cap.outFn, err: cap.errFn, packagesDir: dir });
+    assert.equal(code, 1);
+    assert.deepEqual(JSON.parse(cap.out[0]), ['alpha']);
+    assert.ok(
+      cap.err.some((line) => /^FAIL broken\s+package\.json is not valid JSON/.test(line)),
+      cap.err.join('\n'),
+    );
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('main --all: the broken package is a FAIL row and the healthy package still runs', () => {
+  const dir = gatedPackages({ alpha: 'node -e "process.exit(0)"', broken: BROKEN });
+  const cap = capture();
+  try {
+    const code = main(['--all'], { out: cap.outFn, err: cap.errFn, packagesDir: dir });
+    assert.equal(code, 1);
+    assert.ok(cap.out.some((line) => /^PASS\s+alpha/.test(line)), cap.out.join('\n'));
+    // The summary row is a padded table line ("FAIL broken  0ms  <detail>"), so the detail is not
+    // adjacent to the name.
+    assert.ok(
+      cap.out.some((line) => /^FAIL\s+broken\b.*package\.json is not valid JSON/.test(line)),
+      cap.out.join('\n'),
+    );
+    assert.ok(cap.err.some((line) => /--- broken output tail ---/.test(line)), cap.err.join('\n'));
+    assert.ok(cap.err.some((line) => /not valid JSON/.test(line)), cap.err.join('\n'));
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('main: a named broken package fails with the parse error, not a bogus null command', () => {
+  const dir = gatedPackages({ broken: BROKEN });
+  const cap = capture();
+  try {
+    const code = main(['broken'], { out: cap.outFn, err: cap.errFn, packagesDir: dir });
+    assert.equal(code, 1);
+    assert.ok(cap.out.some((line) => /^FAIL\s+broken/.test(line)), cap.out.join('\n'));
+    assert.ok(!cap.err.some((line) => /unknown package/.test(line)), cap.err.join('\n'));
+    assert.ok(cap.err.some((line) => /not valid JSON/.test(line)), cap.err.join('\n'));
+    assert.ok(!cap.err.some((line) => /ENOENT/.test(line)), cap.err.join('\n'));
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('cli --all: a malformed manifest fails that package alone', () => {
+  const dir = scratchRepo({ alpha: 'node -e "process.exit(0)"', broken: BROKEN });
+  try {
+    const { code, out } = runCli(dir, ['--all']);
+    assert.equal(code, 1);
+    assert.match(out, /PASS\s+alpha/);
+    assert.match(out, /FAIL\s+broken/);
+    assert.match(out, /not valid JSON/);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('cli --list --json: the broken package is signalled without breaking the JSON', () => {
+  const dir = scratchRepo({ alpha: 'node -e "process.exit(0)"', broken: BROKEN });
+  try {
+    const { code, stdout, stderr } = runCli(dir, ['--list', '--json']);
+    assert.equal(code, 1);
+    assert.deepEqual(JSON.parse(stdout.trim()), ['alpha']);
+    assert.match(stderr, /FAIL broken/);
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }

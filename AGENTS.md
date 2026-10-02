@@ -59,6 +59,10 @@ A package that cannot pass yet is listed in the `QUARANTINED` constant in
 every run and drops out of the CI matrix. There is no other exclusion mechanism, and nothing
 is skipped silently.
 
+A package whose `package.json` cannot be read, parsed, or shaped into a `scripts` object is
+reported as `FAIL` for **that package alone** — the rest of the inventory still runs, and
+`--list --json` (the CI matrix source) stays valid JSON with the failure named on stderr.
+
 ### Never run `npx biome`
 
 Use the package's installed binary — `./node_modules/.bin/biome`, `npm run check`, or
