@@ -136,9 +136,11 @@ broken package correctly warns as rot instead of silencing it.
 The named-invocation validation loop (`package-gate.mjs:182-186`) already accepts any name present
 in the inventory, so `package-gate.mjs broken` reaches `runGate`. What changes is the *quality* of
 that failure: today the whole run dies during discovery, and once the scan stops throwing but
-before `runGate` is fixed, `runGate` would pass a `null` gate to `gateSteps` and report an
-`ENOENT` tail from a bogus `null` command. After this change it reports `FAIL` with the parse
-error. A name in no part of the inventory is still `unknown package` → exit 2.
+before `runGate` is fixed, `runGate` would pass a `null` gate to `gateSteps`, whose `String(null)`
+becomes the command `null`; the spawn fails with `ENOENT` on the *thrown* error rather than on
+stdout/stderr, so the reported tail is **empty** — a FAIL that names no cause. After this change
+it reports `FAIL` with the parse error. A name in no part of the inventory is still
+`unknown package` → exit 2.
 
 ### 3. `runGate` and `summarize`
 
@@ -177,8 +179,8 @@ npm's error instead of the parse error the assertions look for.
 - `main --list --json`: stdout parses as exactly `["alpha"]` — broken excluded, still valid JSON —
   stderr names the broken package, exit 1.
 - `main --all`: healthy package `PASS`, broken package `FAIL`, exit 1, error in the output tail.
-- `main broken` (named): `FAIL`, exit 1, with the parse error in the output tail — not an
-  `ENOENT` tail from a bogus command, which is what a `null` gate reaching the runner produces.
+- `main broken` (named): `FAIL`, exit 1, with the parse error in the output tail — not the empty
+  tail a `null` gate reaching the runner produces.
 - Process-level (`scratchRepo` + `runCli`): a truncated manifest beside a healthy package —
   `--all` exits 1 with the healthy package still `PASS`, and `--list --json` output still parses.
   `runCli` gains `stdout` / `stderr` fields (keeping the historical merged `out` the existing
