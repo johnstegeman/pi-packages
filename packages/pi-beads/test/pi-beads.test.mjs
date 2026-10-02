@@ -279,30 +279,13 @@ case "$1" in
       while IFS= read -r line; do printf 'DEPS %s\\n' "$line" >> "$FAKE_BD_LOG"; done < "$4"
       exit 0
     fi
-    # canned dependents for beads_gate_resolve / beads_close cascade tests
+    # canned dependents for beads_gate_resolve tests
     if [ "$3" = "proj-g1" ] && [ "$5" = "up" ]; then
       printf '%s\n' '[{"id":"proj-apr","title":"User approves design","issue_type":"task","status":"open","dependency_type":"blocks"}]'
       exit 0
     fi
-    # cascade fixtures (Task 2): proj-imp has children proj-t1, proj-t2
-    if [ "$3" = "proj-t1" ] && [ "$5" = "down" ]; then
-      printf '%s\n' '[{"id":"proj-imp","title":"Implement","issue_type":"task","status":"open","dependency_type":"parent-child"}]'
-      exit 0
-    fi
-    if [ "$3" = "proj-t2" ] && [ "$5" = "down" ]; then
-      printf '%s\n' '[{"id":"proj-imp","title":"Implement","issue_type":"task","status":"open","dependency_type":"parent-child"}]'
-      exit 0
-    fi
-    if [ "$3" = "proj-imp" ] && [ "$5" = "up" ]; then
-      printf '%s\n' '[{"id":"proj-t1","title":"Task 1","issue_type":"task","status":"open","dependency_type":"parent-child"},{"id":"proj-t2","title":"Task 2","issue_type":"task","status":"open","dependency_type":"parent-child"}]'
-      exit 0
-    fi
-    if [ "$3" = "proj-imp" ] && [ "$5" = "down" ]; then
-      printf '%s\n' '[{"id":"proj-m1","title":"m1","issue_type":"molecule","status":"open","dependency_type":"parent-child"}]'
-      exit 0
-    fi
     if [ "$3" = "proj-t9" ] && [ "$5" = "down" ]; then
-      printf '%s\n' '[{"id":"proj-imp2","title":"Implement 2","issue_type":"task","status":"open","dependency_type":"parent-child"}]'
+      printf '%s\n' '[{"id":"proj-imp2","title":"Implement 2","issue_type":"task","status":"open","labels":["step:implement"],"dependency_type":"parent-child"}]'
       exit 0
     fi
     if [ "$3" = "proj-imp2" ] && [ "$5" = "up" ]; then
@@ -311,21 +294,6 @@ case "$1" in
     fi
     if [ "$3" = "proj-imp2" ] && [ "$5" = "down" ]; then
       printf '%s\n' '[{"id":"proj-m1","title":"m1","issue_type":"molecule","status":"open","dependency_type":"parent-child"}]'
-      exit 0
-    fi
-    # cascade-parent failure fixture (Task 4): proj-tc's parent fails to close
-    if [ "$3" = "proj-tc" ] && [ "$5" = "down" ]; then
-      printf '%s\n' '[{"id":"proj-bad-parent","title":"Bad parent","issue_type":"task","status":"open","dependency_type":"parent-child"}]'
-      exit 0
-    fi
-    # already-closed-parent fixture (fix r1): parent close fails but show says closed
-    if [ "$3" = "proj-tcc" ] && [ "$5" = "down" ]; then
-      printf '%s\n' '[{"id":"proj-closed-parent","title":"Closed parent","issue_type":"task","status":"open","dependency_type":"parent-child"}]'
-      exit 0
-    fi
-    # multi-repo cascade failure fixture (fix r1): umb-tc's parent fails to close
-    if [ "$3" = "umb-tc" ] && [ "$5" = "down" ]; then
-      printf '%s\n' '[{"id":"umb-bad-parent","title":"Umb bad parent","issue_type":"task","status":"open","dependency_type":"parent-child"}]'
       exit 0
     fi
     if [ "$3" = "proj-g2" ] && [ "$5" = "up" ]; then
@@ -366,18 +334,6 @@ case "$1" in
       echo "boom" >&2
       exit 1
     fi
-    if [ "$2" = "proj-bad-parent" ]; then
-      echo "boom" >&2
-      exit 1
-    fi
-    if [ "$2" = "proj-closed-parent" ]; then
-      echo "boom" >&2
-      exit 1
-    fi
-    if [ "$2" = "umb-bad-parent" ]; then
-      echo "boom" >&2
-      exit 1
-    fi
     if [ "$2" = "crmback-fail" ]; then
       echo "boom" >&2
       exit 1
@@ -398,12 +354,6 @@ case "$1" in
     ;;
   show)
     case "$2" in
-      *closed-parent*)
-        printf '%s\n' '[{"id":"'"$2"'","status":"closed"}]'
-        exit 0 ;;
-      *bad-parent*)
-        printf '%s\n' '[{"id":"'"$2"'","status":"open"}]'
-        exit 0 ;;
     esac
     echo "ok"; exit 0
     ;;
@@ -1341,51 +1291,33 @@ test("single-repo: beads_gate_resolve reports still-blocked steps alongside clos
   findInvocation(["close", "proj-bad-step"]);
 });
 
-test("single-repo: beads_close does NOT cascade while a sibling task is open", async () => {
+test("single-repo: closing the last task under a step:implement parent leaves the parent open", async () => {
+  const s = await openSession("single", repoDir);
+  resetLog();
+  // proj-t9 is the only child of proj-imp2, which carries the label the real
+  // superpowers-workflow implement step carries (pi-packages-oq1f8): closing the
+  // last task must close that task and nothing else.
+  const r = await s.byName.get("beads_close").execute("c", { ids: "proj-t9", reason: "done" });
+  assert.ok(okResult(r), JSON.stringify(r));
+  assert.equal(r.content[0].text, "closed proj-t9", r.content[0].text);
+  findInvocation(["close", "proj-t9", "-r", "done"]);
+  assertNoInvocation(["close", "proj-imp2"]);
+  assertNoInvocation(["dep", "list", "proj-t9", "--direction", "down", "--json"]);
+});
+
+test("single-repo: beads_close closes exactly the named ids and never touches a parent", async () => {
   const s = await openSession("single", repoDir);
   resetLog();
   const r = await s.byName.get("beads_close").execute("c", { ids: "proj-t1", reason: "done" });
   assert.ok(okResult(r), JSON.stringify(r));
-  const invs = invocations();
-  findInvocation(["close", "proj-t1", "-r", "done"]);
-  assert.ok(!invs.some((iv) => iv[0] === "close" && iv[1] === "proj-imp"), "no cascade while sibling open");
-});
-
-test("single-repo: beads_close cascades to close the parent step when its last child closes", async () => {
-  const s = await openSession("single", repoDir);
-  resetLog();
-  // proj-t9 is the only child of proj-imp2 -> closing it closes proj-imp2, but NOT the root
-  const r = await s.byName.get("beads_close").execute("c", { ids: "proj-t9", reason: "done" });
-  assert.ok(okResult(r), JSON.stringify(r));
-  const invs = invocations();
-  findInvocation(["close", "proj-t9", "-r", "done"]);
-  findInvocation(["close", "proj-imp2"]);
-  assert.ok(!invs.some((iv) => iv[0] === "close" && iv[1] === "proj-m1"), "never closes the molecule root");
+  assert.equal(r.content[0].text, "closed proj-t1", r.content[0].text);
+  const closes = invocations().filter((iv) => iv[0] === "close");
+  assert.equal(closes.length, 1, "exactly one bd close call; got " + JSON.stringify(closes));
+  assert.deepEqual(closes[0], ["close", "proj-t1", "-r", "done"]);
   assert.ok(
-    invs.findIndex((iv) => iv[0] === "close" && iv[1] === "proj-imp2") >
-      invs.findIndex((iv) => iv[0] === "close" && iv[1] === "proj-t9"),
-    "parent closed after child",
+    !invocations().some((iv) => iv[0] === "dep" && iv[1] === "list"),
+    "beads_close must not walk the dependency graph",
   );
-});
-
-test("single-repo: close cascade surfaces a failed parent close", async () => {
-  const s = await openSession("single", repoDir);
-  resetLog();
-  const r = await s.byName.get("beads_close").execute("c", { ids: "proj-tc" });
-  const text = r?.content?.[0]?.text ?? "";
-  assert.match(text, /closed proj-tc/, text);
-  assert.match(text, /parent cascade: proj-bad-parent not closed/, text);
-});
-
-test("single-repo: close cascade treats an already-closed parent as success", async () => {
-  const s = await openSession("single", repoDir);
-  resetLog();
-  const r = await s.byName.get("beads_close").execute("c", { ids: "proj-tcc" });
-  const text = r?.content?.[0]?.text ?? "";
-  assert.match(text, /closed proj-tcc/, text);
-  assert.doesNotMatch(text, /warning:/, text);
-  assert.doesNotMatch(text, /not closed/, text);
-  findInvocation(["show", "proj-closed-parent", "--json"]);
 });
 
 test("single-repo: beads_ready excludes template rows", async () => {
@@ -1564,7 +1496,7 @@ test("single-repo: beads_mol_ready still returns a template molecule's steps", a
   assert.match(t, /proj-t2 P2 \[open\] Task two/);
 });
 
-test("single-repo: beads_close maps continue/next flags, claims client-side, and still cascades", async () => {
+test("single-repo: beads_close maps continue/next flags and claims client-side", async () => {
   const s = await openSession("single", repoDir);
   resetLog();
   const r = await s.byName.get("beads_close").execute("c", {
@@ -1579,7 +1511,6 @@ test("single-repo: beads_close maps continue/next flags, claims client-side, and
   findInvocation(["update", "proj-1a2", "--claim"]);
   assert.match(r.content[0].text, /claimed next: proj-1a2/);
   assert.doesNotMatch(r.content[0].text, /superpowers-workflow/);
-  findInvocation(["close", "proj-imp2"]); // parent cascade still runs
 });
 
 test("single-repo: beads_close claimNext never claims a template step", async () => {
@@ -1636,7 +1567,7 @@ test("single-repo: beads_close claimNext surfaces a claim-write failure as a war
   }
 });
 
-test("single-repo: beads_close batches one beads:changed per repo when claimNext cascades", async () => {
+test("single-repo: beads_close batches one beads:changed per repo when claimNext claims", async () => {
   const s = await openSession("single", repoDir);
   resetLog();
   s.emitted.length = 0;
@@ -1644,16 +1575,6 @@ test("single-repo: beads_close batches one beads:changed per repo when claimNext
   assert.ok(okResult(r), JSON.stringify(r));
   assert.equal(s.emitted.filter((e) => e === "beads:changed").length, 1, "one emit per repo");
   assert.match(r.content[0].text, /claimed next: proj-1a2/);
-  findInvocation(["close", "proj-imp2"]); // the cascade really ran
-});
-
-test("umbrella: close cascade failure is not overwritten by a later repo failure", async () => {
-  const s = await openSession("umbrella", projDir);
-  resetLog();
-  const r = await s.byName.get("beads_close").execute("c", { ids: "umb-tc crmback-fail" });
-  const text = r?.content?.[0]?.text ?? "";
-  assert.match(text, /parent cascade: umb-bad-parent not closed/, text);
-  assert.match(text, /bd close failed for crmback-fail/, text);
 });
 
 test("umbrella: a failing repo close does not skip later repos (no order-dependent silent failure)", async () => {
