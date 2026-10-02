@@ -90,7 +90,10 @@ test("refutation: DATA-boundary markers around interpolated finding", () => {
 });
 
 test("requirement: finders are told to set line for a single-line defect", () => {
-  assert.match(src, /Set `line` whenever the defect sits on a single line/);
+  assert.match(
+    src,
+    /Set `line` whenever the defect sits on a single line: the dedupe key is the location, so the same item reported once with a line and once without cannot merge and would be verified twice\. A genuinely file-level defect still carries none\./,
+  );
 });
 
 test("verify: WAVE = 6 bounded sequential waves keep verdicts in order", () => {

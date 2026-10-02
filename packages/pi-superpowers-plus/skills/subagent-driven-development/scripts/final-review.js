@@ -149,7 +149,7 @@ const requirement = (dimension) => {
     '',
     'Find REAL issues only, at the correct severity (critical/important/minor). Return the schema object; an empty findings array when clean.',
     '',
-    'Set `line` whenever the defect sits on a single line: the dedupe key is the location, so the same item reported once with a line and once without cannot merge and would be verified twice.',
+    'Set `line` whenever the defect sits on a single line: the dedupe key is the location, so the same item reported once with a line and once without cannot merge and would be verified twice. A genuinely file-level defect still carries none.',
   ]
   return lines.join('\n')
 }

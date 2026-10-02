@@ -65,6 +65,14 @@ same item reported once with a line and once without cannot merge and would be v
 Instruction plus reason in one sentence. `line` stays optional in `FINDINGS_SCHEMA`; the
 sentence is scoped to defects that sit on a single line, so file-level findings are unaffected.
 
+**Errata (2026-10-02).** The final whole-branch review flagged that this instruction carried only
+its positive half: it says when to set `line`, but never that a genuinely file-level defect must
+carry **no** line (constraint #4 above), which `reference/final-review.md` does state. A compliant
+finder could over-apply the instruction and invent a line to satisfy it — the fabrication risk
+constraint #4 exists to prevent. The prompt now appends, character-for-character after the
+sentence above: ` A genuinely file-level defect still carries none.` The design text above is left
+as written; only the prompt and its structural pin changed.
+
 ## 2. `refutation()` — refuter prompt (`m6pca`)
 
 Add one sentence as its own paragraph, after the `END VERIFIED FINDING DATA` marker and the
