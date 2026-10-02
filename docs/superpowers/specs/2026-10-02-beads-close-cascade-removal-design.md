@@ -117,8 +117,12 @@ close `implement` itself; without it, a model half-remembering the old cascade c
 - **Deleted:** `:1371` (surfaces a failed parent close), `:1380` (already-closed parent is success),
   `:1650` (umbrella cascade failure — its surviving half is already asserted by `:1659`). With them
   go the fixtures that existed only for those paths: the `dep list` rows for `proj-tc` / `proj-tcc` /
-  `umb-tc` (`:316-330`) and the `bd show` rows for `proj-bad-parent` / `proj-closed-parent` /
-  `umb-bad-parent` (including the row at `:225`).
+  `umb-tc` (`:316-330`); the `close)` case arms for `proj-bad-parent` / `proj-closed-parent` /
+  `umb-bad-parent` (`:369-380`), which made the parent close fail — the removed walk's failure
+  path; and the top-level `show)` case's `*closed-parent*` / `*bad-parent*` arms (`:401-406`), whose
+  only caller was the removed walk's failure probe. The `mol show` case's `*closed-parent*` /
+  `*bad-parent*` arms (`:224-229`) are pre-existing and intentionally untouched — unrelated to this
+  change.
 - **Rewritten minus cascade:** `:1567` (drop `findInvocation(["close","proj-imp2"])` at `:1582`,
   rename to "…maps continue/next flags and claims client-side") and `:1639` (drop `:1647`, rename to
   "…batches one `beads:changed` per repo when claimNext claims"). Its

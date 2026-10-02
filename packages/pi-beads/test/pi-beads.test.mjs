@@ -279,7 +279,7 @@ case "$1" in
       while IFS= read -r line; do printf 'DEPS %s\\n' "$line" >> "$FAKE_BD_LOG"; done < "$4"
       exit 0
     fi
-    # canned dependents for beads_gate_resolve / beads_close cascade tests
+    # canned dependents for beads_gate_resolve tests
     if [ "$3" = "proj-g1" ] && [ "$5" = "up" ]; then
       printf '%s\n' '[{"id":"proj-apr","title":"User approves design","issue_type":"task","status":"open","dependency_type":"blocks"}]'
       exit 0
