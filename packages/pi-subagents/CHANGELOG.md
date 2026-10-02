@@ -9,6 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 - **The workflow stand-down now recognises a lowercase `workflow` tool** ([#283](https://github.com/tintinweb/pi-subagents/issues/283) — thanks [@zampierilucas](https://github.com/zampierilucas)). The match is exact on purpose, and the set held `Workflow` and `SubagentWorkflow` only, so `@quintinshaw/pi-dynamic-workflows` — which registers lowercase `workflow` — never tripped it: with `workflowsEnabled` unset, both orchestrators reached the model and nothing warned. Adding the third name is the whole fix; exactness is kept, so a `list_workflows` still cannot take the feature down.
+- **A workflow's `args` must now be an object or an array** (`pi-packages-x33o`). A JSON-encoded *string* was transported happily and then failed inside the script — `args.base` was `undefined`, and the run died at the return marshal with "Cannot pass undefined across the workflow VM boundary (at the workflow result.base)", an error naming the result for an input problem. The tool description had always told callers to pass the value itself; the runtime now enforces it, the `SubagentWorkflow` call rejects it up front (same rationale as the `meta` pre-parse: the model can fix it in the same turn instead of paying for a background run that fails), and a nested `workflow(name, args)` is held to the same rule. `undefined` still means "not provided", and objects and arrays are unchanged.
 
 ## [0.19.0] - 2026-08-25
 

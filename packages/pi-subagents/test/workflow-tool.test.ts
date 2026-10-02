@@ -711,6 +711,21 @@ describe("SubagentWorkflow tool — script vs scriptPath vs name", () => {
     expect(textOf(result)).toMatch(/Provide `script`.*`scriptPath`.*or `name`/s);
   });
 
+  it("rejects a JSON-encoded string `args` without starting a run", async () => {
+    const result = await tools.get("SubagentWorkflow").execute(
+      "tc-args",
+      { script: inlineScript, args: '{"base":"c311606"}' },
+      undefined,
+      undefined,
+      workflowCtx(),
+    );
+
+    const text = textOf(result);
+    expect(text).toMatch(/`args` must be an object or an array, not string/);
+    expect(text).toMatch(/not a JSON-encoded string/);
+    expect(text).not.toMatch(/started/);
+  });
+
   it("runs a saved workflow by name from .pi/workflows", async () => {
     mkdirSync(join(hermetic.dir, ".pi", "workflows"), { recursive: true });
     writeFileSync(join(hermetic.dir, ".pi", "workflows", "nightly.js"), fileScript);

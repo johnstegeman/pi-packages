@@ -387,6 +387,33 @@ export function assertBoundarySafe(value: unknown, path: string): void {
   walk(value, path, new Set());
 }
 
+/**
+ * LOCAL PATCH (pi-packages) — see docs/pi-subagents-local-patch.md
+ *
+ * `args` is the one value a script reads before it can defend itself, and a
+ * scalar there fails late and confusingly: a JSON *string* arrives as a string,
+ * every `args.x` is `undefined`, and the run dies at the return marshal with
+ * "Cannot pass undefined across the workflow VM boundary (at the workflow
+ * result.x)" — an error that blames the result for an input problem. The tool
+ * description already tells callers to pass the value itself; this makes the
+ * runtime enforce what the description asks for.
+ *
+ * `undefined` means "not provided". Arrays are data and pass; every other
+ * non-`object` typeof — including `null` — is rejected.
+ */
+export function assertWorkflowArgs(args: unknown): void {
+  if (args === undefined) return;
+  if (args === null || typeof args !== "object") {
+    const kind = args === null ? "null" : typeof args;
+    throw new WorkflowRuntimeError(
+      "Workflow `args` must be an object or an array, not " +
+        kind +
+        "." +
+        (kind === "string" ? " Pass the value itself, not a JSON-encoded string." : ""),
+    );
+  }
+}
+
 /* ------------------------------------------------------------------------- *
  * Semaphore
  * ------------------------------------------------------------------------- */
@@ -585,6 +612,8 @@ export function validateScript(script: string): { meta: WorkflowMeta; body: stri
 export async function runWorkflow(options: RunWorkflowOptions): Promise<WorkflowRunResult> {
   const { script, host } = options;
 
+  // LOCAL PATCH (pi-packages) — see docs/pi-subagents-local-patch.md
+  assertWorkflowArgs(options.args);
   assertBoundarySafe(options.args, "args");
 
   const { meta, body } = validateScript(script);

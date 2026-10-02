@@ -3,6 +3,7 @@ import type { WorkflowJournalEntry } from "../src/workflow/journal.js";
 import { buildPhaseGroups, type WorkflowAgentEntry, type WorkflowEntry } from "../src/workflow/progress.js";
 import {
   assertBoundarySafe,
+  assertWorkflowArgs,
   type RunWorkflowOptions,
   runWorkflow,
   WORKFLOW_AGENT_CAP,
@@ -443,6 +444,24 @@ describe("the JSON boundary", () => {
     await expect(run("return 1;", { host, args: { when: new Date(0) } })).rejects.toThrow(
       /across the workflow VM boundary/,
     );
+  });
+
+  it("rejects a scalar args before the worker starts", async () => {
+    const { host } = stubHost();
+    await expect(run("return 1;", { host, args: '{"base":"c311606"}' })).rejects.toThrow(
+      /Workflow `args` must be an object or an array, not string/,
+    );
+  });
+
+  it("accepts an object, an array and undefined, and rejects every scalar", () => {
+    expect(() => assertWorkflowArgs(undefined)).not.toThrow();
+    expect(() => assertWorkflowArgs({ root: "src/" })).not.toThrow();
+    expect(() => assertWorkflowArgs(["a.ts", "b.ts"])).not.toThrow();
+    expect(() => assertWorkflowArgs('{"root":"src/"}')).toThrow(/not string/);
+    expect(() => assertWorkflowArgs('{"root":"src/"}')).toThrow(/not a JSON-encoded string/);
+    expect(() => assertWorkflowArgs(7)).toThrow(/not number/);
+    expect(() => assertWorkflowArgs(true)).toThrow(/not boolean/);
+    expect(() => assertWorkflowArgs(null)).toThrow(/not null/);
   });
 
   it("accepts plain JSON in both directions", () => {
@@ -1187,6 +1206,27 @@ describe("nested workflow()", () => {
     const result = await run("return await workflow('audit', { n: 7 });", { host: stub.host });
 
     expect(JSON.parse(result.value as string)).toEqual([7, "audit"]);
+  });
+
+  it("rejects every scalar at the nested boundary, naming the child", async () => {
+    const cases: [string, string][] = [
+      ["'plain string'", "not string"],
+      ["null", "not null"],
+      ["7", "not number"],
+      ["true", "not boolean"],
+    ];
+    for (const [literal, expected] of cases) {
+      const stub = nestingHost({ audit: child("audit", "return args;") });
+      const result = await run(`return await workflow('audit', ${literal});`, { host: stub.host });
+
+      expect(result.status).toBe("failed");
+      expect(result.error).toContain(
+        `workflow("audit") args must be an object or an array, ${expected}`,
+      );
+      if (expected === "not string") {
+        expect(result.error).toContain("Pass the value itself, not a JSON-encoded string.");
+      }
+    }
   });
 
   it("shares the parent's agent counter, so ids never collide", async () => {

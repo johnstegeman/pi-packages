@@ -23,6 +23,8 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fauxText, fauxToolCall, getCurrentSystemPrompt, getCurrentTools } from "@earendil-works/pi-ai";
 import { afterEach, describe, expect, it } from "vitest";
+import { registerAgents } from "../../src/agent-types.js";
+import { loadCustomAgents } from "../../src/custom-agents.js";
 import { encodeCwd } from "../../src/output-file.js";
 import { readJournal } from "../../src/workflow/journal.js";
 import { runPrintMode, toolCallsNamed, toolResultsNamed } from "../helpers/print-mode-runner.js";
@@ -263,6 +265,58 @@ describe("Workflow end to end", () => {
       await run.dispose?.();
     }
   }, 60_000);
+
+  it("gives a workflow-dispatched agent the nested tools its type opts into", async () => {
+    // The disputed claim: pi-superpowers-plus documented that a SubagentWorkflow
+    // child carries no nestedRuntime, so `allowed_subagents` is inert inside a
+    // workflow. The host spawns through the same manager a direct dispatch uses,
+    // so the child sits at depth 1 with no `isolated` — and opts in for real.
+    const cwd = workflowProject();
+    mkdirSync(join(cwd, ".pi", "agents"), { recursive: true });
+    writeFileSync(
+      join(cwd, ".pi", "agents", "recursive-reviewer.md"),
+      "---\ndescription: a reviewer that may delegate\nallowed_subagents: Explore\n---\nreview agent\n",
+    );
+
+    const childTools: string[] = [];
+    const script = [
+      'export const meta = { name: "nested-probe", description: "spawn a delegating child" };',
+      'return await agent("NESTED-TOOLS-PROBE", { agentType: "recursive-reviewer" });',
+    ].join("\n");
+
+    const run = await runPrintMode({
+      prompt: "run the workflow",
+      cwd,
+      activateTools: ["SubagentWorkflow"],
+      maxModelCalls: 16,
+      live: false, // scripted on purpose: a real model would not emit the tool call
+      beforeRun: () => registerAgents(loadCustomAgents(cwd)),
+      respond: context => {
+        const text = asText(context);
+        // The parent's own second turn carries the script it emitted, so the
+        // probe text appears in the parent's transcript too — the tool result
+        // is what marks that turn as the parent's, not the child's.
+        if (text.includes("Task ID")) return fauxText("workflow launched");
+        if (text.includes("NESTED-TOOLS-PROBE")) {
+          childTools.push(...getCurrentTools(context.messages).map(tool => tool.name));
+          return fauxText("NESTED-CHILD-DONE");
+        }
+        return workflowCall(script, "wf-call-nested");
+      },
+    });
+
+    try {
+      const reachedChild = await waitFor(() => childTools.length > 0);
+      expect(reachedChild, "the workflow child never reached a model call").toBe(true);
+      await run.manager?.waitForAll();
+
+      expect(childTools).toEqual(
+        expect.arrayContaining(["Agent", "get_subagent_result", "steer_subagent"]),
+      );
+    } finally {
+      await run.dispose?.();
+    }
+  }, 90_000);
 });
 
 // ---------------------------------------------------------------------------

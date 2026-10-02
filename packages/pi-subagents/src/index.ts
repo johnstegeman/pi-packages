@@ -68,7 +68,7 @@ import { createWorkflowHost } from "./workflow/host.js";
 import { appendJournal, readJournal, type WorkflowJournalEntry } from "./workflow/journal.js";
 import { extractMeta, type WorkflowMeta, workflowCallName } from "./workflow/meta.js";
 import { elapsedMs } from "./workflow/progress.js";
-import { runWorkflow } from "./workflow/runtime.js";
+import { assertWorkflowArgs, runWorkflow } from "./workflow/runtime.js";
 import { resolveWorkflowScript } from "./workflow/saved.js";
 import { completeWorkflowTask, createWorkflowTask, failWorkflowTask, formatWorkflowNotification, resolveResumeTarget, updateWorkflowProgressBatch, type WorkflowTask, workflowResultText, workflowRunId } from "./workflow/task.js";
 import { fullWorkflowToolDescription } from "./workflow/tool-description.js";
@@ -2453,7 +2453,8 @@ Terse command-style prompts produce shallow, generic work.
       ),
       args: Type.Optional(
         Type.Any({
-          description: "Exposed to the script as the global `args`, verbatim. Must be JSON-shaped.",
+          description:
+            "Exposed to the script as the global `args`, verbatim. Must be an object or an array — a JSON-encoded string is rejected.",
         }),
       ),
       resumeFromRunId: Type.Optional(
@@ -2511,6 +2512,16 @@ Terse command-style prompts produce shallow, generic work.
     execute: async (toolCallId, params, _signal, _onUpdate, ctx) => {
       const resumeFrom = resolveResumeTarget(params.resumeFromRunId, workflowTasks);
       if (resumeFrom !== undefined && !resumeFrom.ok) return textResult(resumeFrom.message);
+
+      // LOCAL PATCH (pi-packages) — see docs/pi-subagents-local-patch.md
+      // Same rationale as the `meta` parse below: a malformed `args` is a
+      // caller error the model can fix immediately, and reporting it as a
+      // background run that failed a second later would just cost a turn.
+      try {
+        assertWorkflowArgs(params.args);
+      } catch (err) {
+        return textResult(err instanceof Error ? err.message : String(err));
+      }
 
       // A resume with no source of its own re-runs what that run ran. The
       // common case is an edited script, but "run that again, cheaply" should

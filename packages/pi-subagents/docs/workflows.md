@@ -141,7 +141,8 @@ const root = args?.root ?? 'src/'
 const listing = await agent(`List every file under ${root}. One path per line, nothing else.`)
 ```
 
-`args` is whatever was passed to the tool, verbatim, and it must be JSON-shaped. Now *"run the audit workflow against src/api"* and *"…against src/admin"* are the same workflow.
+`args` is whatever was passed to the tool, verbatim, and it must be an object or an array — a
+JSON-encoded string is rejected before the script runs. Now *"run the audit workflow against src/api"* and *"…against src/admin"* are the same workflow.
 
 ## A worked example
 
@@ -222,7 +223,7 @@ export const meta = {
 | `script` | string | Inline source. Must begin with `export const meta = { name, description }` |
 | `scriptPath` | string | A script file, absolute or project-relative. **Takes precedence over `script`** — this is how an edited workflow is re-run |
 | `name` | string | A saved workflow — `<name>.js` in one of the three directories above. Lowest precedence |
-| `args` | any | Handed to the script as the `args` global, verbatim. Must be JSON-shaped |
+| `args` | any | Handed to the script as the `args` global, verbatim. Must be an object or an array — a JSON-encoded string is rejected |
 | `resumeFromRunId` | string | Replay an earlier run in this session. Matches `^wf_[a-z0-9-]{6,}$` |
 | `title` / `description` | string | Accepted and ignored — for Claude Code parity, so a ported call does not fail. A workflow is named by its `meta` block |
 
@@ -265,17 +266,17 @@ Prefer `pipeline` unless a stage genuinely needs every prior result *together* �
 
 ### `workflow(nameOrRef, args?)`
 
-Runs a saved workflow inline and returns its value. Pass a name, or `{ scriptPath }`. `args` becomes the child's `args` global.
+Runs a saved workflow inline and returns its value. Pass a name, or `{ scriptPath }`. `args` becomes the child's `args` global, and it must be an object or an array — a JSON-encoded string is rejected, exactly as for the tool's own `args`.
 
 The child runs in the *same* worker and vm context under its own globals, so it shares this run's concurrency cap, agent counter, abort signal, journal and budget by construction — its agents are simply this run's agents, controllable from the same inspector. What it does not share is phase state: the child's phases render as their own `▸ <name>` group.
 
-**One level only** — `workflow()` inside a child throws saying so. An unknown name, an unreadable path, a child carrying no `meta`, or a child that will not parse all throw into the calling script, so `try`/`catch` if you want to handle them. Capped at 256 nested calls per run.
+**One level only** — `workflow()` inside a child throws saying so. An unknown name, an unreadable path, a child carrying no `meta`, a child that will not parse, or an `args` that is not an object or an array all throw into the calling script, so `try`/`catch` if you want to handle them. Capped at 256 nested calls per run.
 
 ### `phase()`, `log()`, `args`, `budget`
 
 - **`phase(title)`** — start a new progress group; subsequent `agent()` calls are grouped under it. Inside `pipeline`/`parallel` stages use the `phase` *option* instead, since the ambient phase races.
 - **`log(message)`** — a progress line under the tree, for you to read.
-- **`args`** — whatever was passed as the tool's `args`, verbatim; `undefined` if none.
+- **`args`** — whatever was passed as the tool's `args`, verbatim; `undefined` if none. Must be an object or an array — a JSON-encoded string is rejected at the call, before the script runs.
 - **`budget`** — `{ total, spent(), remaining() }`. **`total` is always `null` here**: it comes from a token-target directive pi does not have. That is deliberate rather than broken — Claude Code scripts guard on it (`while (budget.total && budget.remaining() > 50_000)`), and those guards correctly do not fire instead of throwing on a missing global. `remaining()` is `Infinity` with no target. `spent()` is real, and counts output tokens this run's agents have used.
 
 ### Where files live
@@ -303,6 +304,13 @@ These are three different things and are easy to conflate: 1000 is a budget for 
 Above 25 scheduled agents, or 1.5M tokens actual or projected, the card adds `⚠ Large workflow · /agents → Workflows to stop`.
 
 A run's concurrency limit is its own, independent of the session's `maxConcurrent` and `maxConcurrentForeground` pools — its agents do not enter either.
+
+An agent a workflow spawns can delegate: if its type declares `allowed_subagents` and the
+depth cap allows it, it receives the nested `Agent` / `get_subagent_result` /
+`steer_subagent` tools, exactly as a directly dispatched agent would. Those grandchildren are
+not counted above — *Agents per run, total* counts the agents the **script** launches, and a
+grandchild appears in neither that count nor the progress tree. Its tokens still roll into its
+parent child's totals.
 
 ### Settings and the CLI flag
 
