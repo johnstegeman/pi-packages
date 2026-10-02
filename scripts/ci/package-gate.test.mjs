@@ -297,6 +297,21 @@ test('discoverPackages: valid JSON of the wrong shape is errored, never dropped'
   }
 });
 
+test('discoverPackages: a package.json that cannot be read is errored, not skipped', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'pkg-gate-'));
+  try {
+    // A directory named package.json passes existsSync and fails readFileSync with EISDIR.
+    mkdirSync(join(dir, 'unreadable', 'package.json'), { recursive: true });
+    const found = discoverPackages(dir);
+    assert.equal(found.length, 1);
+    assert.equal(found[0].name, 'unreadable');
+    assert.equal(found[0].gate, null);
+    assert.match(found[0].error, /cannot read package\.json:/);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 test('discoverPackages: a no-manifest directory and an ungated package still contribute nothing', () => {
   const dir = scratchPackages({
     gated: { scripts: { test: 'npm test' } },
@@ -662,6 +677,19 @@ test('main --list --json: the broken package is on stderr and the payload stays 
       cap.err.some((line) => /^FAIL broken\s+package\.json is not valid JSON/.test(line)),
       cap.err.join('\n'),
     );
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('main --list --json: a lone broken package yields an empty array and exit 1', () => {
+  const dir = gatedPackages({ broken: BROKEN });
+  const cap = capture();
+  try {
+    const code = main(['--list', '--json'], { out: cap.outFn, err: cap.errFn, packagesDir: dir });
+    assert.equal(code, 1);
+    assert.deepEqual(JSON.parse(cap.out[0]), []);
+    assert.ok(cap.err.some((line) => /^FAIL broken/.test(line)), cap.err.join('\n'));
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
