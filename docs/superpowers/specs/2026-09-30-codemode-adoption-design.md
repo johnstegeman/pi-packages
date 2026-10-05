@@ -847,6 +847,63 @@ correctly (an unconditional subtraction would have printed an empty `declared:` 
 which is the parser's artifact, not a brick).
 
 
+#### Trial — file I/O through scripts (anchor round trip)
+
+**The anchor survived — as a literal, not as a script variable.** Read from the existing Task 1
+transcripts (`/tmp/codemode-stage-b/sessions-only/`); no new session. Harness:
+`cd /tmp/codemode-stage-b && node dump-calls.mjs sessions-only` (adaptation below).
+
+The `only` session made exactly **two** tool calls, both `codemode`, in three assistant messages:
+
+| # | Script | Nested calls |
+|---|---|---|
+| 1 | `const r = await tools.read({ path: "scratch.txt" });` then `return r;` | `read` |
+| 2 | `const e = await tools.edit({ path: "scratch.txt", edits: [{ replace: { pos: "2#ine", lines: ["BETA"] } }] });` then `const r = await tools.read({ path: "scratch.txt" });` then `const w = await tools.bash({ command: "wc -l scratch.txt" });` then `return { edit: e, readback: r, wc: w.output };` | `edit`, `read`, `bash` |
+
+Script 1's result is the anchor list `1#7iR:alpha` / `2#ine:beta` / `3#ngS:gamma` / `4#UO-:`;
+script 2 **hard-codes** `pos: "2#ine"`. So the round trip was `read` output → model context
+(text) → **literal string** in the next script's source — **not** through a script variable, and
+not through `store`/`load` (both are available to a script). The two calls are separate QuickJS
+sandboxes with no shared scope, so a variable could only have existed if the model had put read
+and edit in one script, which it did not.
+
+**The literal survived intact.** Script 2's `edit` returned
+`Successfully applied 1 edit(s) to scratch.txt. Lines: 4 -> 4.` with `2#0oe:BETA`, and the
+in-script read-back was `1#oeR:alpha` / `2#0oe:BETA` / `3#ypS:gamma` / `4#UO-:`. No retry, no hash
+mismatch; `wc -l` returned `3 scratch.txt` (correct — no trailing newline). The anchor is an opaque
+3-char string, but nothing in the script path transforms it: the only new failure mode over the
+`on` path is a transcription typo, and none occurred in this run.
+
+**Why the variable route is not free.** `tools.read` returns an untyped text blob, not a
+structured anchor list. To thread the anchor through a variable the model must parse the blob
+itself (`r.split("\n")[1].split(":")[0]`); to avoid parsing it, it must round-trip the anchor
+through its own context as a literal — which costs the extra codemode call. The model chose the
+extra call. So the trial **did not exercise the variable route §5's method named**; the anchor
+survived by literal transcription, and that is the honest result.
+
+**Friction: nothing had to be looked up, because the `rules` block still teaches the hidden
+tools.** Neither session called `searchTools()` or `describeTool()` (grep over both transcripts:
+the only occurrence of those names is inside the codemode description's own text). The model knew
+`tools.read`/`edit`/`bash` from the mode-`only` codemode description — all four core tools are
+listed inline at `inlineBudget: 3000` (§Truncation) — and it knew `edit`'s `edits` array and `pos`
+anchor shape from the system prompt's `rules` section, which under `only` still carries
+hashline-edit's rule verbatim:
+`Example: edits=[{"replace":{"pos":"2#TmR","lines":["  console.log('hi');"]}}]`. That block also
+still names `write` and `Agent`, both hidden from the tool list. The mode hides the
+*declarations*, not the instruction text that describes them.
+
+**`on` side, one sentence.** The `on` session did the same task as four direct calls — `read`,
+`edit`, `read`, `bash` over five assistant messages, anchor typed as a literal `pos` — where
+`only` folded them into two authored scripts over three assistant messages, anchor likewise
+literal.
+
+**Harness note (scratch, not committed).** The plan's `dump-calls.mjs` sketch assumes a
+`{type:"tool_call"}`-style block and prints calls only. pi 1.0.3 writes assistant calls as
+`{type:"toolCall", name, arguments}` inside `{type:"message", message:{...}}`, and puts the
+script's actual invocations in the result's `nestedCalls.calls`; the scratch version prints both,
+and `on-calls.txt` confirms the direct four-call route (`read` → `edit` → `read` → `bash`).
+
+
 ### Verdict
 
 Not yet reached. One of `go` / `no-go` / `go-with-mitigations`, with the evidence above, the
