@@ -630,6 +630,89 @@ then `Agent`(1154) is refused (remaining 946, non-namespaced group dropped) and
 over the budget-100000 costs predicts exactly the 17-tool set the budget-3000 transcript
 lists — including `Agent`'s silent omission. Harness:
 `cd /tmp/codemode-stage-b && node listing.mjs sessions-only sessions-full`.
+#### Gate 1 — tool-scope veto under `mode: "only"`
+
+**PASS.** The nested (script) path is the only call path under `only`, so
+`createToolScopeVeto` (Divergence 4) is the whole call-time enforcement surface; it holds.
+
+Agent dir `/tmp/codemode-stage-b/agentdir-only/` (`{"codemode":{"mode":"only"}}`).
+Covering command, run from `packages/pi-subagents`:
+
+```sh
+PI_CODING_AGENT_DIR=/tmp/codemode-stage-b/agentdir-only \
+  ./node_modules/.bin/vitest run test/e2e/codemode-nested-scope.e2e.test.ts
+```
+
+**Step 3 — the pre-existing case under `only`:** `1 passed (1)` (3.15s). That run
+shows the nested path still works under `only`, but it does **not** show the mode took
+effect — it would pass identically under the ambient `on` — so the two mode-`only`
+cases added to the same file assert that first.
+
+**Mode took effect.** `session._hiddenDeclarations` is `["read"]` under `only` and `[]`
+under `on` (`read` is the agent's declared `direct` tool). Note `session.agent.state.tools`
+is the *active* set and keeps hidden declarations (`["read","probe_allowed","codemode"]` in
+**both** modes), so it cannot show the mode; pi's `_getLoadout` records the hide list in
+the separate `_hiddenDeclarations` field. The plan's carry-forward named `state.tools` as
+the probe — that is wrong, and the added case asserts on `_hiddenDeclarations` instead
+(the gate behaviour assertions are exactly as planned).
+
+**Result, verbatim from a real QuickJS script under `only`:**
+
+- in-scope control (`ext:` narrowing selects it) — `tools.probe_allowed({})`:
+  `Script completed ... probe_allowed ran`.
+- out-of-scope (`ext:ext-veto-nested.mjs/probe_allowed` excludes it) — `tools.probe_denied({})`:
+
+```
+Script failed
+Wall time 0.0 seconds
+Output:
+
+Script error:
+Error: Tool "probe_denied" is not available to this subagent.
+
+Tool calls made before the failure (they are not undone): probe_denied (error)
+```
+
+An `ext:`-excluded deferred tool is refused from a script while an in-scope one runs,
+under `mode: "only"`.
+
+#### Gate 2 — registry gate (`disallowedTools`) under `mode: "only"`
+
+**PASS.** Same file, same run, `bootSession({ disallowedTools: ["probe_denied"] })` under
+the mode-`only` agent dir. Precondition as in gate 1: `_hiddenDeclarations` contains
+`read`, so the run is genuinely under `only`.
+
+**Refused from a script.** `disallowedTools` becomes `excludeTools` on the session, so
+`probe_denied` is never registered; the script's `tools` object has no such method:
+
+```
+Script failed
+Wall time 0.0 seconds
+Output:
+
+Script error:
+TypeError: not a function
+    at <anonymous> (codemode.js:1:47)
+
+No tool calls were made.
+```
+
+**Not listed.** The mode-`only` codemode description's *inline* listing is budget-truncated
+in this fixture (`Nested tools: PARTIAL - 1 of 3 shown` at the default `inlineBudget: 3000`),
+and the fixture's deferred tools are omitted from it whether or not they are excluded — so
+absence from the description is not discriminating here. The description's own discovery
+surface is `ALL_TOOLS` (the description says deferred tools "are still available on the
+global `tools` object and listed in `ALL_TOOLS`"), and that **is** discriminating. Read from
+a script in the same session:
+
+| Session | `ALL_TOOLS` |
+|---|---|
+| `only`, base | `["read","probe_allowed","probe_denied"]` |
+| `only`, `disallowedTools: ["probe_denied"]` | `["read","probe_allowed"]` |
+
+The excluded tool is neither callable nor listed. The added case asserts both the refusal
+and the `ALL_TOOLS` absence.
+
 
 ### Verdict
 
