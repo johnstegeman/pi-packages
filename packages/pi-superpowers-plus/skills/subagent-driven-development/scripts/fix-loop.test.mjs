@@ -286,7 +286,11 @@ test("behavior: the retry path's resume and verify prompts carry the guardrail t
     ["fix", "fix", "verify", "re-review"],
     "first gated fix, ungated resume, re-gated verify, then re-review",
   )
-  for (const p of prompts) assert.ok(p.prompt.includes(CORE), p.label + " must carry CORE")
+  for (const p of prompts) {
+    assert.ok(p.prompt.includes(CORE), p.label + " must carry CORE")
+    const tail = p.label === "re-review" ? TAIL_REVIEW : TAIL_IMPL
+    assert.ok(p.prompt.includes(tail), p.label + " must carry its audience tail")
+  }
 })
 
 run();
