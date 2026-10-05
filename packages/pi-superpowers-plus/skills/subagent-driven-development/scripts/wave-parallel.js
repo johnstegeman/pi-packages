@@ -42,6 +42,14 @@ if (!Array.isArray(ARGS.wave) || ARGS.wave.length === 0) {
 }
 const WAVE = ARGS.wave
 
+// Beads guardrail: workflow children are read-only on beads. implementer-prompt.md:48 carries the
+// identical IMPL text, and skills-contract.test.mjs pins every copy byte-for-byte against CORE +
+// its audience tail. Keep each rendered string on ONE line.
+const BEADS_GUARDRAIL_IMPL =
+  "**Do NOT create, update, or close any beads issues (beads_* tools / bd commands) — task tracking belongs to the orchestrator, who closes this task's bead only after the review passes. Report DONE; the controller handles the bead.**"
+const BEADS_GUARDRAIL_REVIEW =
+  "**Do NOT create, update, or close any beads issues (beads_* tools / bd commands) — task tracking belongs to the orchestrator. Your beads access is READ-ONLY — reading the task/gate bead is fine; never write. Report your verdict; the controller records it.**"
+
 const IMPLEMENT_RESULT_SCHEMA = {
   type: 'object',
   properties: {
@@ -84,6 +92,7 @@ const implementPrompt = (item) => [
   'Task bead (the exact task text), from a codemode script: return await tools.beads_show({ id: "' + item.taskBeadId + '", full: true }). The beads_* tools have code-mode exposure, so they are not in your declared tool list — reach them through `codemode`.',
   'Report file (write your full report there; return the path): ' + (ARGS.reportDir ?? '.') + '/' + item.taskBeadId + '-report.md',
   'Global Constraints (attention lens), from a codemode script: return await tools.beads_show({ id: "' + ARGS.gateBeadId + '", full: true }).',
+  BEADS_GUARDRAIL_IMPL,
   '',
   'Work on the SHARED branch. Commit exactly your own files (git add <your files>, one commit at the end); retry once after ~2s if a commit fails with an index.lock error. Never merge, rebase, or push.',
   ...(item.gate
@@ -98,6 +107,7 @@ const reviewPrompt = (item) => [
   '',
   'Task bead (the exact task text), from a codemode script: return await tools.beads_show({ id: "' + item.taskBeadId + '", full: true }). The beads_* tools have code-mode exposure, so they are not in your declared tool list — reach them through `codemode`.',
   'Global Constraints (attention lens), from a codemode script: return await tools.beads_show({ id: "' + ARGS.gateBeadId + '", full: true }).',
+  BEADS_GUARDRAIL_REVIEW,
   '',
   'Build the scoped review package yourself (resolve HEAD yourself):',
   // Every path is single-quoted so spaces cannot split args; the shape guard

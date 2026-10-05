@@ -26,6 +26,8 @@ Dispatch a subagent with this prompt:
     code-mode exposure, so they are not in your declared tool list — reach
     them through `codemode`.)
 
+    **Do NOT create, update, or close any beads issues (beads_* tools / bd commands) — task tracking belongs to the orchestrator. Your beads access is READ-ONLY — reading the task/gate bead is fine; never write. Report your verdict; the controller records it.**
+
     The canonical Global Constraints for this plan live in the plan-approval
     gate bead's description (writing-plans populated it). Read it now, in a
     codemode script: `return await tools.beads_show({ id: "[GATE_ID]", full: true });`.

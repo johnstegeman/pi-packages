@@ -6,4 +6,4 @@
   (`<workspace>/<task-id>-report.md`) and put it in the dispatch prompt. The
   implementer writes the full report there and returns only status, commits,
   a one-line test summary, and concerns.
-- Never hand bead management to the implementer. Task tracking (creating, updating, closing this task's bead) is the controller's job alone, and the task closes only after its review passes. The implementer prompt template carries this guardrail — do not override it.
+- Never hand bead management to the implementer. Task tracking (creating, updating, closing this task's bead) is the controller's job alone, and the task closes only after its review passes. The implementer prompt template carries this guardrail — do not override it — and so does every agent template that ships with this skill (`agent-templates/*.md`, `explore.md` excepted), because a template body is the child's system prompt. It is advisory: the controller re-reads the task bead before closing it (see [fix-loop.md](fix-loop.md)).

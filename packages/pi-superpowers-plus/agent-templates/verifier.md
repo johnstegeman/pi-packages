@@ -24,3 +24,7 @@ must try to refute it. Default to refuted when the evidence is ambiguous.
   `isReal: false` with a reason naming what was missing.
 
 The caller supplies a schema; return exactly that object.
+
+## Beads
+
+**Do NOT create, update, or close any beads issues (beads_* tools / bd commands) — task tracking belongs to the orchestrator. Your beads access is READ-ONLY — reading the task/gate bead is fine; never write. Report your verdict; the controller records it.**

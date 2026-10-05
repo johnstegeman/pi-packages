@@ -56,3 +56,7 @@ Begin directly with the spec-compliance verdict. Every line is a verdict, a find
 ### Assessment
 **Task quality:** [Approved | Needs fixes]
 **Reasoning:** [1-2 sentence technical assessment]
+
+## Beads
+
+**Do NOT create, update, or close any beads issues (beads_* tools / bd commands) — task tracking belongs to the orchestrator. Your beads access is READ-ONLY — reading the task/gate bead is fine; never write. Report your verdict; the controller records it.**

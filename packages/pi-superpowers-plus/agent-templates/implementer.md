@@ -22,3 +22,7 @@ Pause and consider which scenario applies before writing code: full TDD for new 
 - Run the narrowest test(s) first, then the full suite when appropriate.
 - Commit when the task's tests pass.
 - Report: what changed, tests run, files changed, any concerns.
+
+## Beads
+
+**Do NOT create, update, or close any beads issues (beads_* tools / bd commands) — task tracking belongs to the orchestrator, who closes this task's bead only after the review passes. Report DONE; the controller handles the bead.**

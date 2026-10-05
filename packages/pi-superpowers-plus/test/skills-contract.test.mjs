@@ -173,4 +173,84 @@ test("no set_phase call lives in reference material", () => {
   assert.deepEqual(offenders, []);
 });
 
+// ----- beads guardrail (docs/superpowers/specs/2026-10-05-workflow-child-bead-guardrail-design.md) -----
+// Every prompt a child receives must forbid beads writes; the controller alone owns bead state.
+// CORE is byte-identical everywhere, followed by an audience tail. Each copy must sit on ONE
+// unbroken line — a hard-wrap makes it invisible to a human reader scanning for the rule.
+
+const CORE =
+  "Do NOT create, update, or close any beads issues (beads_* tools / bd commands) — task tracking belongs to the orchestrator";
+const TAIL_IMPL =
+  ", who closes this task's bead only after the review passes. Report DONE; the controller handles the bead.";
+const TAIL_REVIEW =
+  ". Your beads access is READ-ONLY — reading the task/gate bead is fine; never write. Report your verdict; the controller records it.";
+const GUARDRAIL_IMPL = `**${CORE}${TAIL_IMPL}**`;
+const GUARDRAIL_REVIEW = `**${CORE}${TAIL_REVIEW}**`;
+const IMPL = "IMPL";
+const REVIEW = "REVIEW";
+const rendering = (variant) => {
+  if (variant !== IMPL && variant !== REVIEW) throw new Error(`unknown guardrail variant: ${variant}`);
+  return variant === IMPL ? GUARDRAIL_IMPL : GUARDRAIL_REVIEW;
+};
+
+test("beads guardrail: implementer-prompt.md stays the canonical IMPL copy", () => {
+  const p = join(root, "skills", "subagent-driven-development", "implementer-prompt.md");
+  assert.ok(
+    readFileSync(p, "utf8").includes(GUARDRAIL_IMPL),
+    "implementer-prompt.md:48 must keep CORE + TAIL_IMPL verbatim on one line",
+  );
+});
+
+test("beads guardrail: every prompt source carries the audience-correct variant", () => {
+  const guarded = [
+    ["skills/subagent-driven-development/implementer-prompt.md", [IMPL]],
+    ["skills/subagent-driven-development/re-review-prompt.md", [REVIEW]],
+    ["skills/subagent-driven-development/task-reviewer-prompt.md", [REVIEW]],
+    ["skills/subagent-driven-development/scripts/fix-loop.js", [IMPL, REVIEW]],
+    ["skills/subagent-driven-development/scripts/wave-parallel.js", [IMPL, REVIEW]],
+    ["skills/subagent-driven-development/scripts/final-review.js", [REVIEW]],
+    ["agent-templates/implementer.md", [IMPL]],
+    ["agent-templates/worker.md", [IMPL]],
+    ["agent-templates/task-reviewer.md", [REVIEW]],
+    ["agent-templates/code-reviewer.md", [REVIEW]],
+    ["agent-templates/verifier.md", [REVIEW]],
+  ];
+  const offenders = [];
+  for (const [rel, variants] of guarded) {
+    const src = readFileSync(join(root, rel), "utf8");
+    for (const v of variants) {
+      if (!src.includes(rendering(v))) offenders.push(`${rel} (missing ${v})`);
+    }
+  }
+  assert.deepEqual(offenders, []);
+});
+
+test("beads guardrail: no prompt source is left unguarded", () => {
+  const offenders = [];
+  // 1. every prompt template the SDD skill ships. Deliberately SDD-scoped, not skills/**: another
+  // skill's prompt template is not this package's beads guardrail to impose (spec, Out of scope).
+  const sddDir = join(root, "skills", "subagent-driven-development");
+  for (const f of skillFiles()) {
+    if (!f.startsWith(sddDir)) continue;
+    if (f.endsWith("-prompt.md") && !readFileSync(f, "utf8").includes(CORE)) offenders.push(f);
+  }
+  // 2. every SDD workflow script that emits a prompt. `.js` only: the workflow loader runs `.js`
+  // scripts and `run-workflow.mjs` is the test harness, not a prompt source. This is a file-level
+  // presence check — per-prompt coverage is each script's own behavioural test (the retry-path
+  // prompts only exist on the gate-failed branch, which a source scan cannot see).
+  const scriptsDir = join(root, "skills", "subagent-driven-development", "scripts");
+  for (const e of readdirSync(scriptsDir)) {
+    if (!e.endsWith(".js")) continue;
+    const src = readFileSync(join(scriptsDir, e), "utf8");
+    if (/\bagent\s*\(/.test(src) && !src.includes(CORE)) offenders.push(join(scriptsDir, e));
+  }
+  // 3. every agent template except the read-only research agent
+  const templatesDir = join(root, "agent-templates");
+  for (const e of readdirSync(templatesDir)) {
+    if (!e.endsWith(".md") || e === "explore.md") continue;
+    if (!readFileSync(join(templatesDir, e), "utf8").includes(CORE)) offenders.push(join(templatesDir, e));
+  }
+  assert.deepEqual(offenders, [], "every prompt source must carry CORE — see the spec's inventory");
+});
+
 run();
