@@ -243,4 +243,50 @@ test("behavior: missing required field returns bad-args envelope", async () => {
   }
 })
 
+const CORE =
+  "Do NOT create, update, or close any beads issues (beads_* tools / bd commands) — task tracking belongs to the orchestrator"
+const TAIL_IMPL =
+  ", who closes this task's bead only after the review passes. Report DONE; the controller handles the bead."
+const TAIL_REVIEW =
+  ". Your beads access is READ-ONLY — reading the task/gate bead is fine; never write. Report your verdict; the controller records it."
+
+test("behavior: every emitted prompt carries the beads guardrail, with the right tail", async () => {
+  const prompts = []
+  const agent = async (prompt, opts) => {
+    prompts.push({ prompt, label: opts?.label ?? "" })
+    return "done — gate passed"
+  }
+  await runWorkflow(src, { args: passedArgs, agent })
+
+  assert.ok(prompts.length >= 2, "the passed path emits fix + re-review")
+  for (const p of prompts) {
+    assert.ok(p.prompt.includes(CORE), p.label + " must carry CORE")
+    const tail = p.label === "re-review" ? TAIL_REVIEW : TAIL_IMPL
+    assert.ok(p.prompt.includes(tail), p.label + " must carry its audience tail")
+  }
+})
+
+test("behavior: the retry path's resume and verify prompts carry the guardrail too", async () => {
+  const prompts = []
+  let fixCalls = 0
+  const agent = async (prompt, opts) => {
+    const label = opts?.label ?? ""
+    prompts.push({ prompt, label })
+    if (label === "fix") {
+      fixCalls++
+      return fixCalls === 1 ? null : "resumed and fixed"
+    }
+    if (label === "verify") return "npm test passed"
+    return "unexpected"
+  }
+  const result = await runWorkflow(src, { args: passedArgs, agent })
+  assert.equal(result.passed, true)
+  assert.deepEqual(
+    prompts.map((p) => p.label),
+    ["fix", "fix", "verify", "re-review"],
+    "first gated fix, ungated resume, re-gated verify, then re-review",
+  )
+  for (const p of prompts) assert.ok(p.prompt.includes(CORE), p.label + " must carry CORE")
+})
+
 run();
