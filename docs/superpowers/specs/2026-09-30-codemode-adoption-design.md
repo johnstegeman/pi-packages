@@ -635,6 +635,16 @@ lists — including `Agent`'s silent omission. Harness:
 **PASS.** The nested (script) path is the only call path under `only`, so
 `createToolScopeVeto` (Divergence 4) is the whole call-time enforcement surface; it holds.
 
+**Harness version (applies to Gates 1 and 2).** The covering command exercises
+`@earendil-works/pi-coding-agent@0.99.1` — the version `packages/pi-subagents/package.json:54`
+pins and the e2e harness imports — **not** the 1.0.3 binary this spec is scoped to.
+The gate conclusions transfer because the equivalent 1.0.3 code paths were verified:
+`prepareCodemodeLoadout` returns the same `hiddenDeclarations`, `createCodemodeDescription`
+filters deferred tools out of the count, and `_executeNestedToolCall` still passes
+`beforeToolCall`. Every codemode-description string quoted below is a **0.99.1** string;
+1.0.3 contains neither of the quoted literals and renders `Nested tools:` with
+per-namespace `(tools not listed)` markers instead.
+
 Agent dir `/tmp/codemode-stage-b/agentdir-only/` (`{"codemode":{"mode":"only"}}`).
 Covering command, run from `packages/pi-subagents`:
 
@@ -698,12 +708,12 @@ No tool calls were made.
 ```
 
 **Not listed.** The mode-`only` codemode description's *inline* listing is budget-truncated
-in this fixture (`Nested tools: PARTIAL - 1 of 3 shown` at the default `inlineBudget: 3000`),
-and the fixture's deferred tools are omitted from it whether or not they are excluded — so
-absence from the description is not discriminating here. The description's own discovery
-surface is `ALL_TOOLS` (the description says deferred tools "are still available on the
-global `tools` object and listed in `ALL_TOOLS`"), and that **is** discriminating. Read from
-a script in the same session:
+in this fixture (0.99.1 renders `Nested tools: PARTIAL - 1 of 3 shown` at the default
+`inlineBudget: 3000`), and the fixture's deferred tools are omitted from it whether or not
+they are excluded — so absence from the description is not discriminating here. The
+description's own discovery surface is `ALL_TOOLS` (the 0.99.1 description says deferred
+tools "are still available on the global `tools` object and listed in `ALL_TOOLS`"), and
+that **is** discriminating. Read from a script in the same session:
 
 | Session | `ALL_TOOLS` |
 |---|---|
@@ -711,7 +721,8 @@ a script in the same session:
 | `only`, `disallowedTools: ["probe_denied"]` | `["read","probe_allowed"]` |
 
 The excluded tool is neither callable nor listed. The added case asserts both the refusal
-and the `ALL_TOOLS` absence.
+and the `ALL_TOOLS` absence, with `probe_allowed` present as a positive control so the
+absence assertion cannot pass on error text or an empty catalog.
 
 
 ### Verdict

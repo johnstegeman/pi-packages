@@ -221,6 +221,10 @@ describe("codemode nested calls honor the subagent tool scope under mode=only", 
       // just make the call fail: `ALL_TOOLS` is the codemode description's own
       // discovery surface (the description's inline listing is budget-truncated).
       const catalog = await runScript(session, "return JSON.stringify(ALL_TOOLS.map((t) => t.name))");
+      // Positive control: probe_allowed is in scope, so it must be listed. Without
+      // this the negative assertion below would also pass on error text or an empty
+      // catalog (e.g. if the script failed or ALL_TOOLS were empty).
+      expect(catalog).toContain("probe_allowed");
       expect(catalog).not.toContain("probe_denied");
     });
   });
