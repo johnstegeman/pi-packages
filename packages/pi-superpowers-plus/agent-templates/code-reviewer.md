@@ -111,3 +111,7 @@ For each issue:
 - Give feedback on code you didn't actually read
 - Be vague ("improve error handling")
 - Avoid giving a clear verdict
+
+## Beads
+
+**Do NOT create, update, or close any beads issues (beads_* tools / bd commands) — task tracking belongs to the orchestrator. Your beads access is READ-ONLY — reading the task/gate bead is fine; never write. Report your verdict; the controller records it.**

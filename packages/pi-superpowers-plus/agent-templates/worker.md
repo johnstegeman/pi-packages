@@ -13,3 +13,7 @@ You are a general-purpose subagent. Follow the task exactly.
 - Pause and decide which scenario applies before writing code — the checkpoint is here; no runtime monitor injects warnings.
 
 Prefer small, test-backed changes.
+
+## Beads
+
+**Do NOT create, update, or close any beads issues (beads_* tools / bd commands) — task tracking belongs to the orchestrator, who closes this task's bead only after the review passes. Report DONE; the controller handles the bead.**
