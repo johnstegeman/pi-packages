@@ -592,4 +592,24 @@ test("merge: a severity flip keeps the losing phrasing in alsoDescribed", async 
   assert.deepEqual([...row.alsoDescribed], ['phrasing A'], 'the losing phrasing survives the flip')
 })
 
+const CORE =
+  "Do NOT create, update, or close any beads issues (beads_* tools / bd commands) — task tracking belongs to the orchestrator"
+const TAIL_REVIEW =
+  ". Your beads access is READ-ONLY — reading the task/gate bead is fine; never write. Report your verdict; the controller records it."
+
+test("behavior: every emitted prompt carries the beads guardrail", async () => {
+  const { state, agent } = liveAgent()
+  await runWorkflow(src, {
+    args: { base: "a", head: "b", packagePath: "/x", description: "d", gateBeadId: "g", findingsFile: "/tmp/guardrail.jsonl" },
+    agent,
+  })
+  assert.equal(state.finderPrompts.length, 5, "five dimension finders")
+  assert.ok(state.refuterPrompts.length >= 1, "refuters must have run")
+  assert.equal(state.writerPrompts.length, 1, "the writer runs only when findingsFile is set")
+  for (const p of state.finderPrompts.concat(state.refuterPrompts, state.writerPrompts)) {
+    assert.ok(p.includes(CORE), "every final-review prompt must carry CORE")
+    assert.ok(p.includes(TAIL_REVIEW), "final-review children are reviewers")
+  }
+})
+
 run();
