@@ -723,6 +723,128 @@ that **is** discriminating. Read from a script in the same session:
 The excluded tool is neither callable nor listed. The added case asserts both the refusal
 and the `ALL_TOOLS` absence, with `probe_allowed` present as a positive control so the
 absence assertion cannot pass on error text or an empty catalog.
+#### Gate 3 — `codemode` is declared under `mode: "only"`
+
+**PASS.** Read from the **existing Task 1 transcript** (`/tmp/codemode-stage-b/sessions-only/`)
+— no new session:
+
+```sh
+SB=/tmp/codemode-stage-b
+node "$SB/parse-tools.mjs" "$SB/sessions-on" "$SB/sessions-only" | sed -n '/^only:/,/^hidden/p'
+```
+
+```
+only: file=2026-10-05T12-05-12-681Z_stage-b-only.jsonl entries=1 n=1 chars=12626 est=3157  [toolsAdded n=8, 7 hidden]
+  declared: codemode
+hidden by mode=only: read, bash, edit, write, grep, Agent, set_phase
+```
+
+The `only:` line's model-facing `declared:` set is exactly `codemode`. The activator turned it
+on, and `prepareCodemodeLoadout` does not hide it: `hiddenDeclarations` is `direct ∧ declared`
+and `codemode` is `model-only`, not `direct`. The seven `direct` tools are hidden; codemode is
+not. Observed tool list: `codemode` (n=1).
+
+#### Gate 4 — `-builtin:codemode` / `--no-extensions` degradation
+
+**PASS — neither path bricks.** Real sessions under `codemode.mode: "only"`
+(`/tmp/codemode-stage-b/proj-degraded/.pi/settings.json`). The declared list is the model-facing
+set (`toolsAdded` minus the hide set); the transcript's `sections.tools` region is quoted where
+it discriminates.
+
+The plan spells the disabled-codemode case `-builtin:codemode`. That is **not a pi 1.0.3 flag**:
+`pi -builtin:codemode --version` → `Error: Unknown option: -builtin:codemode`. The mechanism is
+omitting `-e builtin:codemode`: codemode is a *built-in extension* (`builtInExtensions` in the
+1.0.3 bundle, `builtin: true`), loaded only when discovery is on or it is named explicitly.
+Gate 4a's set omits it.
+
+**4a — codemode absent** (`-ne`, so no built-in extensions; explicit `-e` set without
+`builtin:codemode`):
+
+```sh
+SB=/tmp/codemode-stage-b; WT=/Users/jstegeman/orca/workspaces/pi-packages/t6wc
+cd "$SB/proj-degraded" && pi -a -nc -ne -p --session-id stage-b-nocodemode \
+  --session-dir "$SB/sessions-nocodemode" \
+  -e "$WT/packages/codemode-bootstrap/index.ts" -e "$WT/packages/bifrost/index.ts" \
+  -e "$WT/packages/hashline-edit/src/index.ts" -e "$WT/packages/pi-beads/src/index.ts" \
+  -e "$WT/packages/pi-subagents/src/index.ts" -e "$WT/packages/pi-superpowers-plus" \
+  "Reply with the single word ok."
+node "$SB/parse-tools.mjs" "$SB/sessions-on" "$SB/sessions-nocodemode"
+```
+
+```
+only: file=2026-10-05T13-17-52-849Z_stage-b-nocodemode.jsonl entries=1 n=7 chars=9142 est=2286
+  declared: read, bash, edit, write, grep, Agent, set_phase
+hidden by mode=only:
+```
+
+Observed tool list: `read, bash, edit, write, grep, Agent, set_phase` — no `codemode`, and
+`read`/`edit`/`bash`/`write` all present. The mode is inert without codemode: hiding lives in
+codemode's own `prepareLoadout` hook, which `_applyToolLoadout` runs only for tools in the
+selected set, so an absent codemode leaves the direct tools declared. Corroborated by the
+transcript's model-facing `sections.tools` region — `bash`, `write`, `Agent` reappear here,
+whereas under `only` with codemode present (Task 1) that region held only `codemode`.
+
+**Callable, not just declared.** A follow-up turn in the same degraded setup (session
+`stage-b-4a-callable`, `/tmp/codemode-stage-b/sessions-4a-callable/`, same `-e` set) called the
+direct `read` tool and it succeeded:
+`toolName=read isError=False content=[{type: text, text: "1#7iR:alpha\n2#ine:beta\n3#ngS:gamma\n4#UO-:"}]`.
+
+**4a control — the setup can still declare codemode.** The same `-ne` command plus
+`-e builtin:codemode` and `-e codemode-bootstrap/index.ts`
+(`/tmp/codemode-stage-b/sessions-4a-control/`) reproduces Task 1's `only` session exactly,
+including the declaration payload:
+
+```
+only: file=2026-10-05T13-23-51-871Z_stage-b-4a-control.jsonl entries=1 n=1 chars=12626 est=3157  [toolsAdded n=8, 7 hidden]
+  declared: codemode
+hidden by mode=only: read, bash, edit, write, grep, Agent, set_phase
+```
+
+So 4a's codemode absence is the omitted `-e builtin:codemode`, not a broken session.
+
+**Registered-but-inactive sub-case.** `-e builtin:codemode` *without* the bootstrap extension
+(`/tmp/codemode-stage-b/sessions-registered/`) leaves codemode registered but inactive:
+`toolsAdded` is `read, bash, edit, write, grep, Agent, set_phase` (no codemode) and nothing is
+hidden. An inactive codemode contributes no hook, so this path does not brick either.
+
+**4b — `--no-extensions`.** The plan's literal command (no `-e` at all) **does** write a session
+before the provider failure the plan anticipated: `-ne` disables extension discovery, so
+bifrost is absent and the model turn fails with
+`404 {"type":"error","error":{"type":"not_found_error","message":"model: claude-opus-4-8"},"request_id":"req_011CfjAL9CyG52yQiQwqS7mf"}`,
+but session start has already persisted `toolsAdded`.
+
+```sh
+SB=/tmp/codemode-stage-b
+cd "$SB/proj-degraded" && pi -a -nc -ne -p --session-id stage-b-noext \
+  --session-dir "$SB/sessions-noext" "Reply with the single word ok."
+node "$SB/parse-tools.mjs" "$SB/sessions-on" "$SB/sessions-noext"
+```
+
+```
+only: file=2026-10-05T13-22-43-469Z_stage-b-noext.jsonl entries=1 n=4 chars=2527 est=632
+  declared: read, bash, edit, write
+hidden by mode=only:
+```
+
+`toolsAdded` is exactly `read, bash, edit, write`, and the model-facing `sections.tools` region
+lists all four:
+
+```
+<tools>
+- read: Read file contents
+- bash: Execute bash commands (ls, grep, find, etc.)
+- edit: Make precise file edits with exact text replacement, including multiple disjoint edits in one call
+- write: Create or overwrite files
+```
+
+No codemode tool exists, so the mode is inert and the built-in tools (which are not extensions)
+remain. The model turn's 404 does not affect the declaration read.
+
+**Parser note (scratch, not committed).** `parse-tools.mjs` derives the mode-`only` hide set
+from the `on` transcript and subtracts it only when the session actually contains `codemode` —
+the hook owner. That leaves Gate 3's output unchanged and makes the degraded sessions read
+correctly (an unconditional subtraction would have printed an empty `declared:` for 4a/4b,
+which is the parser's artifact, not a brick).
 
 
 ### Verdict
