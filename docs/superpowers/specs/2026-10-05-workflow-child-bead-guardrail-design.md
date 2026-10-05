@@ -105,11 +105,13 @@ why the text is a canonical core plus an audience tail rather than one verbatim 
 | 10 | `skills/subagent-driven-development/implementer-prompt.md` | `:48` | IMPL — already correct, **no edit** |
 | 11 | `skills/subagent-driven-development/re-review-prompt.md` | dispatch template | REVIEW |
 | 12 | `skills/subagent-driven-development/task-reviewer-prompt.md` | dispatch template | REVIEW |
-| 13 | `agent-templates/implementer.md` | `## Rules` bullet | IMPL |
-| 14 | `agent-templates/worker.md` | `## Rules` bullet | IMPL |
-| 15 | `agent-templates/task-reviewer.md` | `## Boundaries` bullet | REVIEW |
-| 16 | `agent-templates/code-reviewer.md` | `## Critical Rules` → DO list | REVIEW |
-| 17 | `agent-templates/verifier.md` | boundaries bullet | REVIEW |
+| 13 | `agent-templates/implementer.md` | appended `## Beads` section (end of file) | IMPL |
+| 14 | `agent-templates/worker.md` | appended `## Beads` section (end of file) | IMPL |
+| 15 | `agent-templates/task-reviewer.md` | appended `## Beads` section (end of file) | REVIEW |
+| 16 | `agent-templates/code-reviewer.md` | appended `## Beads` section (end of file) | REVIEW |
+| 17 | `agent-templates/verifier.md` | appended `## Beads` section (end of file) | REVIEW |
+
+The uniform appended section is deliberate — one placement rule for every template, rather than five different anchors — because an agent template's body is the child's system prompt.
 
 **Placement rule (scripts):** the guardrail goes immediately after the lines that tell the child how
 to *read* the task/gate bead through `codemode`. The prompt is what hands the child its `codemode`

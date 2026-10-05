@@ -40,6 +40,10 @@ Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   agent count, cap and progress tree; nested spend still rolls into the child's
   totals. Pinned by pi-subagents' `test/e2e/workflow.e2e.test.ts`. Requires re-copying `agent-templates/code-reviewer.md`.
 
+### Fixed
+
+- **Workflow children no longer close beads they do not own** — `scripts/fix-loop.js`, `scripts/wave-parallel.js` and `scripts/final-review.js` build their own prompts and never carried the "do not create, update, or close any beads" guardrail `implementer-prompt.md` has always had, so a gated fix round could close its own task bead (observed 2026-10-05, `pi-packages-2ik53`). Every prompt those scripts emit, both prose-path prompt templates, and all five non-explore agent templates now carry one canonical guardrail (a byte-identical core plus an audience tail), pinned by `test/skills-contract.test.mjs` — which also fails when a new prompt source is added without it. The guardrail is advisory: `reference/fix-loop.md` and `reference/subagent-workflows.md` now require the controller to re-read a task bead before closing it and ledger a `DEVIATION` if a child closed it first.
+
 ---
 
 ## [0.9.0] — 2026-09-04
