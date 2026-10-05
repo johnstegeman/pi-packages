@@ -559,6 +559,78 @@ either — it has no namespace, so its budget omission carries no `(some tools n
 marker. Under `only` it is reachable only through `searchTools()`/`ALL_TOOLS`. §2 owns the
 truncation read; it is flagged here because it is the discovery regression §2 warns about.
 
+#### Truncation
+
+The mode-`only` codemode declaration *is* the list, so this is read from the budget-3000
+session, not modelled. A third session — identical except `codemode.inlineBudget: 100000`
+(`/tmp/codemode-stage-b/sessions-full/`, same `-e` set and `-nc`) — lists every callable tool
+with no truncation marker, and is the cost table the white-box cross-check runs over.
+
+At the default `inlineBudget: 3000`, **17 of 21** callable tools are listed:
+
+| Group | Listed / total | Marker | Listed |
+|---|---|---|---|
+| (no namespace) | 6 / 7 | none — the group has no heading | `read`, `bash`, `edit`, `write`, `grep`, `set_phase` |
+| `beads` | 9 / 12 | ` (some tools not listed)` | `beads_ready`, `beads_list`, `beads_show`, `beads_deps`, `beads_close`, `beads_dep`, `beads_undep`, `beads_comment`, `beads_comments` |
+| `subagents` | 2 / 2 | none | `get_subagent_result`, `steer_subagent` |
+
+All four core tools **survive**: `read=true edit=true bash=true write=true`. `grep` and
+`set_phase` survive too.
+
+**Incompleteness is reported for namespaces only.** `beads` carries the
+` (some tools not listed)` marker; `subagents` is complete. The non-namespaced group has no
+`## ` heading, so a dropped non-namespaced tool carries no marker at all: `Agent` is omitted
+silently and is discoverable only via `searchTools()`/`ALL_TOOLS` (still callable by literal
+name). This is read from the parsed transcript and confirms the Measurement flag above.
+
+**Dropped at 3000:** `Agent`, `beads_create`, `beads_create_list`, `beads_update`.
+
+**Cost table** (full session; each group cheapest-first — the queue order the rule consumes):
+
+| Group | Tool | Cost |
+|---|---|---|
+| — | `write` | 91 |
+| — | `read` | 124 |
+| — | `grep` | 159 |
+| — | `set_phase` | 168 |
+| — | `bash` | 171 |
+| — | `edit` | 297 |
+| — | `Agent` | 1154 |
+| `beads` | `beads_comment` | 62 |
+| `beads` | `beads_undep` | 89 |
+| `beads` | `beads_comments` | 97 |
+| `beads` | `beads_dep` | 117 |
+| `beads` | `beads_show` | 165 |
+| `beads` | `beads_deps` | 170 |
+| `beads` | `beads_close` | 216 |
+| `beads` | `beads_list` | 267 |
+| `beads` | `beads_ready` | 275 |
+| `beads` | `beads_create` | 307 |
+| `beads` | `beads_update` | 333 |
+| `beads` | `beads_create_list` | 360 |
+| `subagents` | `steer_subagent` | 164 |
+| `subagents` | `get_subagent_result` | 180 |
+
+**Truncation order.** `selectCatalog` was re-read verbatim from the 1.0.3 binary (offset
+73883895) and matches the spec's quote: sort each group's entries cheapest-first, then
+round-robin across groups, taking each group's cheapest affordable entry per turn and
+dropping a group permanently when its next entry no longer fits. Group order is
+non-namespaced first, then namespace name (`localeCompare`). Cost is
+`ceil(section.length / 4)` (`CHARS_PER_TOKEN3 = 4`); `renderToolSection` builds the section as
+the heading line plus `renderToolSample(declaration).trim()`. Admission order at 3000:
+
+`write`(91) → `beads_comment`(62) → `steer_subagent`(164) → `read`(124) →
+`beads_undep`(89) → `get_subagent_result`(180) → `grep`(159) → `beads_comments`(97) →
+`set_phase`(168) → `beads_dep`(117) → `bash`(171) → `beads_show`(165) → `edit`(297) →
+`beads_deps`(170) → `beads_close`(216) → `beads_list`(267) → `beads_ready`(275);
+then `Agent`(1154) is refused (remaining 946, non-namespaced group dropped) and
+`beads_create`(307) is refused (remaining 188, `beads` group dropped).
+
+**White-box cross-check: MATCH.** Reimplementing `selectCatalog` and the section-cost rule
+over the budget-100000 costs predicts exactly the 17-tool set the budget-3000 transcript
+lists — including `Agent`'s silent omission. Harness:
+`cd /tmp/codemode-stage-b && node listing.mjs sessions-only sessions-full`.
+
 ### Verdict
 
 Not yet reached. One of `go` / `no-go` / `go-with-mitigations`, with the evidence above, the
