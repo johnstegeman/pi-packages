@@ -246,4 +246,36 @@ test("behavior: malformed and incomplete args fail loud", async () => {
     /wave-parallel\.js: args\.wave must be a non-empty array/)
 })
 
+const CORE =
+  "Do NOT create, update, or close any beads issues (beads_* tools / bd commands) — task tracking belongs to the orchestrator"
+const TAIL_IMPL =
+  ", who closes this task's bead only after the review passes. Report DONE; the controller handles the bead."
+const TAIL_REVIEW =
+  ". Your beads access is READ-ONLY — reading the task/gate bead is fine; never write. Report your verdict; the controller records it."
+
+test("behavior: every emitted prompt carries the beads guardrail, with the right tail", async () => {
+  const prompts = []
+  const agent = async (prompt, opts) => {
+    const label = opts?.label ?? ""
+    prompts.push({ prompt, label })
+    if (label.startsWith("implement:")) {
+      const id = label.slice("implement:".length)
+      return { status: "done", reportFile: "/r/" + id + "-report.md" }
+    }
+    if (label.startsWith("review:")) return { specCompliant: true, issues: [], assessment: "ok" }
+    return null
+  }
+  const result = await runWorkflow(src, { args: waveArgs, agent })
+  assert.equal(result.degraded, null)
+  assert.deepEqual(
+    prompts.map((p) => p.label),
+    ["implement:a", "review:a", "implement:b", "review:b"],
+  )
+  for (const p of prompts) {
+    assert.ok(p.prompt.includes(CORE), p.label + " must carry CORE")
+    const tail = p.label.startsWith("review:") ? TAIL_REVIEW : TAIL_IMPL
+    assert.ok(p.prompt.includes(tail), p.label + " must carry its audience tail")
+  }
+})
+
 run();
