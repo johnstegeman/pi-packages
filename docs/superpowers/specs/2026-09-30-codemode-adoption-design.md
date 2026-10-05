@@ -505,17 +505,59 @@ guessed number.
 
 ### Provenance
 
-Recorded when the extraction and the sessions are run: `pi --version`, the sha256 of the pi
-binary, and the byte offsets of `selectCatalog` and `prepareCodemodeLoadout` in the embedded
-bundle. (Exploration on 2026-10-05 used `pi 1.0.3`, binary
-`/Users/jstegeman/.local/share/mise/installs/pi/1.0.3/pi/pi`, offsets 73883895 and
-73887911; the sha256 is recorded at implementation time.)
+Recorded 2026-10-05 against pi 1.0.3:
+
+- `pi --version` → `1.0.3`
+- binary sha256 → `8207ce945286b0f7243b7ac25ae39a1bef938c526427666089197ef29378d119`
+  (`/Users/jstegeman/.local/share/mise/installs/pi/1.0.3/pi/pi`; the `pi` on `PATH` resolves
+  to the same artifact — identical sha256)
+- embedded-bundle byte offsets (`grep -aob`):
+  - `function selectCatalog` → 73883895
+  - `function prepareCodemodeLoadout` → 73887381
+  - `function toCodemodeDeclaration` → 73883309
+  - `function renderToolSample` → 73815214
+
+(The exploration note recorded 73887911 for `prepareCodemodeLoadout`; that offset does not
+reproduce on this binary — it lands mid-function. Use the measured 73887381.)
 
 ### Findings
 
-Not yet gathered — this is the spike itself. Its findings are the measurement table, the
-truncation answer, the per-gate results and the trial record, recorded here by the spike's
-implementation.
+#### Measurement
+
+Two real `pi -p` sessions, same prompt, same `-e` extension set and `-nc`; the only
+difference is `.pi/settings.json` (`codemode.mode`). Both are persisted under
+`/tmp/codemode-stage-b/sessions-{on,only}/` (the `only` transcript is reused by §2).
+
+| Side | Declared tools | Chars | chars/4 est. |
+|---|---|---|---|
+| `on` | 8 — `read`, `bash`, `edit`, `write`, `grep`, `Agent`, `set_phase`, `codemode` | 22,144 | 5,536 |
+| `only` | 1 — `codemode` | 12,626 | 3,157 |
+| **Net** | 7 declarations removed | **9,518** | **~2,380** |
+
+The seven `direct`-exposure tools are hidden from the request under `only`. The
+`codemode` declaration itself grows only 59 chars (12,451 → 12,510): it now lists those
+tools as nested callables, but the 3,000-token `inlineBudget` caps the listing. Net saving
+≈ 9,518 chars ≈ 2,380 est. tokens.
+
+Caveats (same as stage A): `chars/4` is a heuristic, not a tokenizer; the removed side
+counts each tool's description + parameter schema; the added side is the `codemode`
+declaration.
+
+**Declared-tool diff.** `toolsAdded` is the *active* set and still carries declarations
+that a `prepareLoadout` hook hides from the request ("They stay active and callable, and
+the transcript still declares them" — `@earendil-works/pi-coding-agent` types.d.ts), so a
+raw sum over it is not the model-facing payload: it reads `on` 22,144, `only` 21,768 (net
+376). The model-facing payload is the active set minus `hiddenDeclarations`, which
+`prepareCodemodeLoadout` sets to `[]` under `on` and to the declared `direct` tools under
+`only`. Cross-checked behaviourally: the `on` session called `read`, `edit` and `bash`
+directly; the `only` session called only `codemode`. The seven hidden names come from the
+`on` transcript's appended `describeScriptCall` notes, which only directly-declared tools
+carry (`codemode`, being `model-only`, has none in either mode).
+
+`Agent` is hidden like the rest but does **not** appear in the `only` codemode listing
+either — it has no namespace, so its budget omission carries no `(some tools not listed)`
+marker. Under `only` it is reachable only through `searchTools()`/`ALL_TOOLS`. §2 owns the
+truncation read; it is flagged here because it is the discovery regression §2 warns about.
 
 ### Verdict
 
