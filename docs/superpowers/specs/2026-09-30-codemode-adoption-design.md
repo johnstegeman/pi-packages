@@ -167,9 +167,18 @@ divergence on a nightly-synced subtree, which is what tipped the decision to ven
 Namespace: `{ name: "beads", description: "Beads issue tracker — umbrella aggregate across all repos" }`.
 
 The split is not by importance: pi's `selectCatalog` fills the `codemode.inlineBudget`
-(3000 estimated tokens) **cheapest-declaration-first**, not most-important-first. So
+(3000 estimated tokens) **cheapest-first within each group, round-robin across groups** —
+not most-important-first, and not cheapest-declaration-first over the whole set. So
 `deferred` is the correct lever for "rare, do not spend budget on this", which frees
 budget for the hot path.
+
+> **Corrected 2026-10-05 (stage B).** This sentence originally read
+> "cheapest-declaration-first, not most-important-first". Stage B re-read `selectCatalog`
+> verbatim from the pi 1.0.3 binary (offset 73883895) and the white-box cross-check
+> reproduced the transcript's 17-tool listing exactly: each group's entries are sorted
+> cheapest-first, then the budget is spent round-robin across groups — non-namespaced
+> first, then namespace name — taking each group's cheapest affordable entry per turn and
+> dropping a group permanently when its next entry no longer fits. See §Truncation.
 
 | Exposure | Tools | Count |
 |---|---|---|
@@ -447,7 +456,14 @@ source-text assertions, per stage A's rule.
 | 1 | **Tool-scope veto** (`createToolScopeVeto`, Divergence 4) | Becomes the *sole* call-time guard for every tool in every session | Existing `test/e2e/codemode-nested-scope.e2e.test.ts` **plus a mode-`only` variant** | A tool excluded by `ext:<ext>/<tool>` is refused on the nested path; an included one is allowed |
 | 2 | **Registry gate** (`tools:` → `allowedToolNames`/`excludeTools`) | `hiddenDeclarations` is `direct ∧ declared ∧ callable`, so active-set narrowing now decides what is *listed* as well as callable | `agent-runner.test.ts` plus a mode-`only` case that narrows with `tools:` | An excluded tool is neither listed in the codemode description nor callable from a script; an allowed one is both |
 | 3 | **codemode-bootstrap activator** | The activator must still turn codemode on when the direct tools are gone, and codemode must not hide itself | `activator.test.mjs` plus a real mode-`only` session asserting codemode is declared | codemode is active **and** declared under `only` |
-| 4 | **`-builtin:codemode` / `--no-extensions` degradation** | The brick risk: if hiding were global, a session without codemode would have no tools at all | Two real sessions under `codemode.mode: "only"`: one with `-builtin:codemode`, one with `--no-extensions`; plus the registered-but-inactive sub-case | `-builtin:codemode`: `read`/`edit` still declared and callable. `--no-extensions`: no codemode tool exists, so the mode is inert and the default built-ins remain. Neither path bricks |
+| 4 | **codemode-absent / `--no-extensions` degradation** | The brick risk: if hiding were global, a session without codemode would have no tools at all | Two real sessions under `codemode.mode: "only"`: one with `-ne` and an explicit `-e` set that omits `builtin:codemode`, one with `--no-extensions`; plus the registered-but-inactive sub-case | codemode-absent: `read`/`edit` still declared and callable. `--no-extensions`: no codemode tool exists, so the mode is inert and the default built-ins remain. Neither path bricks |
+
+> **Re-verification correction 2026-10-05 (stage B).** This row originally spelled the
+> disabled-codemode case `-builtin:codemode`. That is **not a pi 1.0.3 CLI flag**:
+> `pi -builtin:codemode --version` → `Error: Unknown option: -builtin:codemode`. Codemode is
+> a *built-in extension*, loaded when discovery is on or when it is named explicitly, so the
+> case Gate 4 actually ran is `-ne` with an explicit `-e` set that omits `builtin:codemode`
+> (plus `--no-extensions` for 4b). See the Gate 4 findings for both commands and outputs.
 
 Gate 1's mode-`only` variant is the only *new* test artifact the spike may need. If the
 existing suite already runs under the mode override, the spec records that rather than
@@ -870,7 +886,10 @@ and edit in one script, which it did not.
 **The literal survived intact.** Script 2's `edit` returned
 `Successfully applied 1 edit(s) to scratch.txt. Lines: 4 -> 4.` with `2#0oe:BETA`, and the
 in-script read-back was `1#oeR:alpha` / `2#0oe:BETA` / `3#ypS:gamma` / `4#UO-:`. No retry, no hash
-mismatch; `wc -l` returned `3 scratch.txt` (correct — no trailing newline). The anchor is an opaque
+mismatch; `wc -l` returned `3 scratch.txt`. That is correct, but **not** because the file lacks a
+trailing newline: the scratch file is 17 bytes ending `gamma\n`, so it *does* end with a newline
+and `wc -l` counts its 3 newline bytes. The reader's 4th segment `4#UO-:` is an empty segment from
+splitting the file's text on `\n`, not a 4th line. The anchor is an opaque
 3-char string, but nothing in the script path transforms it: the only new failure mode over the
 `on` path is a transcription typo, and none occurred in this run.
 
@@ -892,6 +911,12 @@ hashline-edit's rule verbatim:
 still names `write` and `Agent`, both hidden from the tool list. The mode hides the
 *declarations*, not the instruction text that describes them.
 
+The `rules` section is **byte-identical between the two sessions** (1,608 chars, sha256
+`d1180d1fa20cdb0a8868d5c5ab0d24c682a359df8ee3eda8dd2c3d8b3cbb09d7`; only the `tools` section
+differs, 322 → 167 chars), so the leak does **not** reduce the measured saving — the saving is a
+declaration measurement and the instruction text is unchanged. It changes only what "hidden"
+means: declarations are hidden, the text that describes them is not.
+
 **`on` side, one sentence.** The `on` session did the same task as four direct calls — `read`,
 `edit`, `read`, `bash` over five assistant messages, anchor typed as a literal `pos` — where
 `only` folded them into two authored scripts over three assistant messages, anchor likewise
@@ -906,14 +931,114 @@ and `on-calls.txt` confirms the direct four-call route (`read` → `edit` → `r
 
 ### Verdict
 
-Not yet reached. One of `go` / `no-go` / `go-with-mitigations`, with the evidence above, the
-residual risks, and any mitigation's follow-up bead id.
+**`go-with-mitigations`.**
+
+**Scope — this verdict is true only of:** pi **1.0.3**, binary
+`/Users/jstegeman/.local/share/mise/installs/pi/1.0.3/pi/pi`, sha256
+`8207ce945286b0f7243b7ac25ae39a1bef938c526427666089197ef29378d119`; config
+`{"codemode":{"mode":"only"}}` with **`inlineBudget` at its default 3000** (the truncation
+read; the cost table uses 100000), `-nc` in every session, no `defaultTools`, and the extension
+set `codemode-bootstrap`, `bifrost`, `hashline-edit`, `pi-beads`, `pi-subagents`,
+`pi-superpowers-plus` plus `builtin:codemode`. A different build, budget or extension set voids
+it. Gates 1–2 were exercised through the `@earendil-works/pi-coding-agent@0.99.1` e2e harness
+(the version `packages/pi-subagents` pins) and transfer to 1.0.3 by the code-path equivalences
+recorded in those findings, not by running the 1.0.3 binary; gates 3–4 and the measurement are
+read from real 1.0.3 sessions.
+
+**The four gates — all PASS.** Commands and raw output are in each finding.
+
+| # | Gate | Result | Evidence |
+|---|---|---|---|
+| 1 | Tool-scope veto under `only` | **PASS** | `test/e2e/codemode-nested-scope.e2e.test.ts` under `PI_CODING_AGENT_DIR=…/agentdir-only`; `_hiddenDeclarations` is `["read"]`, so the mode took effect; `tools.probe_allowed({})` ran, `tools.probe_denied({})` → `Tool "probe_denied" is not available to this subagent.` |
+| 2 | Registry gate (`disallowedTools`) under `only` | **PASS** | Same run with `disallowedTools: ["probe_denied"]`: the script's `tools.probe_denied` is `TypeError: not a function`, and `ALL_TOOLS` is `["read","probe_allowed"]` against `["read","probe_allowed","probe_denied"]` in the base session (positive control present) |
+| 3 | `codemode` declared under `only` | **PASS** | Existing 1.0.3 transcript: the declared set is exactly `codemode` (n=1) and the seven `direct` tools are hidden. `codemode` is `model-only`, so `hiddenDeclarations = direct ∧ declared` cannot hide it |
+| 4 | codemode-absent / `--no-extensions` degradation | **PASS** | 4a (`-ne`, explicit `-e` set omitting `builtin:codemode`): declared `read, bash, edit, write, grep, Agent, set_phase`, nothing hidden, and `read` callable (`toolName=read isError=False`). 4b (`--no-extensions`): `toolsAdded` is `read, bash, edit, write`. Registered-but-inactive: nothing hidden. Neither bricks |
+
+All four pass, so §6's rule makes `go` **eligible** — it does not make it automatic: the same
+rule says the verdict weighs the findings and names the residual risks. The two findings below
+are why the word is `go-with-mitigations`, and why that is a finding-driven judgement rather
+than the plan's expectation.
+
+**Saving — a finding, not a gate, not a threshold.** Under `only` the model-facing declared
+payload falls from 22,144 chars over 8 tools to 12,626 chars over 1 tool (`codemode`): a net
+**9,518 chars ≈ 2,380 est. tokens**, ~43% of the declared payload (`chars/4`, a heuristic, not
+a tokenizer; the raw `toolsAdded` sum of 376 is pre-projection and is not the saving). It is
+reported, never thresholded: no value of it would have changed a gate result.
+
+**Residual risk (a) — the discovery regression.** At `inlineBudget: 3000`, 17 of 21 callable
+tools are listed: `beads` 9/12 with the ` (some tools not listed)` marker, `subagents` 2/2
+complete, the non-namespaced group 6/7. Dropped: `Agent`, `beads_create`, `beads_create_list`,
+`beads_update`. The three `beads_*` write tools drop from a *marked* group, so the model is told
+the listing is partial and can reach them by literal name or through `searchTools()`/`ALL_TOOLS`
+(both documented in the codemode description). **`Agent` drops silently**: it has no namespace,
+the non-namespaced group has no heading, and incompleteness is reported per namespace, so
+nothing in the tool list says anything is missing. `Agent` is the primary subagent-dispatch tool
+— and the one decision 6 kept `direct` precisely to preserve its prose. Under `only` it stays
+callable as `tools.Agent`, but a model that does not already know it exists will not find it.
+That is a real behaviour change bought with 2,380 tokens, and it is the reason this verdict is
+not `go`. Mitigation: **`pi-packages-graey`** — make the omission non-silent (namespace `Agent`
+so its group carries the marker, or take it upstream).
+
+**Residual risk (b) — the instruction-text leak.** The system prompt's `rules` section is
+**byte-identical between the two sessions** (1,608 chars, sha256
+`d1180d1fa20cdb0a8868d5c5ab0d24c682a359df8ee3eda8dd2c3d8b3cbb09d7`); only the `tools` section
+shrinks (322 → 167 chars). 8 of the block's 12 content lines — 1,290 of its 1,608 chars — name
+a tool that `only` hides (`edit` three times, `write`, `Agent` four times). Because the saving
+is a *declaration* measurement, the leak does not reduce it; what it changes is the meaning of
+"hidden" — declarations are hidden, the instruction text that describes them is not. It is also
+why the isolated trial needed no `searchTools()`/`describeTool()` call. That cuts both ways: the
+leak is currently the only remaining cue that `Agent` exists (risk (a)), and it is not ours to
+rely on — pi could stop leaking it in any release, at which point (a) becomes a genuinely
+silent tool. Tracking: **`pi-packages-peefw`**.
+
+**Why not `go`.** All four gates pass, the core tools (`read`/`edit`/`bash`/`write`) all survive
+at 3000, and the trial's ergonomic cost is bounded (two authored scripts instead of four direct
+calls, no retries, the anchor survived). But a gate pass licenses the *mechanism*, not the
+surface: risk (a) is a silent loss of the primary dispatch tool whose only remaining cue is the
+accidental leak in (b), and it has a cheap real fix. Naming that fix and doing it before
+adoption is exactly the difference between `go` and `go-with-mitigations`.
+
+**Why not `no-go`.** Nothing disqualifying fired. §2's own disqualifier — a core tool demoted to
+`searchTools()` discovery — does not apply: all four core tools are listed at 3000. No gate
+failed, nothing bricks, the mode is inert without codemode, and the abort condition was not
+triggered. The discovery regression is confined to one non-namespaced tool and is addressable
+without changing the mode.
+
+**Remaining live risks from `### Risks and abort conditions`.**
+
+- **`inlineBudget` is a knob (risk 5).** Everything above is at the default 3000, where
+  `Agent`(1154) is refused with 946 left and the last admitted tool is `beads_ready`(275).
+  Raising the budget re-lists `Agent` and lowers the saving; lowering it can push a core tool
+  out. The verdict is at 3000, not "at any budget".
+- **The trial's ergonomics read is subjective (risk 4).** One `only` session, no retries, and
+  the anchor survived by **literal transcription** — the variable route §5 named was not
+  exercised, recorded as an honest deviation. The user has not weighed in; no subjective number
+  is asserted.
+- **Evidence transfer for gates 1–2.** They were run on the 0.99.1 harness the package pins and
+  transfer by code-path equivalence; a 1.0.3 in-process run of those suites was not made.
+- Retired: the bundle-vs-published-package risk (provenance), the transcript-payload risk
+  (verified before parsing), and the subagent-inherits-the-mode risk (probed —
+  `_hiddenDeclarations` is `["read"]` under the mode-`only` agent dir in the subagent harness).
+
+### Follow-ups
+
+| Bead | Kind | What |
+|---|---|---|
+| `pi-packages-graey` | mitigation (risk (a)) | Make `Agent`'s budget omission non-silent under `codemode.mode: "only"` — namespace it so its group carries ` (some tools not listed)`, or take it upstream; verify from a real mode-`only` session at `inlineBudget: 3000` |
+| `pi-packages-peefw` | tracking (risk (b)) | Track the instruction-text leak upstream: the system-prompt `rules` block is byte-identical under `only`, so hidden tools are still taught; re-check on the next pi bump |
+
+The verdict is `go-with-mitigations` only while these are open. If `pi-packages-graey` is
+closed as wontfix, risk (a) stands unmitigated and the honest verdict for `Agent`-dependent work
+reverts to `no-go`.
 
 ### Re-verification note for the stage-A text
 
-One stage-A claim is already suspect on 1.0.3 and is corrected here if the re-check
-confirms it: "§3 pi-beads" says `selectCatalog` fills `codemode.inlineBudget`
-"cheapest-declaration-first, not most-important-first". The 1.0.3 source is **round-robin
-across groups, cheapest-first *within* each group** — each namespace gets a turn before any
-group takes a second. Stage B's argument rests on how the budget is spent, so the sentence
-is corrected with a note if the rest of the re-check holds.
+**Applied 2026-10-05.** One stage-A claim was already suspect on 1.0.3: "§3 pi-beads" said
+`selectCatalog` fills `codemode.inlineBudget` "cheapest-declaration-first, not
+most-important-first". The 1.0.3 source is **round-robin across groups, cheapest-first
+*within* each group** — each namespace gets a turn before any group takes a second — and the
+white-box cross-check (§Truncation) reproduced the transcript's 17-tool listing exactly under
+that rule. The §3 sentence is therefore corrected in place, with the original wording quoted in
+the correction note there. The other two stage-A claims the spike re-checked are the
+`-builtin:codemode` flag (Correction B, in §Method's gate-4 row) and the `wc -l` / `rules`
+explanation (Correction C, in §Trial); both are applied.
