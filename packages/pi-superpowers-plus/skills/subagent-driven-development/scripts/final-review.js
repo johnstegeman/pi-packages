@@ -37,9 +37,10 @@ const REQUIRED_ARGS = ['base', 'head', 'packagePath', 'gateBeadId']
 const missingArgs = REQUIRED_ARGS.filter((f) => typeof ARGS[f] !== 'string' || ARGS[f].trim() === '')
 if (missingArgs.length > 0) failArgs('missing required args: ' + missingArgs.join(', '))
 
-// Beads guardrail: workflow children are read-only on beads. implementer-prompt.md:48 carries the
-// identical IMPL text, and skills-contract.test.mjs pins every copy byte-for-byte against CORE +
-// its audience tail. Keep each rendered string on ONE line.
+// Beads guardrail: workflow children are read-only on beads. Only the REVIEW rendering is declared
+// here — all three of this script's prompts are reviewer-facing (finders, refuters, writer);
+// fix-loop.js and wave-parallel.js declare the IMPL rendering for implementer-facing children.
+// Every copy must stay byte-identical to CORE + its audience tail (skills-contract.test.mjs) on ONE line.
 const BEADS_GUARDRAIL_REVIEW =
   "**Do NOT create, update, or close any beads issues (beads_* tools / bd commands) — task tracking belongs to the orchestrator. Your beads access is READ-ONLY — reading the task/gate bead is fine; never write. Report your verdict; the controller records it.**"
 

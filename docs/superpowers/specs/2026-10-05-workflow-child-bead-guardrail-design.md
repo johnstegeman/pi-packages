@@ -156,7 +156,7 @@ skills tree and is the existing structural contract for the prompt set:
 1. **Canonical copy pin** — `implementer-prompt.md` contains exactly `CORE + TAIL_IMPL`.
 2. **Per-file variant assertions** for the 17 locations above.
 3. **Exhaustiveness** — mechanical conventions, each failing on a new match not in the list:
-   - every `skills/**/*-prompt.md` must contain `CORE`;
+   - every `*-prompt.md` under `skills/subagent-driven-development/` must contain `CORE`;
    - every `skills/subagent-driven-development/scripts/*.js` containing `agent(` must contain `CORE`
      (any script that emits a prompt);
    - every `agent-templates/*.md` except `explore.md` must contain `CORE`.

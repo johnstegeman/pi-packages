@@ -188,7 +188,10 @@ const GUARDRAIL_IMPL = `**${CORE}${TAIL_IMPL}**`;
 const GUARDRAIL_REVIEW = `**${CORE}${TAIL_REVIEW}**`;
 const IMPL = "IMPL";
 const REVIEW = "REVIEW";
-const rendering = (variant) => (variant === IMPL ? GUARDRAIL_IMPL : GUARDRAIL_REVIEW);
+const rendering = (variant) => {
+  if (variant !== IMPL && variant !== REVIEW) throw new Error(`unknown guardrail variant: ${variant}`);
+  return variant === IMPL ? GUARDRAIL_IMPL : GUARDRAIL_REVIEW;
+};
 
 test("beads guardrail: implementer-prompt.md stays the canonical IMPL copy", () => {
   const p = join(root, "skills", "subagent-driven-development", "implementer-prompt.md");
@@ -224,16 +227,22 @@ test("beads guardrail: every prompt source carries the audience-correct variant"
 
 test("beads guardrail: no prompt source is left unguarded", () => {
   const offenders = [];
-  // 1. every prompt template the skill ships
+  // 1. every prompt template the SDD skill ships. Deliberately SDD-scoped, not skills/**: another
+  // skill's prompt template is not this package's beads guardrail to impose (spec, Out of scope).
+  const sddDir = join(root, "skills", "subagent-driven-development");
   for (const f of skillFiles()) {
+    if (!f.startsWith(sddDir)) continue;
     if (f.endsWith("-prompt.md") && !readFileSync(f, "utf8").includes(CORE)) offenders.push(f);
   }
-  // 2. every SDD workflow script that emits a prompt
+  // 2. every SDD workflow script that emits a prompt. `.js` only: the workflow loader runs `.js`
+  // scripts and `run-workflow.mjs` is the test harness, not a prompt source. This is a file-level
+  // presence check — per-prompt coverage is each script's own behavioural test (the retry-path
+  // prompts only exist on the gate-failed branch, which a source scan cannot see).
   const scriptsDir = join(root, "skills", "subagent-driven-development", "scripts");
   for (const e of readdirSync(scriptsDir)) {
     if (!e.endsWith(".js")) continue;
     const src = readFileSync(join(scriptsDir, e), "utf8");
-    if (src.includes("agent(") && !src.includes(CORE)) offenders.push(join(scriptsDir, e));
+    if (/\bagent\s*\(/.test(src) && !src.includes(CORE)) offenders.push(join(scriptsDir, e));
   }
   // 3. every agent template except the read-only research agent
   const templatesDir = join(root, "agent-templates");
