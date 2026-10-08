@@ -323,6 +323,38 @@ describe("createWorkflowHost — spawn mapping", () => {
     expect(failed.skipped).toBeUndefined();
     expect(skipped).toMatchObject({ ok: false, skipped: true });
   });
+
+  it("forwards the child's liveness signals into request.onActivity", async () => {
+    // The watchdog's whole activity signal is this mapping. Only the e2e
+    // exercised it, so a callback dropped here would leave a child watched but
+    // unable to prove it was alive — a false positive 10 minutes later.
+    const stub = stubManager();
+    const host = createWorkflowHost({ pi: {} as any, ctx: ctx(), manager: stub.manager });
+    const onActivity = vi.fn();
+
+    await host.spawnAgent(request({ onActivity }));
+
+    const options = stub.spawnAndWait.mock.calls[0][4];
+    for (const name of ["onToolActivity", "onTurnEnd", "onAssistantUsage"] as const) {
+      expect(typeof options[name]).toBe("function");
+      options[name]();
+    }
+    expect(onActivity).toHaveBeenCalledTimes(3);
+  });
+
+  it("does not require a request to carry onActivity", async () => {
+    const stub = stubManager();
+    const host = createWorkflowHost({ pi: {} as any, ctx: ctx(), manager: stub.manager });
+
+    await host.spawnAgent(request());
+
+    const options = stub.spawnAndWait.mock.calls[0][4];
+    expect(() => {
+      options.onToolActivity();
+      options.onTurnEnd();
+      options.onAssistantUsage();
+    }).not.toThrow();
+  });
 });
 
 /* ------------------------------------------------------------------------- *
