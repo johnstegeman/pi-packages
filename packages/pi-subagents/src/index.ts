@@ -34,7 +34,7 @@ import { getMaxSubagentDepth, setMaxSubagentDepth } from "./nested-tools.js";
 import { createOutputFilePath, ensureOutputFile, getOutputTranscriptDefault, sessionTaskDir, setOutputTranscriptDefault, streamToOutputFile, writeInitialEntry } from "./output-file.js";
 import { SubagentScheduler } from "./schedule.js";
 import { resolveStorePath, ScheduleStore } from "./schedule-store.js";
-import { applyAndEmitLoaded, loadSettings, type SubagentsSettings, saveAndEmitChanged, type ToolDescriptionMode } from "./settings.js";
+import { applyAndEmitLoaded, getWorkflowStallTimeoutSecs, loadSettings, type SubagentsSettings, saveAndEmitChanged, setWorkflowStallTimeout, type ToolDescriptionMode } from "./settings.js";
 import { getForegroundOutcomeNote, getStatusNote, partialOutputSuffix } from "./status-note.js";
 import { type AgentConfig, type AgentInvocation, type AgentMentionMode, type AgentRecord, type JoinMode, type NotificationDetails, type SubagentType, type ViewerMarkdownMode, type WidgetMode } from "./types.js";
 import { createMentionProvider, mentionRoster, type TypeInfo } from "./ui/agent-mention.js";
@@ -67,7 +67,16 @@ import { WORKFLOW_ENTRY_TYPE, type WorkflowEntryData, workflowEntryData } from "
 import { createWorkflowHost } from "./workflow/host.js";
 import { appendJournal, readJournal, type WorkflowJournalEntry } from "./workflow/journal.js";
 import { extractMeta, type WorkflowMeta, workflowCallName } from "./workflow/meta.js";
-import { elapsedMs } from "./workflow/progress.js";
+// The progress module's elapsed-time formatter is `formatRunDuration` (see
+// its own doc comment); the widget module's `formatDuration` takes a START
+// TIMESTAMP, so the two no longer share a name at this call site.
+import {
+  elapsedMs,
+  formatRunDuration,
+  stats,
+  type WorkflowEntry,
+  type WorkflowRunStatus,
+} from "./workflow/progress.js";
 import { assertWorkflowArgs, runWorkflow } from "./workflow/runtime.js";
 import { resolveWorkflowScript } from "./workflow/saved.js";
 import { completeWorkflowTask, createWorkflowTask, failWorkflowTask, formatWorkflowNotification, resolveResumeTarget, updateWorkflowProgressBatch, type WorkflowTask, workflowResultText, workflowRunId } from "./workflow/task.js";
@@ -796,6 +805,11 @@ export default function (pi: ExtensionAPI) {
   // bound session_start, so a filtered-out activation never advertises (#142).
   pi.on("session_start", async (_event, ctx) => {
     currentCtx = ctx;
+    // Before anything can ask about a run: the process that launched one is
+    // gone, so the transcript is the only place its id and outcome survive
+    // (§5d). Cheap and read-only — a session with no workflows scans nothing
+    // it can match.
+    rehydrateWorkflowRuns(ctx);
     if (ctx.hasUI) {
       widget.setUICtx(ctx.ui);
       fleet.setUICtx(ctx.ui as any);
@@ -1434,6 +1448,7 @@ export default function (pi: ExtensionAPI) {
       setShowCost,
       setShowModel,
       setViewerMarkdown,
+      setWorkflowStallTimeout,
     },
     (event, payload) => pi.events.emit(event, payload),
   );
@@ -2326,6 +2341,108 @@ Terse command-style prompts produce shallow, generic work.
   const workflowTasks = new Map<string, WorkflowTask>();
 
   /**
+   * Settled runs recovered from the session transcript, by run id.
+   *
+   * Deliberately NOT `workflowTasks`: a recovered run is not live — it has no
+   * control surface, no journal and no abort handle — and offering it to the
+   * fleet's pause/skip/retry keys or to `resumeFromRunId` would promise a
+   * handle that does not exist. This map exists so `get_subagent_result` can
+   * still answer for a run after the process that launched it is gone (§5d).
+   */
+  const recoveredWorkflowRuns = new Map<string, WorkflowEntryData>();
+
+  /**
+   * Runs the transcript shows were STARTED but never settled, by run id.
+   *
+   * A run that was mid-flight at process death wrote no terminal entry — that
+   * append only happens on settle. Without this set it would simply vanish and
+   * the caller would be told its id is unknown; "interrupted" is the honest
+   * answer, and it can never be a stale `running` (§5d).
+   */
+  const interruptedWorkflowRuns = new Set<string>();
+
+  /**
+   * Rebuild the run-status maps from the session transcript.
+   *
+   * The process that launched a run keeps `workflowTasks` in memory only, so
+   * a reload would otherwise leave `get_subagent_result("wf_…")` answering
+   * "no such run" for every run the session ever did. Two sources, because a
+   * run leaves two different traces: a settled one appends a terminal entry
+   * (the settle path), and a started one leaves its id on the tool result —
+   * which is the only trace a run killed mid-flight has (§5d).
+   */
+  function rehydrateWorkflowRuns(ctx: ExtensionContext): void {
+    recoveredWorkflowRuns.clear();
+    interruptedWorkflowRuns.clear();
+    const entries = ctx.sessionManager?.getEntries?.() ?? [];
+    const started = new Set<string>();
+    for (const entry of entries) {
+      if (entry.type === "custom" && entry.customType === WORKFLOW_ENTRY_TYPE) {
+        const data = entry.data as WorkflowEntryData | undefined;
+        // An entry written before ids were persisted cannot be resolved to a
+        // run; skipping it is the only honest thing to do with it.
+        if (typeof data?.id === "string") recoveredWorkflowRuns.set(data.id, data);
+        continue;
+      }
+      if (
+        entry.type === "message" &&
+        entry.message.role === "toolResult" &&
+        entry.message.toolName === SUBAGENT_TOOL_NAMES.WORKFLOW
+      ) {
+        const taskId = (entry.message.details as unknown as { taskId?: unknown } | undefined)?.taskId;
+        if (typeof taskId === "string") started.add(taskId);
+      }
+    }
+    for (const id of started) {
+      // A run this process is running right now is live, not interrupted:
+      // session_start can fire again (a switch) while a run is in flight.
+      if (!recoveredWorkflowRuns.has(id) && !workflowTasks.has(id)) interruptedWorkflowRuns.add(id);
+    }
+  }
+
+  /**
+   * A run as the status payload needs it, from the live task or a recovered
+   * snapshot.
+   *
+   * One shape for both because `get_subagent_result` asks the same question
+   * either way; without it the recovered branch would be a near-copy of the
+   * live one and the two would drift.
+   */
+  function workflowRunStatusView(id: string):
+    | {
+        status: WorkflowRunStatus;
+        progress: readonly WorkflowEntry[];
+        agentCount: number;
+        elapsedMs: number;
+        result: string;
+      }
+    | undefined {
+    const task = workflowTasks.get(id);
+    if (task) {
+      return {
+        status: task.status,
+        progress: task.workflowProgress,
+        agentCount: task.agentCount,
+        elapsedMs: elapsedMs(task, Date.now()),
+        result: workflowResultText(task),
+      };
+    }
+    const recovered = recoveredWorkflowRuns.get(id);
+    if (!recovered) return undefined;
+    return {
+      status: recovered.status,
+      progress: recovered.progress,
+      agentCount: recovered.agentCount,
+      // The snapshot froze the clock at settle, so this is the run's real
+      // duration rather than the time since the reload.
+      elapsedMs: elapsedMs({ startTime: recovered.startTime, endTime: recovered.endTime }, Date.now()),
+      // A snapshot written before the outcome was persisted has nothing to
+      // report; "No output." is what a live run with no value says.
+      result: recovered.result ?? "No output.",
+    };
+  }
+
+  /**
    * Workflow runs as the fleet list wants them.
    *
    * Mapped here rather than handing `WorkflowTask` over the seam: the list is
@@ -2361,6 +2478,18 @@ Terse command-style prompts produce shallow, generic work.
         script: task.script,
         args: task.args,
         signal: task.abortController.signal,
+        // The user's window, converted to the milliseconds the runtime works
+        // in. Read per run, so a change in /agents → Settings applies to the
+        // next workflow rather than the next session. 0 passes straight
+        // through — the runtime reads it as "watchdog off", which is why this
+        // is a multiplication and not a `|| DEFAULT_STALL_TIMEOUT_MS`.
+        stallTimeoutMs: getWorkflowStallTimeoutSecs() * 1000,
+        // The run-level (wedged-worker) window is twice the child window, the
+        // same relationship the runtime's own default draws. The setting is
+        // the only switch: leaving this unset would arm the runtime's built-in
+        // 20-minute window even when the user set 0, making the Settings label
+        // "0 = off" a lie. `0 × 2` is still 0, so off stays off.
+        runStallTimeoutMs: getWorkflowStallTimeoutSecs() * 1000 * 2,
         host: createWorkflowHost({
           pi,
           ctx,
@@ -2369,7 +2498,15 @@ Terse command-style prompts produce shallow, generic work.
           rootSessionId: ctx.sessionManager.getSessionId(),
           workflowId: task.id,
         }),
-        onProgress: entries => updateWorkflowProgressBatch(task, entries),
+        onProgress: entries => {
+          // A stalled child is worth saying out loud, but not worth a turn: the
+          // run degrades and settles moments later, and the completion
+          // notification carries the count. `notify` is the non-triggering
+          // channel; `sendMessage` here would wake the model mid-run.
+          for (const label of updateWorkflowProgressBatch(task, entries)) {
+            if (ctx.hasUI) ctx.ui.notify(`Workflow child timed out (stalled): ${label}`, "warning");
+          }
+        },
         // The dialog's pause / skip / retry keys run through this; it is dropped
         // again when the task settles.
         onControl: control => { task.control = control; },
@@ -2383,6 +2520,27 @@ Terse command-style prompts produce shallow, generic work.
       completeWorkflowTask(task, result);
     } catch (err) {
       failWorkflowTask(task, err instanceof Error ? err.message : String(err));
+    }
+  }
+
+  /**
+   * Record a settled run in the session transcript.
+   *
+   * Both launch paths need this, and the entry is the only thing that
+   * outlives the process: a flag-launched run has no tool call to hang its
+   * card on, and a tool-launched run's card lives in `workflowTasks`, which
+   * a reload loses — without the entry the run is unqueryable and its result
+   * is gone (§5d).
+   */
+  function appendWorkflowEntry(task: WorkflowTask): void {
+    try {
+      pi.appendEntry<WorkflowEntryData>(WORKFLOW_ENTRY_TYPE, workflowEntryData(task));
+    } catch {
+      // A detached run can settle after its session was replaced or is
+      // shutting down, and pi refuses an entry from a stale ctx. There is
+      // nowhere left to record it, and losing the entry is better than an
+      // unhandled rejection from a promise nobody awaits. Same rule the
+      // completion nudge follows (`scheduleNudge`'s send).
     }
   }
 
@@ -2585,7 +2743,12 @@ Terse command-style prompts produce shallow, generic work.
 
       // Background, like Claude Code: the id comes back now and the run keeps
       // going without the tool call.
-      void runWorkflowTask(ctx, task).then(() => notifyWorkflowFinished(task));
+      void runWorkflowTask(ctx, task).then(() => {
+        // Same entry the flag path writes: without it this run exists only in
+        // `workflowTasks`, and a reload loses it (§5d).
+        appendWorkflowEntry(task);
+        notifyWorkflowFinished(task);
+      });
 
       return {
         content: [{
@@ -2748,7 +2911,7 @@ Terse command-style prompts produce shallow, generic work.
       // No tool call to attach a result card to, so the card becomes a session
       // entry (same layout), and the outcome is handed to the model as context
       // for its next turn rather than forcing one.
-      pi.appendEntry<WorkflowEntryData>(WORKFLOW_ENTRY_TYPE, workflowEntryData(task));
+      appendWorkflowEntry(task);
       pi.sendMessage({
         customType: "workflow-result",
         content: formatWorkflowNotification(task),
@@ -2767,9 +2930,10 @@ Terse command-style prompts produce shallow, generic work.
     // LOCAL PATCH (pi-packages) — see docs/pi-subagents-local-patch.md
     exposure: "codemode",
     namespace: SUBAGENTS_NAMESPACE,
+    // LOCAL PATCH (pi-packages) — see docs/pi-subagents-local-patch.md
     description:
-      "Check status and retrieve a background agent's full result — its completion notification carries only a preview. Use the agent ID returned by Agent.",
-    promptSnippet: "Check status and retrieve results from a background agent",
+      "Check status and retrieve a background agent's full result — its completion notification carries only a preview. Use the agent ID returned by Agent, or the workflow run ID returned by SubagentWorkflow (a `wf_…` id).",
+    promptSnippet: "Check status and retrieve results from a background agent or workflow run",
     // LOCAL PATCH (pi-packages) — see docs/pi-subagents-local-patch.md
     outputSchema: Type.Object({
       error: Type.Optional(Type.String()),
@@ -2779,7 +2943,7 @@ Terse command-style prompts produce shallow, generic work.
     }),
     parameters: Type.Object({
       agent_id: Type.String({
-        description: "The agent ID to check. The agent's handle also works — its `name` if you gave it one, otherwise its type (`explore`, `explore-2`).",
+        description: "The agent ID to check, or a workflow run ID (`wf_…`) returned by SubagentWorkflow. The agent's handle also works — its `name` if you gave it one, otherwise its type (`explore`, `explore-2`).",
       }),
       wait: Type.Optional(
         Type.Boolean({
@@ -2793,7 +2957,66 @@ Terse command-style prompts produce shallow, generic work.
       ),
     }),
     execute: async (_toolCallId, params, signal, _onUpdate, _ctx) => {
+      // LOCAL PATCH (pi-packages) — see docs/pi-subagents-local-patch.md
+      // An agent handle is caller-supplied — it may be a `name` that itself
+      // begins with `wf_` — so the agent lookup runs FIRST. Only a string that
+      // names no live agent is read as a workflow run id.
       const record = resolveAgentRef(params.agent_id);
+      //
+      // A `wf_…` id names a workflow RUN, not an agent: its children are
+      // deliberately absent from the agent lookup (they are owned by the run),
+      // and the run itself lives in `workflowTasks` — or, after a reload, in
+      // the transcript snapshots `session_start` recovers. Without this branch
+      // the id the SubagentWorkflow tool just handed the model answers
+      // `Agent not found` — the reported stall-watchdog symptom.
+      if (record === undefined && params.agent_id.startsWith("wf_")) {
+        const view = workflowRunStatusView(params.agent_id);
+        if (!view) {
+          // A run the transcript shows was started but never settled: it was
+          // mid-flight when the process died. Naming it interrupted beats both
+          // a bare "no such run" and the stale `running` the in-memory map
+          // would have left behind (§5d).
+          if (interruptedWorkflowRuns.has(params.agent_id)) {
+            return {
+              ...textResult(
+                `status: unknown | run "${params.agent_id}" was interrupted — the process ended while it was ` +
+                  `running, so it never settled and its result is lost.`,
+              ),
+              structuredContent: {
+                agentId: params.agent_id,
+                status: "unknown",
+                error: "workflow interrupted",
+              },
+            };
+          }
+          return {
+            ...textResult(`No workflow run "${params.agent_id}" in this session.`),
+            structuredContent: { error: "workflow not found" },
+          };
+        }
+        const totals = stats(view.progress, view.agentCount);
+        // Labels, not just the count `stats` already carries: the orchestrator
+        // has to be able to name which child was lost to the stall window.
+        const timedOut = view.progress.flatMap((entry) =>
+          entry.type === "workflow_agent" && entry.timedOut ? [entry.label] : [],
+        );
+        const summary =
+          `status: ${view.status} | agents: ${totals.done}/${totals.total}` +
+          ` | elapsed: ${formatRunDuration(view.elapsedMs)}` +
+          (timedOut.length > 0 ? ` | timed out: ${timedOut.join(", ")}` : "");
+        return {
+          ...textResult(view.status === "running" ? summary : `${summary}\n\n${view.result}`),
+          structuredContent: {
+            agentId: params.agent_id,
+            status: view.status,
+            // A running run has no result yet; the text body says so too. An
+            // omitted field is the honest shape — `"No output."` reads as a
+            // settled run that produced nothing.
+            ...(view.status === "running" ? {} : { result: view.result }),
+          },
+        };
+      }
+
       if (!record || !isTopLevelAgent(record)) {
         // LOCAL PATCH (pi-packages) — see docs/pi-subagents-local-patch.md
         return {
@@ -3533,6 +3756,9 @@ Write the file using the write tool. Only write the file, nothing else.`;
       showCost: isShowCostEnabled(),
       showModel: isShowModelEnabled(),
       viewerMarkdown: getViewerMarkdown(),
+      // Seconds, 0 = off — read per run, so unlike `workflowsEnabled` above this
+      // is the effective value rather than a session-frozen one.
+      workflowStallTimeoutSecs: getWorkflowStallTimeoutSecs(),
     } satisfies SubagentsSettings;
   }
 
@@ -3549,6 +3775,7 @@ Write the file using the write tool. Only write the file, nothing else.`;
 
   const NUMERIC_IDS = new Set([
     "maxConcurrent", "maxConcurrentForeground", "defaultMaxTurns", "graceTurns", "maxSubagentDepth",
+    "workflowStallTimeoutSecs",
   ]);
 
   async function showSettings(ctx: ExtensionCommandContext) {
@@ -3558,6 +3785,7 @@ Write the file using the write tool. Only write the file, nothing else.`;
       const dmt = getDefaultMaxTurns() ?? 0;
       const gt = getGraceTurns();
       const msd = getMaxSubagentDepth();
+      const wst = getWorkflowStallTimeoutSecs();
       // Label what unset actually does — it targets general-purpose even when
       // that is unregistered (the permissive hardcoded tier), so showing "none"
       // there would advertise strict dispatch for the most permissive state.
@@ -3601,6 +3829,13 @@ Write the file using the write tool. Only write the file, nothing else.`;
           description: "Hard cap on nested delegation — main is 0, its subagents 1 (0/1 = nesting off, Enter to type)",
           currentValue: String(msd),
           values: [String(msd)],
+        },
+        {
+          id: "workflowStallTimeoutSecs",
+          label: "Workflow stall timeout",
+          description: "Workflow stall timeout (seconds, 0 = off, Enter to type)",
+          currentValue: String(wst),
+          values: [String(wst)],
         },
         {
           id: "joinMode",
@@ -3787,6 +4022,19 @@ Write the file using the write tool. Only write the file, nothing else.`;
               : `Nested depth set to ${n}. Applies to agents started from now on.`,
           );
         }
+      } else if (id === "workflowStallTimeoutSecs") {
+        // 0 is meaningful here — it disables the watchdog — so this is the
+        // `n >= 0` shape of maxSubagentDepth, not the `n >= 1` of graceTurns.
+        const n = parseInt(value, 10);
+        if (n >= 0) {
+          setWorkflowStallTimeout(n);
+          notifyApplied(
+            ctx,
+            n === 0
+              ? "Workflow stall watchdog disabled"
+              : `Workflow stall timeout set to ${n}s. Applies to workflows started from now on.`
+          );
+        }
       } else if (id === "joinMode") {
         setDefaultJoinMode(value as JoinMode);
         notifyApplied(ctx, `Default join mode set to ${value}`);
@@ -3952,6 +4200,7 @@ Write the file using the write tool. Only write the file, nothing else.`;
 
     // If a numeric field ID was returned, prompt for typed input
     if (result && NUMERIC_IDS.has(result)) {
+      // One branch per id in NUMERIC_IDS; the final else is `graceTurns`.
       const current = result === "maxConcurrent"
         ? String(manager.getMaxConcurrent())
         : result === "maxConcurrentForeground"
@@ -3960,7 +4209,9 @@ Write the file using the write tool. Only write the file, nothing else.`;
             ? String(getDefaultMaxTurns() ?? 0)
             : result === "maxSubagentDepth"
               ? String(getMaxSubagentDepth())
-              : String(getGraceTurns());
+              : result === "workflowStallTimeoutSecs"
+                ? String(getWorkflowStallTimeoutSecs())
+                : String(getGraceTurns());
 
       const label = result === "maxConcurrent"
         ? "Max concurrency (1+)"
@@ -3970,7 +4221,9 @@ Write the file using the write tool. Only write the file, nothing else.`;
             ? "Default max turns (0 = unlimited)"
             : result === "maxSubagentDepth"
               ? "Nested depth (0/1 = nesting off)"
-              : "Grace turns (1+)";
+              : result === "workflowStallTimeoutSecs"
+                ? "Workflow stall timeout (seconds, 0 = off)"
+                : "Grace turns (1+)";
 
       // Loop until user enters a valid integer or cancels (Esc / null).
       // Silently trims whitespace; rejects non-numeric input by re-prompting.

@@ -87,7 +87,12 @@ export function ctx(overrides: Record<string, unknown> = {}) {
     cwd: process.cwd(),
     model: undefined,
     modelRegistry: { find: vi.fn(), getAvailable: vi.fn(() => []) },
-    sessionManager: { getSessionId: vi.fn(() => "s1"), getBranch: vi.fn(() => []) },
+    sessionManager: {
+      getSessionId: vi.fn(() => "s1"),
+      getBranch: vi.fn(() => []),
+      // The settle path reads this back on session_start (§5d).
+      getEntries: vi.fn(() => []),
+    },
     getSystemPrompt: vi.fn(() => "parent"),
     ...overrides,
   } as any;

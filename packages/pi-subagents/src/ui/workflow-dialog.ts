@@ -53,7 +53,7 @@ import type { WorkflowMeta } from "../workflow/meta.js";
 import {
   buildPhaseGroups,
   displayState,
-  formatDuration,
+  formatRunDuration,
   header,
   isLive,
   type PhaseGroup,
@@ -112,6 +112,8 @@ export const WORKFLOW_DIALOG_SPINNER_MS = 80;
 export interface WorkflowDialogGlyphs {
   tick: string;
   cross: string;
+  /** `⚠` — a child the watchdog stopped, which the cross cannot tell apart. */
+  warning: string;
   /** `◌` — queued or interrupted. The card has no row that draws this. */
   queued: string;
   /** `figures.pointer` — the selected row in either pane. */
@@ -141,6 +143,7 @@ export interface WorkflowDialogGlyphs {
 export const UNICODE_DIALOG_GLYPHS: WorkflowDialogGlyphs = {
   tick: UNICODE_GLYPHS.tick,
   cross: UNICODE_GLYPHS.cross,
+  warning: UNICODE_GLYPHS.warning,
   queued: "◌",
   pointer: "❯",
   focus: UNICODE_GLYPHS.pointer,
@@ -164,6 +167,7 @@ export const UNICODE_DIALOG_GLYPHS: WorkflowDialogGlyphs = {
 export const ASCII_DIALOG_GLYPHS: WorkflowDialogGlyphs = {
   tick: ASCII_GLYPHS.tick,
   cross: ASCII_GLYPHS.cross,
+  warning: ASCII_GLYPHS.warning,
   queued: "o",
   pointer: ">",
   focus: ASCII_GLYPHS.pointer,
@@ -203,6 +207,10 @@ export function dialogRowGlyph(
       return { text: glyphs.cross, color: "dim" };
     case "blocked":
       return { text: glyphs.cross, color: "warning" };
+    case "timed-out":
+      // Blocked already spends the warning cross; the watchdog stop gets the
+      // warning glyph so the two failures are told apart at a glance.
+      return { text: glyphs.warning, color: "warning" };
     case "queued":
     case "interrupted":
       return { text: glyphs.queued, color: "dim" };
@@ -226,6 +234,8 @@ export const WORKFLOW_DIALOG_COPY = {
   noTranscript: "Transcript not available.",
   stoppedEarly: "The workflow stopped before this agent finished.",
   skippedByUser: "Skipped by user.",
+  /** A timed-out child's outcome when its entry carries no error text. */
+  timedOutStalled: "Timed out (stalled).",
   noToolCallsYet: "No tool calls yet.",
   noToolCalls: "No tool calls.",
   noAgents: "No agents",
@@ -256,6 +266,7 @@ export const WORKFLOW_DIALOG_FILTERS: readonly WorkflowDialogFilter[] = [
   "queued",
   "done",
   "failed",
+  "timed-out",
   "blocked",
   "skipped",
   "interrupted",
@@ -413,7 +424,7 @@ export function subStatusAnnotations(
   }
   if (entry.attempt != null && entry.attempt > 1) parts.push(`attempt ${entry.attempt}`);
   if (state === "queued" && entry.queuedAt != null) {
-    parts.push(`waiting ${formatDuration(Math.max(0, now - entry.queuedAt))}`);
+    parts.push(`waiting ${formatRunDuration(Math.max(0, now - entry.queuedAt))}`);
   }
   return parts;
 }
@@ -572,6 +583,8 @@ function outcomeBody(entry: WorkflowAgentEntry, state: WorkflowDisplayState): st
     case "failed":
     case "blocked":
       return entry.error ?? WORKFLOW_DIALOG_COPY.noTranscript;
+    case "timed-out":
+      return entry.error ?? WORKFLOW_DIALOG_COPY.timedOutStalled;
     case "done":
       return entry.resultPreview ?? WORKFLOW_DIALOG_COPY.noTranscript;
   }
@@ -605,6 +618,7 @@ function statusWord(state: WorkflowDisplayState): string {
     case "failed": return "Failed";
     case "skipped": return "Skipped";
     case "blocked": return "Blocked";
+    case "timed-out": return "Timed out";
     case "queued": return "Queued";
     case "interrupted": return "Stopped";
     case "running": return "Running";
@@ -656,7 +670,7 @@ function agentRow(options: {
   }
   // The duration sits flush right, so a column of rows reads as a column of
   // durations rather than as ragged text.
-  const duration = entry.durationMs ? [{ text: `${formatDuration(entry.durationMs)} `, color: "dim" as const }] : [];
+  const duration = entry.durationMs ? [{ text: `${formatRunDuration(entry.durationMs)} `, color: "dim" as const }] : [];
   return duration.length > 0 ? rightAlign(head, duration, width) : clampLine(head, width);
 }
 
@@ -792,7 +806,7 @@ export function layoutWorkflowDialog(input: WorkflowDialogInput): WorkflowCardLi
     if (thinking) stats.push(thinking);
     if (entry.tokens) stats.push(`${formatCompactTokens(entry.tokens)} tok`);
     if (entry.toolCalls) stats.push(`${entry.toolCalls} tool call${entry.toolCalls === 1 ? "" : "s"}`);
-    if (entry.durationMs) stats.push(formatDuration(entry.durationMs));
+    if (entry.durationMs) stats.push(formatRunDuration(entry.durationMs));
     if (stats.length > 0) {
       detailRows.push(clampLine([{ text: ` ${stats.join(" · ")}`, color: "dim" }], rightWidth));
     }

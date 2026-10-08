@@ -1260,6 +1260,8 @@ export async function resumeAgent(
     onToolActivity?: (activity: ToolActivity) => void;
     onAssistantUsage?: (usage: LifetimeUsage) => void;
     onCompaction?: (info: { reason: "manual" | "threshold" | "overflow"; tokensBefore: number }) => void;
+    /** Called at the end of each resumed turn, for liveness reporting. */
+    onTurnEnd?: (turnCount: number) => void;
     signal?: AbortSignal;
   } = {},
 ): Promise<{ text: string; failure?: string }> {
@@ -1270,10 +1272,14 @@ export async function resumeAgent(
   const collector = collectResponseText(session);
   const cleanupAbort = forwardAbortSignal(session, options.signal);
 
-  const unsubEvents = (options.onToolActivity || options.onAssistantUsage || options.onCompaction)
+  // Counted here so a resumed turn's `onTurnEnd` carries the same cumulative
+  // value the spawn path reports.
+  let resumeTurnCount = 0;
+  const unsubEvents = (options.onToolActivity || options.onAssistantUsage || options.onCompaction || options.onTurnEnd)
     ? session.subscribe((event: AgentSessionEvent) => {
         if (event.type === "tool_execution_start") options.onToolActivity?.({ type: "start", toolName: event.toolName });
         if (event.type === "tool_execution_end") options.onToolActivity?.({ type: "end", toolName: event.toolName });
+        if (event.type === "turn_end") options.onTurnEnd?.(++resumeTurnCount);
         if (event.type === "message_end" && event.message.role === "assistant") {
           const u = (event.message as any).usage;
           if (u) options.onAssistantUsage?.({

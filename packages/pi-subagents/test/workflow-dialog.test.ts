@@ -155,14 +155,24 @@ describe("dialog glyph mapping", () => {
     agentEntry({ index: 5, label: "running", state: "progress", startedAt: START }),
   ];
 
-  it("maps every one of the seven display states to its glyph and colour", () => {
+  it("maps every display state to its glyph and colour", () => {
     expect(dialogRowGlyph("done", UNICODE_DIALOG_GLYPHS)).toEqual({ text: "✔", color: "success" });
     expect(dialogRowGlyph("failed", UNICODE_DIALOG_GLYPHS)).toEqual({ text: "✘", color: "error" });
     expect(dialogRowGlyph("skipped", UNICODE_DIALOG_GLYPHS)).toEqual({ text: "✘", color: "dim" });
     expect(dialogRowGlyph("blocked", UNICODE_DIALOG_GLYPHS)).toEqual({ text: "✘", color: "warning" });
+    expect(dialogRowGlyph("timed-out", UNICODE_DIALOG_GLYPHS)).toEqual({ text: "⚠", color: "warning" });
     expect(dialogRowGlyph("queued", UNICODE_DIALOG_GLYPHS)).toEqual({ text: "◌", color: "dim" });
     expect(dialogRowGlyph("interrupted", UNICODE_DIALOG_GLYPHS)).toEqual({ text: "◌", color: "dim" });
     expect(dialogRowGlyph("running", UNICODE_DIALOG_GLYPHS, 3)).toEqual({ text: SPINNER[3], color: "dim" });
+  });
+
+  it("draws a timed-out row apart from a plain failure", () => {
+    // Blocked already spends the warning-coloured cross; the watchdog stop
+    // needs its own mark, not a colour the eye has learned means "gate".
+    const lines = styled({
+      progress: [agentEntry({ index: 0, label: "stalled", state: "error", timedOut: true })],
+    });
+    expect(lines.find(l => l.includes("stalled"))).toContain("<warning>⚠</warning>");
   });
 
   it("keys off the derived display state, not the raw entry state", () => {
@@ -206,7 +216,7 @@ describe("dialog glyph mapping", () => {
   });
 
   it("keeps an ASCII tier one column wide for every glyph", () => {
-    for (const key of ["tick", "cross", "queued", "pointer", "focus"] as const) {
+    for (const key of ["tick", "cross", "queued", "warning", "pointer", "focus"] as const) {
       expect(visibleWidth(ASCII_DIALOG_GLYPHS[key]), key).toBe(1);
     }
     const joined = dialog({ progress: live, ascii: true }).join("\n");
@@ -484,6 +494,10 @@ describe("per-agent detail", () => {
     expect(outcome({ state: "error", skipped: true })).toEqual(["  Skipped by user."]);
     expect(outcome({ state: "error", error: "boom" })).toEqual(["  boom"]);
     expect(outcome({ state: "error", blocked: true })).toEqual([`  ${WORKFLOW_DIALOG_COPY.noTranscript}`]);
+    expect(outcome({ state: "error", timedOut: true, error: "Timed out after 600s of inactivity." })).toEqual([
+      "  Timed out after 600s of inactivity.",
+    ]);
+    expect(outcome({ state: "error", timedOut: true })).toEqual([`  ${WORKFLOW_DIALOG_COPY.timedOutStalled}`]);
     expect(outcome({ state: "done", resultPreview: "shipped" })).toEqual(["  shipped"]);
     expect(outcome({ state: "progress", startedAt: START })).toEqual([
       "  Not available yet (agent still running).",

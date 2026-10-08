@@ -37,7 +37,7 @@ import type { WorkflowMeta } from "../workflow/meta.js";
 import {
   buildPhaseGroups,
   collapse,
-  formatDuration,
+  formatRunDuration,
   header,
   sizeWarning,
   stats,
@@ -250,17 +250,24 @@ export function agentStatSegments(entry: WorkflowAgentEntry): string[] {
   if (model) parts.push(model);
   if (entry.tokens) parts.push(formatCompactTokens(entry.tokens));
   if (entry.toolCalls) parts.push(`${entry.toolCalls} tool call${entry.toolCalls === 1 ? "" : "s"}`);
-  if (entry.durationMs) parts.push(formatDuration(entry.durationMs));
+  if (entry.durationMs) parts.push(formatRunDuration(entry.durationMs));
   return parts;
 }
 
 /**
  * The recovered inline mapping — keyed on the raw entry state. `skipped` and
  * `blocked` are not distinguished here; that is the dialog's job.
+ *
+ * A watchdog stop is the exception: a row the runtime cut off for silence is
+ * worth telling apart from one that ran and failed, and the warning glyph is
+ * already the card's mark for "something needs attention".
  */
 function rowGlyph(entry: WorkflowAgentEntry, glyphs: WorkflowGlyphs): WorkflowCardSegment {
   if (entry.state === "done") return { text: glyphs.tick, color: "success" };
-  if (entry.state === "error") return { text: glyphs.cross, color: "error" };
+  if (entry.state === "error") {
+    if (entry.timedOut) return { text: glyphs.warning, color: "warning" };
+    return { text: glyphs.cross, color: "error" };
+  }
   return { text: glyphs.running };
 }
 

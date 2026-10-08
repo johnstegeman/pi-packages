@@ -10,13 +10,16 @@
  */
 
 import { describe, expect, it, vi } from "vitest";
+import { workflowEntryData } from "../src/workflow/entry.js";
 import type { WorkflowControl } from "../src/workflow/runtime.js";
 import {
   completeWorkflowTask,
   createWorkflowTask,
   failWorkflowTask,
+  formatWorkflowNotification,
   pauseWorkflowTask,
   resumeWorkflowTask,
+  updateWorkflowProgressBatch,
   type WorkflowTask,
 } from "../src/workflow/task.js";
 
@@ -128,5 +131,85 @@ describe("settling a run", () => {
 
     expect(task.control).toBeUndefined();
     expect(task.status).toBe("failed");
+  });
+});
+
+
+describe("surfacing a stalled child", () => {
+  /** A run with one clean child and one the watchdog stopped. */
+  function stalledTask(): WorkflowTask {
+    const task = createWorkflowTask({ id: "wf_x", script: "x", scriptPath: "x", toolCallId: "c" });
+    task.workflowName = "sdd-final-review";
+    task.workflowProgress = [
+      { type: "workflow_agent", index: 0, label: "find:correctness", state: "done" },
+      { type: "workflow_agent", index: 1, label: "verify:a.ts:1", state: "error", timedOut: true },
+    ];
+    task.agentCount = 2;
+    task.status = "completed";
+    return task;
+  }
+
+  it("names timed-out children in the notification summary", () => {
+    expect(formatWorkflowNotification(stalledTask())).toContain("1 timed out (stalled)");
+  });
+
+  it("leaves the summary alone when nothing stalled", () => {
+    const task = createWorkflowTask({ id: "wf_x", script: "x" });
+    task.workflowProgress = [{ type: "workflow_agent", index: 0, label: "find", state: "done" }];
+    task.status = "completed";
+    expect(formatWorkflowNotification(task)).not.toContain("timed out");
+  });
+
+  it("reports each timed-out child once, however many batches it spans", () => {
+    // The batch handler toasts what this returns, so a row the runtime
+    // re-emits (a later batch carries its duration) must not toast twice.
+    const task = createWorkflowTask({ id: "wf_x", script: "x" });
+    const row = {
+      type: "workflow_agent",
+      index: 1,
+      label: "verify:a.ts:1",
+      state: "error",
+      timedOut: true,
+    } as const;
+
+    expect(updateWorkflowProgressBatch(task, [row])).toEqual(["verify:a.ts:1"]);
+    expect(updateWorkflowProgressBatch(task, [{ ...row, durationMs: 12 }])).toEqual([]);
+  });
+
+  it("says nothing about a skip or an ordinary failure", () => {
+    const task = createWorkflowTask({ id: "wf_x", script: "x" });
+    expect(
+      updateWorkflowProgressBatch(task, [
+        { type: "workflow_agent", index: 0, label: "dismissed", state: "error", skipped: true },
+        { type: "workflow_agent", index: 1, label: "broke", state: "error" },
+      ]),
+    ).toEqual([]);
+  });
+});
+
+describe("snapshotting a settled run", () => {
+  it("carries the run id and the outcome, so a reload can still answer for it", () => {
+    // The transcript is the only thing that outlives the process. Without the
+    // id the snapshot is unqueryable after a reload; without the outcome
+    // `get_subagent_result` has nothing left to report (§5d).
+    const task = createWorkflowTask({ id: "wf_abc123", script: "x" });
+    task.status = "completed";
+    task.value = "all clear";
+
+    expect(workflowEntryData(task)).toMatchObject({ id: "wf_abc123", result: "all clear" });
+  });
+
+  it("caps the persisted outcome so a large run result cannot bloat the transcript", () => {
+    // The snapshot lands in the session file, so an unbounded `JSON.stringify`
+    // of a large run value would grow it without limit. Same 4000-char budget
+    // as the completion notification.
+    const task = createWorkflowTask({ id: "wf_big", script: "x" });
+    task.status = "completed";
+    task.value = { blob: "x".repeat(50_000) };
+
+    const data = workflowEntryData(task);
+    expect(data.result).toBeDefined();
+    expect((data.result ?? "").length).toBeLessThanOrEqual(4000 + "\n...(truncated)".length);
+    expect(data.result?.endsWith("\n...(truncated)")).toBe(true);
   });
 });

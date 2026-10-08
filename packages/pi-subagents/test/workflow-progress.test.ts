@@ -6,7 +6,7 @@ import {
   displayState,
   elapsedMs,
   footerPhaseLabel,
-  formatDuration,
+  formatRunDuration,
   gerund,
   header,
   isLive,
@@ -91,6 +91,13 @@ describe("displayState", () => {
   it("prefers skipped over blocked when both are set", () => {
     const entry = agentEntry({ index: 0, state: "error", skipped: true, blocked: true });
     expect(displayState(entry, true)).toBe("skipped");
+  });
+
+  it("names a watchdog stop `timed-out` rather than a plain failure", () => {
+    // Task 1's runtime emits `{ state: "error", timedOut: true }` when it stops
+    // a silent child. The row has to say the run lost an answer to the
+    // watchdog, which a bare "failed" cannot.
+    expect(displayState(agentEntry({ index: 0, state: "error", timedOut: true }), true)).toBe("timed-out");
   });
 
   it("reports done even after the run stops", () => {
@@ -269,6 +276,18 @@ describe("stats", () => {
     expect(result).toMatchObject({ done: 1, failedCount: 1, started: 2, running: false });
   });
 
+  it("counts a timed-out agent as both failed and timed out", () => {
+    // It is a failure — no answer came back — but the distinct count is what
+    // lets the notification say how many were lost to the watchdog.
+    const result = stats([agentEntry({ index: 0, state: "error", timedOut: true })], 1);
+    expect(result.timedOut).toBe(1);
+    expect(result.failedCount).toBe(1);
+  });
+
+  it("does not count an ordinary failure as timed out", () => {
+    expect(stats([agentEntry({ index: 0, state: "error" })]).timedOut).toBe(0);
+  });
+
   it("does not count a queued-but-unstarted agent as started", () => {
     const result = stats([agentEntry({ index: 0, state: "start", queuedAt: 5 })]);
     expect(result.started).toBe(0);
@@ -334,7 +353,7 @@ describe("elapsedMs", () => {
   });
 });
 
-describe("formatDuration", () => {
+describe("formatRunDuration", () => {
   it.each([
     [0, "0ms"],
     [340, "340ms"],
@@ -342,7 +361,7 @@ describe("formatDuration", () => {
     [72_000, "1m12s"],
     [3_600_000, "60m00s"],
   ])("formats %ims as %s", (ms, expected) => {
-    expect(formatDuration(ms)).toBe(expected);
+    expect(formatRunDuration(ms)).toBe(expected);
   });
 });
 

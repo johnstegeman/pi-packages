@@ -81,7 +81,12 @@ async function fixStage() {
   // The gate runs after the agent finishes: a non-zero exit fails the agent
   // and folds the command output into its error, so `fixed` is null exactly
   // when the suite did not pass — no model judges prose evidence.
-  let fixed = await agent(fixPrompt, { label: 'fix', gate: gateCommand, agentType: 'implementer', phase: 'Fix' })
+  // Every IMPLEMENTER call in this round raises the stall window to 3600 s: a
+  // fix agent legitimately runs a long test suite, and the watchdog judges
+  // inactivity, not duration — a slow `npm test` and a hung one look identical
+  // to the parent. The re-review below is a reviewer reading a diff, so it
+  // keeps the run's default window, the same as final-review's reviewers.
+  let fixed = await agent(fixPrompt, { label: 'fix', gate: gateCommand, agentType: 'implementer', phase: 'Fix', stallTimeout: 3600 })
 
   if (fixed === null) {
     log(gateCommand + ' failed — handing the output back to the same child')
@@ -90,14 +95,14 @@ async function fixStage() {
     // its own choices. Ungated, because gate cannot combine with resume.
     fixed = await agent(
       '`' + gateCommand + '` is still failing. Read the failure above, fix the cause, and stop.\n\n' + BEADS_GUARDRAIL_IMPL,
-      { label: 'fix', resume: 'fix', phase: 'Fix' },
+      { label: 'fix', resume: 'fix', phase: 'Fix', stallTimeout: 3600 },
     )
 
     // The resume could not carry the gate, so verify separately with a fresh
     // gated call in the same tree. This is the entire retry budget.
     const verified = await agent(
       'Run `' + gateCommand + '` and report the result. Change nothing.\n\n' + BEADS_GUARDRAIL_IMPL,
-      { label: 'verify', gate: gateCommand, effort: 'low', agentType: 'implementer', phase: 'Fix' },
+      { label: 'verify', gate: gateCommand, effort: 'low', agentType: 'implementer', phase: 'Fix', stallTimeout: 3600 },
     )
     if (verified === null) {
       // A throw drops this pipeline item; the round resolves to null.
@@ -148,6 +153,9 @@ const reReviewPrompt = [
 
 async function reReviewStage(prev) {
   phase('Re-review')
+  // No stallTimeout: the re-review is a reviewer, not an implementer — it reads
+  // the scoped diff and writes verdicts, so the run's default window applies
+  // (final-review's verifiers keep the same default).
   const reReview = await agent(reReviewPrompt, { agentType: 'code-reviewer', label: 're-review', phase: 'Re-review' })
   return { summary: prev.summary, reReview }
 }

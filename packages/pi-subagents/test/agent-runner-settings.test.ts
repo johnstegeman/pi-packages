@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import {
   getDefaultMaxTurns,
   getGraceTurns,
@@ -6,6 +6,12 @@ import {
   setDefaultMaxTurns,
   setGraceTurns,
 } from "../src/agent-runner.js";
+import {
+  applySettings,
+  getWorkflowStallTimeoutSecs,
+  type SettingsAppliers,
+  setWorkflowStallTimeout,
+} from "../src/settings.js";
 
 describe("setDefaultMaxTurns / getDefaultMaxTurns", () => {
   beforeEach(() => {
@@ -93,4 +99,67 @@ describe("setGraceTurns / getGraceTurns", () => {
     setGraceTurns(-5);
     expect(getGraceTurns()).toBe(1);
   });
+
+/**
+ * `workflowStallTimeoutSecs` is a settings.ts-level value: the module owns both
+ * the state and the applier, so this is the round trip the extension performs
+ * at boot (settings object → applySettings → applier → module state → getter).
+ * The extension's own wiring of that applier is covered by
+ * test/workflow-stall-wiring.test.ts.
+ */
+describe("workflowStallTimeoutSecs", () => {
+  /** Every applier stubbed; only the one under test writes real state. */
+  function appliers(overrides: Partial<SettingsAppliers> = {}): SettingsAppliers {
+    const noop = () => {};
+    return {
+      setMaxConcurrent: noop,
+      setMaxConcurrentForeground: noop,
+      setDefaultMaxTurns: noop,
+      setGraceTurns: noop,
+      setDefaultJoinMode: noop,
+      setBackgroundByDefault: noop,
+      setSchedulingEnabled: noop,
+      setScopeModels: noop,
+      setStrictAgentFiles: noop,
+      setDisableDefaultAgents: noop,
+      setToolDescriptionMode: noop,
+      setFleetView: noop,
+      setAgentMentions: noop,
+      setRememberAgents: noop,
+      setWidgetMode: noop,
+      setOutputTranscript: noop,
+      setWorktreeIsolation: noop,
+      setWorkflowsEnabled: noop,
+      setMaxSubagentDepth: noop,
+      setFallbackSubagent: noop,
+      setReportUsage: noop,
+      setShowCost: noop,
+      setShowModel: noop,
+      setViewerMarkdown: noop,
+      setWorkflowStallTimeout: noop,
+      ...overrides,
+    };
+  }
+
+  it("applies workflowStallTimeoutSecs including 0", () => {
+    applySettings({ workflowStallTimeoutSecs: 900 }, appliers({ setWorkflowStallTimeout }));
+    expect(getWorkflowStallTimeoutSecs()).toBe(900);
+
+    // 0 is a real value — "watchdog off" — so the `typeof === "number"` guard
+    // in applySettings is load-bearing; truthiness would silently skip it.
+    applySettings({ workflowStallTimeoutSecs: 0 }, appliers({ setWorkflowStallTimeout }));
+    expect(getWorkflowStallTimeoutSecs()).toBe(0);
+  });
+
+  it("leaves the window alone when the setting is absent", () => {
+    // Absence means "use the default", not "reset" — the applier must not fire,
+    // which is what keeps a global value from being clobbered by a project file
+    // that says nothing about it.
+    applySettings({ workflowStallTimeoutSecs: 42 }, appliers({ setWorkflowStallTimeout }));
+    const applier = vi.fn();
+    applySettings({}, appliers({ setWorkflowStallTimeout: applier }));
+    expect(applier).not.toHaveBeenCalled();
+    expect(getWorkflowStallTimeoutSecs()).toBe(42);
+  });
+});
 });

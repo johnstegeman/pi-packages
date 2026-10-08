@@ -331,6 +331,7 @@ const AGENT_OPTIONS = [
   "resume",
   "effort",
   "schema",
+  "stallTimeout",
 ];
 
 /** Claude Code options this runtime does not have, and why. */
@@ -481,6 +482,22 @@ async function agentIn(scope, prompt, opts) {
     throw new Error("agent() opts.effort must be one of: " + EFFORT_LEVELS.join(", ") + ".");
   }
 
+  // A number of seconds, not a string: optionalText would coerce the shape
+  // away, and 0 has to stay a number to mean "off". Rejected at the call site
+  // like effort, and bounded by the same 86400 s ceiling as settings'
+  // STALL_TIMEOUT_SECS_CEILING so the global knob and this one cannot disagree.
+  const stallTimeout = options.stallTimeout;
+  if (stallTimeout !== undefined) {
+    if (
+      typeof stallTimeout !== "number" ||
+      !Number.isFinite(stallTimeout) ||
+      stallTimeout < 0 ||
+      stallTimeout > 86400
+    ) {
+      throw new Error("agent() opts.stallTimeout must be a number of seconds in [0, 86400] (0 disables the stall watchdog).");
+    }
+  }
+
   // resume revives a child that already exists, so anything describing how to
   // *start* one is not a thing this call gets to decide — the revived child
   // keeps the agent, model and tool contract it was started with. Rejecting is
@@ -534,6 +551,7 @@ async function agentIn(scope, prompt, opts) {
     gate: gate,
     resume: resume,
     effort: effort,
+    stallTimeout: stallTimeout,
     schema: schema,
   });
   if (result === undefined || result === null) return null;

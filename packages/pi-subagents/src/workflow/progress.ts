@@ -33,6 +33,7 @@ export type WorkflowDisplayState =
   | "failed"
   | "skipped"
   | "blocked"
+  | "timed-out"
   | "interrupted";
 
 /** Why an agent is on a later attempt, shown next to its row. */
@@ -98,6 +99,12 @@ export interface WorkflowAgentEntry {
   isolation?: "worktree";
   error?: string;
   skipped?: boolean;
+  /**
+   * The runtime stopped this child for inactivity, so the row is a failure
+   * rather than a skip: no answer ever came, and the orchestrator has to be
+   * able to tell a degraded review from one the user dismissed.
+   */
+  timedOut?: boolean;
   blocked?: boolean;
   cached?: boolean;
   queuedAt?: number;
@@ -136,6 +143,14 @@ export interface PhaseGroup {
 export interface WorkflowStats {
   done: number;
   failedCount: number;
+  /**
+   * The subset of `failedCount` the watchdog stopped for inactivity.
+   *
+   * A separate count, not a separate bucket: a timed-out child is still a
+   * failure, but the notification has to be able to name how many were lost
+   * to the stall window rather than to a bad answer.
+   */
+  timedOut: number;
   running: boolean;
   total: number;
   started: number;
@@ -175,6 +190,9 @@ export function collapse(progress: readonly WorkflowEntry[]): CollapsedProgress 
 export function displayState(entry: WorkflowAgentEntry, workflowActive: boolean): WorkflowDisplayState {
   if (entry.state === "done") return "done";
   if (entry.state === "error") {
+    // Ahead of skipped/blocked: a watchdog stop is the one failure the run did
+    // not choose, and the row has to say so even if a flag ever disagreed.
+    if (entry.timedOut) return "timed-out";
     if (entry.skipped) return "skipped";
     if (entry.blocked) return "blocked";
     return "failed";
@@ -325,6 +343,7 @@ export function stats(progress: readonly WorkflowEntry[], agentCount = 0): Workf
   let seen = 0;
   let done = 0;
   let failed = 0;
+  let timedOut = 0;
   let started = 0;
   let anyLive = false;
 
@@ -336,6 +355,7 @@ export function stats(progress: readonly WorkflowEntry[], agentCount = 0): Workf
       started++;
     } else if (entry.state === "error") {
       failed++;
+      if (entry.timedOut) timedOut++;
       started++;
     } else {
       anyLive = true;
@@ -348,6 +368,7 @@ export function stats(progress: readonly WorkflowEntry[], agentCount = 0): Workf
   return {
     done,
     failedCount: failed,
+    timedOut,
     running: anyLive,
     total,
     started,
@@ -369,8 +390,14 @@ export function elapsedMs(
 
 const plural = (n: number, word: string) => (n === 1 ? word : `${word}s`);
 
-/** `1m12s` / `9s` / `340ms`, matching how the rest of the extension reads. */
-export function formatDuration(ms: number): string {
+/**
+ * `1m12s` / `9s` / `340ms`, matching how the rest of the extension reads.
+ *
+ * Named `formatRunDuration`, not `formatDuration`: the widget module exports a
+ * same-named formatter that takes a START TIMESTAMP, and the two were easy to
+ * confuse at a call site. `formatRunDuration(ms)` here is an ELAPSED value.
+ */
+export function formatRunDuration(ms: number): string {
   if (ms < 1000) return `${Math.max(0, Math.round(ms))}ms`;
   const totalSeconds = Math.round(ms / 1000);
   const minutes = Math.floor(totalSeconds / 60);
@@ -422,7 +449,7 @@ export function header(
   return {
     name: task.workflowName ?? meta?.name ?? task.summary ?? task.description ?? "workflow",
     subtext: meta?.description ?? task.description ?? task.summary ?? "",
-    stats: `${doneAgents}/${totalAgents} ${plural(totalAgents, "agent")} · ${formatDuration(elapsedMs(task, now))}${suffix}`,
+    stats: `${doneAgents}/${totalAgents} ${plural(totalAgents, "agent")} · ${formatRunDuration(elapsedMs(task, now))}${suffix}`,
   };
 }
 

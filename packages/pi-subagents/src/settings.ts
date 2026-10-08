@@ -219,6 +219,24 @@ export interface SubagentsSettings {
    */
   workflowsEnabled?: boolean;
   /**
+   * Inactivity window for a workflow child, in seconds. A child that goes this
+   * long without a tool start/end, a turn end, or an assistant usage update is
+   * aborted and the run finishes degraded instead of hanging forever.
+   * Defaults to 600 (10 min). `0` disables the watchdog project-wide — a real
+   * value, not "unset", so a truthiness check anywhere on this path is a bug.
+   *
+   * Seconds, because that is the unit a human types into the settings menu and
+   * the unit `agent({ stallTimeout })` takes; the runtime works in
+   * milliseconds, so the call site multiplies by 1000. Kept in step with
+   * `DEFAULT_STALL_TIMEOUT_MS` in workflow/runtime.ts by a test, since the two
+   * constants are otherwise unrelated.
+   *
+   * Read per run, not once at init: a workflow started after the change gets
+   * the new window, which matters because a stuck run is exactly when someone
+   * reaches for this number.
+   */
+  workflowStallTimeoutSecs?: number;
+  /**
    * Hard ceiling on nested subagent delegation, counted from the main session:
    * main = 0, its subagents = 1, their children = 2. Defaults to `2`; `0` or `1`
    * disables nesting project-wide. Read when a subagent session is built, so a
@@ -332,6 +350,7 @@ export interface SettingsAppliers {
   setShowCost: (b: boolean) => void;
   setShowModel: (b: boolean) => void;
   setViewerMarkdown: (mode: ViewerMarkdownMode) => void;
+  setWorkflowStallTimeout: (n: number) => void;
 }
 
 /** Emit callback — a subset of `pi.events.emit` to keep helpers testable. */
@@ -350,6 +369,32 @@ const MAX_CONCURRENT_CEILING = 1024;
 const MAX_TURNS_CEILING = 10_000;
 const GRACE_TURNS_CEILING = 1_000;
 const SUBAGENT_DEPTH_CEILING = 16;
+// 24 h — the same bound the per-call `agent({ stallTimeout })` option carries,
+// since this setting is that knob spelled globally and the two must not
+// disagree. Longer than any window a user could want, short enough that a
+// hand-edited `1e9` is rejected rather than silently meaning "never fire".
+const STALL_TIMEOUT_SECS_CEILING = 86_400;
+
+// The workflow watchdog's inactivity window, in seconds. Module state rather
+// than an index.ts local so the default has one home and a test can read it
+// without booting the extension — the same split `agent-runner.ts` uses for
+// graceTurns. 600 s is the documented default; workflow/runtime.ts carries the
+// same number in milliseconds for direct `runWorkflow` callers.
+let workflowStallTimeoutSecs = 600;
+
+/**
+ * The window the next workflow run gets. Read at each `runWorkflow` call so a
+ * change in `/agents → Settings` applies to the next run, not the next
+ * session.
+ */
+export function getWorkflowStallTimeoutSecs(): number {
+  return workflowStallTimeoutSecs;
+}
+
+/** Applier for the persisted `workflowStallTimeoutSecs` setting. */
+export function setWorkflowStallTimeout(n: number): void {
+  workflowStallTimeoutSecs = n;
+}
 
 /** Drop fields that don't match the expected shape. Silent — garbage becomes absent. */
 function sanitize(raw: unknown): SubagentsSettings {
@@ -385,6 +430,17 @@ function sanitize(raw: unknown): SubagentsSettings {
     (r.graceTurns as number) <= GRACE_TURNS_CEILING
   ) {
     out.graceTurns = r.graceTurns as number;
+  }
+  // Floor 0, not 1: 0 is the documented "watchdog off" value. Non-integers are
+  // dropped rather than rounded — a hand-edited 0.5 would otherwise mean either
+  // "off" or "1 second" depending on the direction, and both are worse than
+  // falling back to the default window.
+  if (
+    Number.isInteger(r.workflowStallTimeoutSecs) &&
+    (r.workflowStallTimeoutSecs as number) >= 0 &&
+    (r.workflowStallTimeoutSecs as number) <= STALL_TIMEOUT_SECS_CEILING
+  ) {
+    out.workflowStallTimeoutSecs = r.workflowStallTimeoutSecs as number;
   }
   if (
     Number.isInteger(r.maxSubagentDepth) &&
@@ -537,6 +593,11 @@ export function applySettings(s: SubagentsSettings, appliers: SettingsAppliers):
   if (typeof s.showModel === "boolean") appliers.setShowModel(s.showModel);
   if (s.viewerMarkdown) appliers.setViewerMarkdown(s.viewerMarkdown);
   if (typeof s.workflowsEnabled === "boolean") appliers.setWorkflowsEnabled(s.workflowsEnabled);
+  // `typeof === "number"` rather than truthiness: 0 means "watchdog off" and is
+  // exactly the value a `if (s.workflowStallTimeoutSecs)` guard would skip.
+  if (typeof s.workflowStallTimeoutSecs === "number") {
+    appliers.setWorkflowStallTimeout(s.workflowStallTimeoutSecs);
+  }
 }
 
 /**

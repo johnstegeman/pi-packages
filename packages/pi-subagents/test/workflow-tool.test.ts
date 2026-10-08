@@ -30,6 +30,28 @@ import { compileJsonSchema } from "../src/workflow/json-schema.js";
 import type { WorkflowSpawnRequest } from "../src/workflow/runtime.js";
 import { ctx, flush, type Hermetic, hermeticDir, makePi, textOf } from "./helpers/boot-extension.js";
 
+/*
+ * Capture every run record the extension creates, so a test can inject a
+ * progress row the real runtime cannot produce cheaply here: a stalled child
+ * needs a 30s watchdog tick (the runtime's default `stallCheckIntervalMs`) and
+ * the tool exposes no interval knob. The wrapper only RECORDS — the real
+ * `createWorkflowTask` still builds the record, so the timed-out test below
+ * exercises the tool's own summary path, not a copy of it.
+ */
+const capturedTasks = vi.hoisted(() => [] as { id: string; workflowProgress: any[] }[]);
+
+vi.mock("../src/workflow/task.js", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../src/workflow/task.js")>();
+  return {
+    ...actual,
+    createWorkflowTask: (init: Parameters<typeof actual.createWorkflowTask>[0]) => {
+      const task = actual.createWorkflowTask(init);
+      capturedTasks.push(task);
+      return task;
+    },
+  };
+});
+
 /* ------------------------------------------------------------------------- *
  * Fixtures
  * ------------------------------------------------------------------------- */
@@ -538,7 +560,15 @@ describe("createWorkflowHost — abort, resume and gate", () => {
     await host.spawnAgent(request({ agentId: "wf-agent-0" }));
     const resumed = await host.resumeAgent?.("wf-agent-0", "and now this");
 
-    expect(stub.resume).toHaveBeenCalledWith("manager-id-7", "and now this", undefined);
+    // The 4th arg is the liveness plumbing the watchdog needs: a resumed child
+    // reports tool/turn/usage activity like a fresh one (see the onActivity
+    // contract in runtime.ts). Asserted by shape, not identity, so the host can
+    // add another forwarding channel without breaking this.
+    expect(stub.resume).toHaveBeenCalledWith("manager-id-7", "and now this", undefined, {
+      onToolActivity: expect.any(Function),
+      onAssistantUsage: expect.any(Function),
+      onTurnEnd: expect.any(Function),
+    });
     expect(resumed).toMatchObject({ ok: true, text: "resumed" });
   });
 
@@ -1565,5 +1595,264 @@ describe("collisions with another extension", () => {
     expect(booted.pi.setActiveTools).not.toHaveBeenCalled();
     expect(booted.pi.getActiveTools()).toContain("SubagentWorkflow");
     expect(warnings(context)).toEqual([]);
+  });
+});
+
+
+/* ------------------------------------------------------------------------- *
+ * get_subagent_result — workflow ids
+ * ------------------------------------------------------------------------- */
+
+/**
+ * A `wf_…` id is what the SubagentWorkflow tool hands the model, but the run
+ * lives in `workflowTasks` — a map no tool exposes — and its children are
+ * filtered out of the agent lookup. So `get_subagent_result("wf_…")` used to
+ * answer `Agent not found` for the very id the tool had just returned. These
+ * tests drive the REAL tool against a REAL run started through the tool.
+ */
+describe("get_subagent_result — workflow ids", () => {
+  let hermetic: Hermetic;
+  let booted: ReturnType<typeof makePi>;
+  let tools: Map<string, any>;
+
+  beforeEach(() => {
+    hermetic = hermeticDir({ settings: { schedulingEnabled: false, workflowsEnabled: true } });
+    booted = makePi();
+    subagentsExtension(booted.pi);
+    tools = booted.tools;
+  });
+
+  afterEach(async () => {
+    // Stop any never-returning script before the temp dir disappears under it.
+    await booted.lifecycle.get("session_shutdown")?.({}, ctx({ cwd: hermetic.dir }));
+    await flush();
+    hermetic.restore();
+    vi.restoreAllMocks();
+  });
+
+  const workflowCtx = () => ctx({ cwd: hermetic.dir });
+
+  /** Start a run through the real tool and return the id it handed back. */
+  async function startRun(script: string): Promise<string> {
+    const started = await tools.get("SubagentWorkflow").execute("tc-wf", { script }, undefined, undefined, workflowCtx());
+    return (started.details as { taskId: string }).taskId;
+  }
+
+  /** Poll until the run leaves "running", then return that read. */
+  async function readSettled(runId: string) {
+    for (let attempt = 0; attempt < 200; attempt++) {
+      const result = await tools
+        .get("get_subagent_result")
+        .execute("tc-read", { agent_id: runId }, undefined, undefined, workflowCtx());
+      if ((result as any).structuredContent?.status !== "running") return result;
+      await flush();
+      await new Promise((resolve) => setTimeout(resolve, 10));
+    }
+    throw new Error(`workflow ${runId} never settled`);
+  }
+
+  it("resolves a settled wf_ id to its status and result", async () => {
+    const runId = await startRun(`${inlineScript}return "all clear";\n`);
+
+    const result = await readSettled(runId);
+    const text = textOf(result);
+    // The prefix is what separates this payload from the agent one: the model
+    // asked about a run, and the answer has to say so.
+    expect(text).toContain("status: completed");
+    expect(text).toContain("agents: 0/0");
+    expect(text).toContain("all clear");
+    // The elapsed figure is the progress module's, not the widget's: the widget
+    // formatter takes a START timestamp, so passing it a duration printed a
+    // lifetime in seconds and a bogus "(running)" on a settled run.
+    expect(text).toMatch(/\| elapsed: \d+(ms|s|m\d\ds)/);
+    expect(text).not.toContain("(running)");
+    expect(text).not.toContain("Agent not found");
+    expect((result as any).structuredContent).toEqual({
+      agentId: runId,
+      status: "completed",
+      result: "all clear",
+    });
+  });
+
+  it("reports a live wf_ id as running, without inventing a result", async () => {
+    const runId = await startRun(`${inlineScript}await new Promise(() => {});\n`);
+
+    const result = await tools
+      .get("get_subagent_result")
+      .execute("tc-read", { agent_id: runId }, undefined, undefined, workflowCtx());
+
+    const text = textOf(result);
+    expect(text).toContain("status: running");
+    // No result body for a run that has not produced one — the agent path
+    // makes the same distinction with its "still running" line.
+    expect(text).not.toContain("No output.");
+    expect((result as any).structuredContent).toMatchObject({ agentId: runId, status: "running" });
+    expect((result as any).structuredContent.error).toBeUndefined();
+  });
+
+  it("names the run when the wf_ id is unknown", async () => {
+    const result = await tools
+      .get("get_subagent_result")
+      .execute("tc-read", { agent_id: "wf_deadbeef1234" }, undefined, undefined, workflowCtx());
+
+    expect(textOf(result)).toContain('No workflow run "wf_deadbeef1234" in this session');
+    expect((result as any).structuredContent).toEqual({ error: "workflow not found" });
+  });
+
+  it("leaves a non-workflow id on the agent path", async () => {
+    const result = await tools
+      .get("get_subagent_result")
+      .execute("tc-read", { agent_id: "3f1320a7-74ec-422" }, undefined, undefined, workflowCtx());
+
+    // The wf_ branch must key off the prefix only: an ordinary id keeps
+    // answering exactly as it did before.
+    expect(textOf(result)).toContain("Agent not found");
+  });
+
+  it("names a timed-out child in the summary, with a real elapsed value", async () => {
+    const runId = await startRun(`${inlineScript}return "done";\n`);
+    await readSettled(runId);
+
+    // The runtime's watchdog needs a 30s tick to stop a child for real, and the
+    // tool exposes no interval knob — so the row the summary reads is injected
+    // directly. The label list is the code under test; how the row got there is
+    // the runtime's own suite's business.
+    const task = capturedTasks.find((t) => t.id === runId)!;
+    task.workflowProgress.push({
+      type: "workflow_agent",
+      index: 0,
+      label: "lost-worker",
+      state: "error",
+      timedOut: true,
+    });
+
+    const result = await tools
+      .get("get_subagent_result")
+      .execute("tc-read", { agent_id: runId }, undefined, undefined, workflowCtx());
+    const text = textOf(result);
+
+    expect(text).toContain("| timed out: lost-worker");
+    expect(text).toMatch(/\| elapsed: \d+(ms|s|m\d\ds)/);
+    expect(text).not.toContain("(running)");
+  });
+});
+
+/* ------------------------------------------------------------------------- *
+ * Durable terminal state (§5d)
+ * ------------------------------------------------------------------------- */
+
+describe("durable workflow state", () => {
+  let hermetic: Hermetic;
+
+  beforeEach(() => {
+    hermetic = hermeticDir({ settings: { schedulingEnabled: false, workflowsEnabled: true } });
+  });
+
+  afterEach(async () => {
+    await flush();
+    hermetic.restore();
+    vi.restoreAllMocks();
+  });
+
+  const workflowCtx = () => ctx({ cwd: hermetic.dir });
+
+  /** A context whose session manager reports exactly the entries a reload would see. */
+  const transcriptCtx = (entries: unknown[]) =>
+    ctx({
+      cwd: hermetic.dir,
+      sessionManager: {
+        getSessionId: vi.fn(() => "s1"),
+        getBranch: vi.fn(() => []),
+        getEntries: vi.fn(() => entries),
+      },
+    });
+
+  it("appends a terminal entry when a tool-launched run settles", async () => {
+    // The CLI-flag path has always done this; the tool path did not, so a
+    // tool-launched run left nothing behind for a reload to find (§5d).
+    const booted = makePi();
+    subagentsExtension(booted.pi);
+    await booted.lifecycle.get("session_start")?.({}, workflowCtx());
+    booted.pi.appendEntry.mockClear();
+
+    const started = await booted.tools.get("SubagentWorkflow").execute(
+      "tc-durable", { script: `${inlineScript}return "all clear";\n` }, undefined, undefined, workflowCtx(),
+    );
+    const runId = (started.details as { taskId: string }).taskId;
+
+    await vi.waitFor(
+      () => expect(booted.pi.appendEntry).toHaveBeenCalledWith(WORKFLOW_ENTRY_TYPE, expect.anything()),
+      { timeout: 10_000 },
+    );
+    const [, data] = booted.pi.appendEntry.mock.calls.find((c: any[]) => c[0] === WORKFLOW_ENTRY_TYPE)!;
+    expect(data).toMatchObject({ id: runId, status: "completed", result: "all clear" });
+  });
+
+  it("rehydrates a settled run from the transcript so its id stays queryable", async () => {
+    // The run happened in a process that is gone. Without rehydration the
+    // model gets "No workflow run" for an id it was handed (§5d).
+    const booted = makePi();
+    subagentsExtension(booted.pi);
+    await booted.lifecycle.get("session_start")?.({}, transcriptCtx([
+      {
+        type: "custom",
+        customType: WORKFLOW_ENTRY_TYPE,
+        data: {
+          id: "wf_rehydrated1",
+          name: "prior-run",
+          status: "completed",
+          startTime: 1_000,
+          endTime: 2_000,
+          agentCount: 1,
+          totalTokens: 5,
+          result: "prior result",
+          progress: [{ type: "workflow_agent", index: 0, label: "step", state: "done" }],
+        },
+      },
+    ]));
+
+    const result = await booted.tools
+      .get("get_subagent_result")
+      .execute("tc-read", { agent_id: "wf_rehydrated1" }, undefined, undefined, workflowCtx());
+
+    const text = textOf(result);
+    expect(text).toContain("status: completed");
+    expect(text).toContain("prior result");
+    expect((result as any).structuredContent).toMatchObject({
+      agentId: "wf_rehydrated1",
+      status: "completed",
+      result: "prior result",
+    });
+  });
+
+  it("reports a run that was mid-flight at process death as interrupted, never running", async () => {
+    // A run that was running when the process died wrote no terminal entry —
+    // the append only happens on settle. Its tool result is the only trace,
+    // and it must never come back as a stale `running` (§5d).
+    const booted = makePi();
+    subagentsExtension(booted.pi);
+    await booted.lifecycle.get("session_start")?.({}, transcriptCtx([
+      {
+        type: "message",
+        message: {
+          role: "toolResult",
+          toolCallId: "tc-lost",
+          toolName: SUBAGENT_TOOL_NAMES.WORKFLOW,
+          content: [],
+          isError: false,
+          timestamp: 0,
+          details: { taskId: "wf_lost123456" },
+        },
+      },
+    ]));
+
+    const result = await booted.tools
+      .get("get_subagent_result")
+      .execute("tc-read", { agent_id: "wf_lost123456" }, undefined, undefined, workflowCtx());
+
+    const text = textOf(result);
+    expect((result as any).structuredContent.status).toBe("unknown");
+    expect(text).toContain("interrupted");
+    expect(text).not.toContain("status: running");
   });
 });
