@@ -330,16 +330,18 @@ export interface RunWorkflowOptions {
    */
   stallCheckIntervalMs?: number;
   /**
-   * How long the whole run may hear nothing from the worker before it is
-   * declared wedged, in ms.
+   * How long the whole run may hear nothing from the worker while nothing is
+   * in flight before it is declared wedged, in ms.
    *
    * The per-child watchdog above only sees a child that goes quiet; a script
    * that spins before it ever calls `agent()` — or a worker wedged between
    * calls — posts nothing at all, and only this check can see it. Measured
    * between worker messages and suspended while the run is paused, because a
-   * paused run is silent by design. `0` disables it. Unset takes
-   * {@link DEFAULT_STALL_TIMEOUT_MS} × 2, so a child that goes silent is
-   * stopped by the per-child watchdog well before the run's own window.
+   * paused run is silent by design. It does not run while a child is in
+   * flight: the worker posts one `call` and then hears nothing until the
+   * answer, so a running child is indistinguishable from a wedged worker by
+   * silence alone — judging it here would cap every `agent()` at this window.
+   * `0` disables it. Unset takes {@link DEFAULT_STALL_TIMEOUT_MS} × 2.
    */
   runStallTimeoutMs?: number;
   /**
@@ -873,9 +875,18 @@ export async function runWorkflow(options: RunWorkflowOptions): Promise<Workflow
    * rather than a child that does not. A pause is not silence — the clock is
    * restarted on resume — and a run that is already settling has nothing left
    * to fail.
+   *
+   * It is gated on there being nothing in flight, because a worker awaiting a
+   * child is silent by design: the worker posts one `call` and then hears
+   * nothing until the answer, so silence alone cannot tell a healthy long
+   * call from a wedged worker. Judging it while a child runs would cap every
+   * `agent()` at this window and throw away the per-child — or per-call
+   * `agent({ stallTimeout })` — patience. Only a run that is silent with
+   * nothing in flight is wedged in the sense this check exists for.
    */
   const checkRunStall = () => {
     if (isPaused() || settled) return;
+    if (inflight.size > 0) return;
     if (Date.now() - lastWorkerMessageAt <= runStallTimeoutMs) return;
     finishRunStall?.();
   };
@@ -1381,6 +1392,15 @@ export async function runWorkflow(options: RunWorkflowOptions): Promise<Workflow
           } finally {
             live.forceSettle = undefined;
             inflight.delete(agentId);
+            // The run-level clock measures silence between worker messages, but
+            // a worker awaiting a child is silent by design — and this child has
+            // just settled without the worker posting anything. Restart the clock
+            // once nothing is left in flight, so the worker gets the whole window
+            // to post its next message (the next `call`, or `complete`) before the
+            // run-level check may call it wedged. Without this, a run whose last
+            // child ran longer than the window would be failed the instant that
+            // child settled, on a clock that started before the child did.
+            if (inflight.size === 0) lastWorkerMessageAt = Date.now();
             live.started = false;
             semaphore.release();
           }

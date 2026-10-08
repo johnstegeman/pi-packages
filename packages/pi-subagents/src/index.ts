@@ -2368,6 +2368,12 @@ Terse command-style prompts produce shallow, generic work.
         // through — the runtime reads it as "watchdog off", which is why this
         // is a multiplication and not a `|| DEFAULT_STALL_TIMEOUT_MS`.
         stallTimeoutMs: getWorkflowStallTimeoutSecs() * 1000,
+        // The run-level (wedged-worker) window is twice the child window, the
+        // same relationship the runtime's own default draws. The setting is
+        // the only switch: leaving this unset would arm the runtime's built-in
+        // 20-minute window even when the user set 0, making the Settings label
+        // "0 = off" a lie. `0 × 2` is still 0, so off stays off.
+        runStallTimeoutMs: getWorkflowStallTimeoutSecs() * 1000 * 2,
         host: createWorkflowHost({
           pi,
           ctx,

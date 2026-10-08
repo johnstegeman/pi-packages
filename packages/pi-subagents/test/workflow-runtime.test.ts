@@ -1620,6 +1620,27 @@ describe("stall watchdog", () => {
     expect(terminal[0]).toMatchObject({ state: "done" });
     expect(terminal[0]?.timedOut).toBeUndefined();
   });
+  it("does not fail a run whose only child is long but silent to the parent", async () => {
+    // The worker posts one `call` and then awaits the child; while that child
+    // runs, the parent hears nothing from the worker at all. The run window
+    // below is shorter than the child, so a run-level check that ignored
+    // in-flight children would cap — and fail — a healthy long call,
+    // defeating the `agent({ stallTimeout })` window Task 8 hands the
+    // implementer. Only the per-child watchdog may judge a running child.
+    const stub = stubHost(async () => {
+      await sleep(200); // 4× the run window below, all of it silent to the parent
+      return { ok: true, text: "slow but alive" };
+    });
+    const result = await run('const a = await agent("slow"); return a;', {
+      host: stub.host,
+      runStallTimeoutMs: 50,
+      stallCheckIntervalMs: 10,
+    });
+    expect(result.status).toBe("completed");
+    expect(result.value).toBe("slow but alive");
+    expect(stub.aborted).toEqual([]);
+  }, 5000);
+
 
   it("fails a wedged worker instead of hanging", async () => {
     // A worker that spins before it ever calls an agent posts nothing at all,

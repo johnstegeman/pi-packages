@@ -103,4 +103,23 @@ describe("workflowStallTimeoutSecs — settings to runWorkflow", () => {
     // off switch back on.
     expect(options.stallTimeoutMs).toBe(0);
   });
+
+  it("passes a run-level window at twice the child window", async () => {
+    boot({ workflowStallTimeoutSecs: 900 });
+    const options = await runOneWorkflow();
+    // The runtime's own default draws the run window as 2× the child window;
+    // the setting has to drive that same relationship, or the Settings label
+    // would only govern the per-child watchdog and leave the run-level one
+    // armed at a fixed 20 minutes.
+    expect(options.runStallTimeoutMs).toBe(1_800_000);
+  });
+
+  it("passes an explicit 0 through to the run-level window too, which disables it", async () => {
+    boot({ workflowStallTimeoutSecs: 0 });
+    const options = await runOneWorkflow();
+    // `0 × 2` is still 0. Leaving `runStallTimeoutMs` unset here would arm the
+    // runtime's built-in window and make the user's off switch a lie — which is
+    // exactly the bug this assertion locks down.
+    expect(options.runStallTimeoutMs).toBe(0);
+  });
 });
