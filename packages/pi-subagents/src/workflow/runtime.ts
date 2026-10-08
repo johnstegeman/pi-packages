@@ -828,7 +828,18 @@ export async function runWorkflow(options: RunWorkflowOptions): Promise<Workflow
       // watchdog exists to prevent. Answer the call ourselves. The child may be
       // left running — the lesser evil, and why this is the second tick rather
       // than the first — but the run is free either way.
-      live.forceSettle?.(
+      //
+      // That grace IS one scan tick, so it is not an independent bound: it
+      // tracks `min(30s, max(100ms, window/10))` and a short window is answered
+      // a tick sooner.
+      const forceSettle = live.forceSettle;
+      // Nothing to answer means nothing was force-completed, so the warning
+      // below must not fire for it: the warning names a leak, and a leak needs
+      // the act. Unreachable in practice — the entry is deleted the moment the
+      // child settles, and `forceSettle` is cleared in the same `finally` — but
+      // the warning belongs to the block that acts, not to the iteration.
+      if (forceSettle === undefined) continue;
+      forceSettle(
         // Report the stop the user asked for, not the one the watchdog did: a
         // skip that raced the watchdog is still a skip, and only the row's own
         // flag can say so once the child never reported one itself.
@@ -1438,7 +1449,10 @@ export async function runWorkflow(options: RunWorkflowOptions): Promise<Workflow
             // too. Without this, a retry of a timed-out call would be killed on
             // the next tick by the verdict on the attempt before it.
             live.timedOut = false;
-            noteActivity(agentId);
+            // No `noteActivity` here: the settle path already deleted this
+            // child's entry, so there is nothing to refresh — the loop's own
+            // `lastActivity.set` on the next iteration is what starts the new
+            // attempt's clock.
             attempt++;
             emit([{ ...base, queuedAt, attempt, lastAttemptReason: "user-retry" }]);
             continue;
@@ -1450,30 +1464,36 @@ export async function runWorkflow(options: RunWorkflowOptions): Promise<Workflow
           // `intent()` and not `result.skipped`: a host reports a stopped child
           // as skipped whether a user asked for it or the watchdog did, so the
           // result alone cannot tell the two apart. The user's intent can, and
-          // theirs wins the race — one row either way.
-          if (live.timedOut === true && intent() !== "skip") {
+          // theirs wins the race — and it wins it whatever the child's own
+          // result turned out to be: the gate below was skipped with the abort,
+          // so a child that resolved `ok` in the same instant must not hand the
+          // script text nothing verified.
+          if (live.timedOut === true) {
             // Counted here too: the child ran and burned output tokens before
-            // the watchdog stopped it, and the timed-out branch returns before
-            // the shared accumulation below.
+            // the watchdog stopped it, and this branch returns before the
+            // shared accumulation below.
             spentOutputTokens += result.outputTokens ?? 0;
             const timedOutAt = Date.now();
-            emit([
-              {
-                ...base,
-                queuedAt,
-                startedAt,
-                ...attemptMark,
-                lastProgressAt: timedOutAt,
-                durationMs: timedOutAt - startedAt,
-                state: "error",
-                timedOut: true,
-                error: stallMessage(agentStallMs),
-              },
-            ]);
+            const stopCommon = {
+              ...base,
+              queuedAt,
+              startedAt,
+              ...attemptMark,
+              lastProgressAt: timedOutAt,
+              durationMs: timedOutAt - startedAt,
+              ...(result.tokens !== undefined ? { tokens: result.tokens } : {}),
+              ...(result.toolCalls !== undefined ? { toolCalls: result.toolCalls } : {}),
+            };
             // `ok: false`, like any other failure: resuming this run re-runs
             // this child live, which is the honest thing to do with a call that
             // never produced an answer.
             recordJournal?.({ index, key, ok: false, ...resumeMark });
+            if (intent() === "skip") {
+              // The stop the user asked for, not the one the watchdog did.
+              emit([{ ...stopCommon, state: "error", skipped: true, error: "Stopped." }]);
+            } else {
+              emit([{ ...stopCommon, state: "error", timedOut: true, error: stallMessage(agentStallMs) }]);
+            }
             // `null` to the script, the shape a skip already gives — the SDD
             // scripts degrade on a missing verdict rather than throw.
             respond(callId, true, null);

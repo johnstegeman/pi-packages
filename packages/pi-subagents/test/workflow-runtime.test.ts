@@ -1534,6 +1534,41 @@ describe("stall watchdog", () => {
     expect(terminal[0]?.timedOut).toBeUndefined();
   });
 
+  it("reports a user skip as a skip even when the child resolves ok as it is aborted", async () => {
+    // The watchdog marks the child timedOut and aborts it; the child's own
+    // result lands in the same instant, and the user's skip is already in
+    // flight. The skip wins: the gate never ran, so the script must get the
+    // same null a plain skip gives rather than text nothing verified.
+    const release = new Map<string, (r: WorkflowSpawnResult) => void>();
+    let gateRan = false;
+    let control: WorkflowControl | undefined;
+    const host: WorkflowHost = {
+      spawnAgent(request) {
+        return new Promise<WorkflowSpawnResult>(resolve => release.set(request.agentId, resolve));
+      },
+      abortAgent(agentId) {
+        // Recorded before the settle path sees the result — this is what makes
+        // the race deterministic instead of timing-dependent.
+        control?.skip(0);
+        release.get(agentId)?.({ ok: true, text: "late" });
+      },
+      async runGate() {
+        gateRan = true;
+        return { ok: true, output: "" };
+      },
+    };
+    const result = await run('const a = await agent("gated", { gate: "true" }); return { got: a };', {
+      host, stallTimeoutMs: 40, stallCheckIntervalMs: 10, onControl: c => { control = c; },
+    });
+
+    expect(result.value).toEqual({ got: null });
+    expect(gateRan).toBe(false);
+    const terminal = agentEntries(result.progress).filter(e => e.index === 0 && e.state !== "start");
+    expect(terminal).toHaveLength(1);
+    expect(terminal[0]).toMatchObject({ state: "error", skipped: true });
+    expect(terminal[0]?.timedOut).toBeUndefined();
+  });
+
   it("marks the stop as a timeout even when the host reports it as skipped", async () => {
     // The real host reports every stop as `skipped` — a user's skip and the
     // watchdog's abort are indistinguishable in the result. The row still has
