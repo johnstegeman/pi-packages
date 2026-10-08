@@ -1384,3 +1384,98 @@ describe("nested workflow()", () => {
     expect(replayHost.calls).toHaveLength(0);
   });
 });
+
+/* ------------------------------------------------------------------------- *
+ * Stall watchdog
+ * ------------------------------------------------------------------------- */
+
+describe("stall watchdog", () => {
+  it("aborts a silent child and returns null instead of hanging", async () => {
+    const stub = stubHost(() => new Promise<WorkflowSpawnResult>(() => {})); // never resolves
+    const result = await run('const a = await agent("hang"); return { got: a };', {
+      host: stub.host, stallTimeoutMs: 50, stallCheckIntervalMs: 10,
+    });
+    expect(result.status).toBe("completed");
+    expect(result.value).toEqual({ got: null });
+    expect(stub.aborted).toEqual(["wf-agent-0"]);
+    expect(agentEntries(result.progress).at(-1)).toMatchObject({ state: "error", timedOut: true });
+  });
+
+  it("keeps a child alive while it reports activity", async () => {
+    const stub = stubHost(async (request) => {
+      for (let i = 0; i < 8; i++) { request.onActivity?.(); await sleep(15); }
+      return { ok: true, text: "ok" };
+    });
+    const result = await run('const a = await agent("busy"); return a;', {
+      host: stub.host, stallTimeoutMs: 60, stallCheckIntervalMs: 10,
+    });
+    expect(result.value).toBe("ok");
+    expect(stub.aborted).toEqual([]);
+  });
+
+  it("does not watch a child when the window is zero", async () => {
+    const stub = stubHost(async () => {
+      // Far past the window every other test here uses, and still a child
+      // nobody should touch: `0` means the watchdog is off for the run.
+      await sleep(120);
+      return { ok: true, text: "slow" };
+    });
+    const result = await run('const a = await agent("slow"); return a;', {
+      host: stub.host, stallTimeoutMs: 0, stallCheckIntervalMs: 10,
+    });
+    expect(result.value).toBe("slow");
+    expect(stub.aborted).toEqual([]);
+  });
+
+  it("lets a user skip win a race with the watchdog, with one row", async () => {
+    // A host that never answers, so the skip arrives while the call is still
+    // pending: the watchdog has already stopped the child, and the user's
+    // intent has to beat a verdict that is already in flight.
+    const stub = stubHost(() => new Promise<WorkflowSpawnResult>(() => {}));
+    let control: WorkflowControl | undefined;
+    const done = run('const a = await agent("hang"); return { got: a };', {
+      host: stub.host,
+      stallTimeoutMs: 40,
+      stallCheckIntervalMs: 40,
+      onControl: c => { control = c; },
+    });
+
+    for (let i = 0; i < 200 && stub.aborted.length === 0; i++) await sleep(2);
+    expect(stub.aborted).toEqual(["wf-agent-0"]);
+    expect(control?.skip(0)).toBe(true);
+
+    const result = await done;
+    expect(result.status).toBe("completed");
+    // Exactly one terminal row, and it is the user's: the watchdog does not
+    // report over an intent the user already expressed.
+    const terminal = agentEntries(result.progress).filter(e => e.index === 0 && e.state !== "start");
+    expect(terminal).toHaveLength(1);
+    expect(terminal[0]).toMatchObject({ state: "error", skipped: true });
+    expect(terminal[0]?.timedOut).toBeUndefined();
+  });
+
+  it("marks the stop as a timeout even when the host reports it as skipped", async () => {
+    // The real host reports every stop as `skipped` — a user's skip and the
+    // watchdog's abort are indistinguishable in the result. The row still has
+    // to say which one it was, or a degraded review reads as one the user
+    // dismissed.
+    const aborted: string[] = [];
+    const release = new Map<string, (r: WorkflowSpawnResult) => void>();
+    const host: WorkflowHost = {
+      spawnAgent(request) {
+        return new Promise<WorkflowSpawnResult>(resolve => release.set(request.agentId, resolve));
+      },
+      abortAgent(agentId) {
+        aborted.push(agentId);
+        release.get(agentId)?.({ ok: false, skipped: true, error: "Stopped." });
+      },
+    };
+    const result = await run('const a = await agent("hang"); return { got: a };', {
+      host, stallTimeoutMs: 40, stallCheckIntervalMs: 10,
+    });
+
+    expect(result.value).toEqual({ got: null });
+    expect(aborted).toEqual(["wf-agent-0"]);
+    expect(agentEntries(result.progress).at(-1)).toMatchObject({ state: "error", timedOut: true });
+  });
+});

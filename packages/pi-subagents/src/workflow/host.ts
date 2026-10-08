@@ -327,6 +327,13 @@ export function createWorkflowHost(deps: WorkflowHostOptions): WorkflowHost {
             // Fires once the child's session exists, which is where the model
             // and the clamped thinking level first become knowable.
             onSessionCreated: () => { sessionReady = true; reportResolved(); },
+            // The run's liveness signal, in the three shapes the manager
+            // already reports. Text and token deltas are deliberately left
+            // out: a wedged provider dribbles them, and a hung bash is exactly
+            // "tool started, never ended", so both have to read as silence.
+            onToolActivity: () => request.onActivity?.(),
+            onTurnEnd: () => request.onActivity?.(),
+            onAssistantUsage: () => request.onActivity?.(),
             ...(request.schema !== undefined ? { structuredOutput: request.schema } : {}),
             ...(request.isolation !== undefined ? { isolation: request.isolation } : {}),
             ...(deps.signal !== undefined ? { signal: deps.signal } : {}),

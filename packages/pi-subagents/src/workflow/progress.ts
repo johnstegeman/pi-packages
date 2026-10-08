@@ -98,6 +98,12 @@ export interface WorkflowAgentEntry {
   isolation?: "worktree";
   error?: string;
   skipped?: boolean;
+  /**
+   * The runtime stopped this child for inactivity, so the row is a failure
+   * rather than a skip: no answer ever came, and the orchestrator has to be
+   * able to tell a degraded review from one the user dismissed.
+   */
+  timedOut?: boolean;
   blocked?: boolean;
   cached?: boolean;
   queuedAt?: number;

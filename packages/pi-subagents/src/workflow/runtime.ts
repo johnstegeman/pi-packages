@@ -33,6 +33,18 @@ export const WORKFLOW_ITEM_CAP = 4096;
 /** Nested `workflow()` invocations allowed per run. */
 export const WORKFLOW_NESTED_CAP = 256;
 
+/**
+ * How long a child may go without reporting activity before the run stops it.
+ *
+ * Inactivity, not total duration: a review child that reasons for three minutes
+ * and then runs tools is working, and a run-level cap would kill it. The shape
+ * the watchdog exists for is the one the incident had — a child whose bash
+ * command printed its answer and then never exited, so no tool-end, no turn-end
+ * and no further model turn ever arrived. Ten minutes is roughly five times the
+ * longest legitimate silent stretch; the stuck children sat for 74-78 minutes.
+ */
+export const DEFAULT_STALL_TIMEOUT_MS = 600_000;
+
 /** How much of a prompt or result is kept for the UI. */
 const PREVIEW_LENGTH = 200;
 
@@ -118,6 +130,18 @@ export interface WorkflowSpawnRequest {
    * itself — so exactly one execution either way.
    */
   gate?: string;
+  /**
+   * Called by the host whenever the child does something observable.
+   *
+   * The watchdog's input, and deliberately coarse: tool start/end, turn end and
+   * assistant usage. Not token or text deltas — a wedged provider can dribble
+   * keepalives for hours, and a hung bash is exactly "tool started, never
+   * ended", so both failure shapes have to read as silence here.
+   *
+   * Optional, so a host that cannot report any of this simply does not, and the
+   * child keeps the whole window rather than being declared dead on arrival.
+   */
+  onActivity?: () => void;
 }
 
 export interface WorkflowSpawnResult {
@@ -279,6 +303,23 @@ export interface RunWorkflowOptions {
   concurrency?: number;
   agentCap?: number;
   itemCap?: number;
+  /**
+   * How long one child may go silent before the run aborts it, in ms.
+   *
+   * `0` disables the watchdog for the whole run — the escape hatch for a script
+   * that legitimately expects a long silent stretch. Unset takes
+   * {@link DEFAULT_STALL_TIMEOUT_MS}.
+   */
+  stallTimeoutMs?: number;
+  /**
+   * How often the watchdog looks, in ms.
+   *
+   * A knob rather than a constant because the window is only meaningful to the
+   * tests as something injected: they exercise a fifty-millisecond stall, not a
+   * ten-minute one. Also the grace a timed-out child gets to settle after its
+   * abort before the run answers the call itself.
+   */
+  stallCheckIntervalMs?: number;
   /**
    * Hands the caller the run's control surface, once per run.
    *
@@ -673,8 +714,91 @@ export async function runWorkflow(options: RunWorkflowOptions): Promise<Workflow
     intent?: "skip" | "retry";
     /** Wakes it out of a pause hold, so a skip does not wait for a resume. */
     wake?: () => void;
+    /**
+     * The watchdog stopped this child for silence, so its call is a timeout
+     * rather than whatever the abort happens to report.
+     */
+    timedOut?: boolean;
+    /**
+     * Answers the outstanding `agent()` call when the child ignored its abort.
+     *
+     * Set only while a spawn is in flight, so a stale resolver can never settle
+     * a later attempt. See {@link checkStalls} — this is the last resort that
+     * keeps a run from wedging on a child that will not stop.
+     */
+    forceSettle?: (result: WorkflowSpawnResult) => void;
   }
   const liveAgents = new Map<number, LiveAgent>();
+
+  /* --- stall watchdog --------------------------------------------------- */
+
+  const stallTimeoutMs = options.stallTimeoutMs ?? DEFAULT_STALL_TIMEOUT_MS;
+  const stallCheckIntervalMs = options.stallCheckIntervalMs ?? 30_000;
+  /**
+   * In-flight children by runtime agent id, with the last time each said
+   * anything.
+   *
+   * Keyed by id rather than index because {@link host.abortAgent} takes an id,
+   * and the index is what finds the {@link LiveAgent} to mark. Armed after the
+   * semaphore, so time parked behind the concurrency limit never counts against
+   * a child that has not started yet.
+   */
+  const lastActivity = new Map<string, { index: number; at: number }>();
+  let stallTimer: ReturnType<typeof setInterval> | undefined;
+
+  /** The one wording for a watchdog stop, shared by the row and the abort. */
+  const stallMessage = () =>
+    `Timed out after ${Math.round(stallTimeoutMs / 1000)}s of inactivity.`;
+
+  const checkStalls = () => {
+    const now = Date.now();
+    for (const [agentId, entry] of lastActivity) {
+      const live = liveAgents.get(entry.index);
+      if (live === undefined) continue;
+      if (live.timedOut !== true) {
+        if (now - entry.at <= stallTimeoutMs) continue;
+        // Abort, rather than answer the call here: a stop reaches a hung tool
+        // call, and it lets the child settle normally — worktree cleanup and
+        // all — so its slot is handed back the way any other child's is.
+        live.timedOut = true;
+        host.abortAgent(agentId);
+        continue;
+      }
+      // A whole tick past the abort and still outstanding: this child is not
+      // going to settle, and waiting for it would wedge the run exactly as the
+      // watchdog exists to prevent. Answer the call ourselves. The child may be
+      // left running — the lesser evil, and why this is the second tick rather
+      // than the first — but the run is free either way.
+      live.forceSettle?.(
+        // Report the stop the user asked for, not the one the watchdog did: a
+        // skip that raced the watchdog is still a skip, and only the row's own
+        // flag can say so once the child never reported one itself.
+        live.intent === "skip" ?
+          { ok: false, skipped: true, error: "Stopped." }
+        : { ok: false, error: stallMessage() },
+      );
+    }
+  };
+
+  /** One timer per run, and only while a child is actually in flight. */
+  const armStallTimer = () => {
+    if (stallTimer !== undefined || stallTimeoutMs <= 0) return;
+    stallTimer = setInterval(checkStalls, stallCheckIntervalMs);
+    // A live workflow must not be the reason the process stays up.
+    stallTimer.unref?.();
+  };
+
+  const disarmStallTimer = () => {
+    if (stallTimer === undefined || lastActivity.size > 0) return;
+    clearInterval(stallTimer);
+    stallTimer = undefined;
+  };
+
+  /** A heartbeat from one child. Unknown ids are ignored, not registered. */
+  const noteActivity = (agentId: string) => {
+    const entry = lastActivity.get(agentId);
+    if (entry !== undefined) entry.at = Date.now();
+  };
 
   /**
    * Output tokens this run has spent, mirrored to the script as
@@ -784,6 +908,10 @@ export async function runWorkflow(options: RunWorkflowOptions): Promise<Workflow
       releasePause();
       for (const agentId of inflight) host.abortAgent(agentId);
       inflight.clear();
+      // Nothing is in flight any more, so there is nothing left to watch — and
+      // a timer outliving its run would keep the process up for nothing.
+      lastActivity.clear();
+      disarmStallTimer();
       semaphore.drain();
       // Resolve only once the thread is actually down, so a caller that awaits
       // runWorkflow() is guaranteed not to be leaking one.
@@ -1040,13 +1168,20 @@ export async function runWorkflow(options: RunWorkflowOptions): Promise<Workflow
           };
           live.started = true;
           inflight.add(agentId);
+          // Armed here rather than when the call arrived: a child parked behind
+          // the concurrency limit has had no chance to say anything, and timing
+          // it out for the run's own queueing would be a false positive.
+          if (stallTimeoutMs > 0) {
+            lastActivity.set(agentId, { index, at: Date.now() });
+            armStallTimer();
+          }
 
           let result: WorkflowSpawnResult;
           try {
-            result =
+            const spawn: Promise<WorkflowSpawnResult> =
               resumed !== undefined && resumeAgent !== undefined
-                ? await resumeAgent(resumed.agentId, payload.prompt, onResolved)
-                : await host.spawnAgent({
+                ? resumeAgent(resumed.agentId, payload.prompt, onResolved)
+                : host.spawnAgent({
                     agentId,
                     index,
                     prompt: payload.prompt,
@@ -1062,7 +1197,21 @@ export async function runWorkflow(options: RunWorkflowOptions): Promise<Workflow
                     // child's worktree does, and hands back `result.gate`.
                     ...(payload.gate !== undefined ? { gate: payload.gate } : {}),
                     onResolved,
+                    // What the watchdog listens to. A resumed child has no such
+                    // hook — `resumeAgent` takes only the follow-up prompt — so
+                    // it is watched but cannot prove it is alive.
+                    onActivity: () => noteActivity(agentId),
                   });
+            // Raced, so that a child which ignores its abort cannot leave this
+            // await — and with it the whole run — outstanding forever. A real
+            // child settles here; only a stopped-in-name-only one is answered
+            // by `checkStalls`, and only after a tick's grace.
+            result = await new Promise<WorkflowSpawnResult>(resolve => {
+              live.forceSettle = resolve;
+              spawn.then(resolve, error => {
+                resolve({ ok: false, error: error instanceof Error ? error.message : String(error) });
+              });
+            });
             if (result.ok) {
               // Recorded before the gate runs: the child itself finished, so it is
               // resumable even when its gate rejects the work — "here is what the
@@ -1091,6 +1240,7 @@ export async function runWorkflow(options: RunWorkflowOptions): Promise<Workflow
           } catch (error) {
             result = { ok: false, error: error instanceof Error ? error.message : String(error) };
           } finally {
+            live.forceSettle = undefined;
             inflight.delete(agentId);
             live.started = false;
             semaphore.release();
@@ -1103,9 +1253,47 @@ export async function runWorkflow(options: RunWorkflowOptions): Promise<Workflow
           // `agent()`, which is the only reason a retry can mean anything.
           if (intent() === "retry" && !aborted) {
             live.intent = undefined;
+            // The retry starts the clock over: the silent child is gone, and
+            // the new one is owed the whole window before it is called silent
+            // too. Without this, a retry of a timed-out call would be killed on
+            // the next tick by the verdict on the attempt before it.
+            live.timedOut = false;
+            noteActivity(agentId);
             attempt++;
             emit([{ ...base, queuedAt, attempt, lastAttemptReason: "user-retry" }]);
             continue;
+          }
+
+          // The watchdog stopped this child, so the call is a timeout rather
+          // than a failure or a skip — whatever the abort made the host report.
+          //
+          // `intent()` and not `result.skipped`: a host reports a stopped child
+          // as skipped whether a user asked for it or the watchdog did, so the
+          // result alone cannot tell the two apart. The user's intent can, and
+          // theirs wins the race — one row either way.
+          if (live.timedOut === true && intent() !== "skip") {
+            const timedOutAt = Date.now();
+            emit([
+              {
+                ...base,
+                queuedAt,
+                startedAt,
+                ...attemptMark,
+                lastProgressAt: timedOutAt,
+                durationMs: timedOutAt - startedAt,
+                state: "error",
+                timedOut: true,
+                error: stallMessage(),
+              },
+            ]);
+            // `ok: false`, like any other failure: resuming this run re-runs
+            // this child live, which is the honest thing to do with a call that
+            // never produced an answer.
+            recordJournal?.({ index, key, ok: false, ...resumeMark });
+            // `null` to the script, the shape a skip already gives — the SDD
+            // scripts degrade on a missing verdict rather than throw.
+            respond(callId, true, null);
+            return;
           }
 
           // Counted before the response is sent, so the very call that spent
@@ -1155,6 +1343,10 @@ export async function runWorkflow(options: RunWorkflowOptions): Promise<Workflow
         }
       } finally {
         liveAgents.delete(index);
+        // The child is gone (or was declared gone), so the watchdog stops
+        // watching it — and stops altogether once no child is left.
+        lastActivity.delete(agentId);
+        disarmStallTimer();
       }
     }
 
