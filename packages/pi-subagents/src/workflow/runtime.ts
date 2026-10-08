@@ -18,7 +18,7 @@ import { Worker } from "node:worker_threads";
 import { type JournalKeyInput, journalKey, type WorkflowJournalEntry } from "./journal.js";
 import { type CompiledSchema, compileJsonSchema } from "./json-schema.js";
 import { extractMeta, type WorkflowMeta } from "./meta.js";
-import type { WorkflowAgentEntry, WorkflowEntry } from "./progress.js";
+import { formatRunDuration, type WorkflowAgentEntry, type WorkflowEntry } from "./progress.js";
 import { WORKER_SOURCE } from "./worker-source.js";
 
 /** Matches the `script` field's `maxLength` in the tool schema. */
@@ -807,7 +807,7 @@ export async function runWorkflow(options: RunWorkflowOptions): Promise<Workflow
 
   /** The one wording for a watchdog stop, shared by the row and the abort. */
   const stallMessage = (timeoutMs: number) =>
-    `Timed out after ${Math.round(timeoutMs / 1000)}s of inactivity.`;
+    `Timed out after ${formatRunDuration(timeoutMs)} of inactivity.`;
 
   const checkStalls = () => {
     const now = Date.now();
@@ -1087,7 +1087,7 @@ export async function runWorkflow(options: RunWorkflowOptions): Promise<Workflow
     finishRunStall = () => {
       finish({
         status: "failed",
-        error: `Workflow stalled: no progress for ${Math.round(runStallTimeoutMs / 1000)}s.`,
+        error: `Workflow stalled: no progress for ${formatRunDuration(runStallTimeoutMs)}.`,
       });
     };
     armRunStallTimer();

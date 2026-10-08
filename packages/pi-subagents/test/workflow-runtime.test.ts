@@ -1482,6 +1482,16 @@ describe("stall watchdog", () => {
     expect(terminal?.durationMs ?? Number.POSITIVE_INFINITY).toBeLessThan(500);
   });
 
+  it("renders a sub-second window as a duration, not as 0s", async () => {
+    // `Math.round(200 / 1000)` printed "Timed out after 0s", which reads as a
+    // watchdog that fired instantly rather than one with a 200 ms window.
+    const stub = stubHost(() => new Promise<WorkflowSpawnResult>(() => {})); // never resolves
+    const result = await run('const a = await agent("hang", { stallTimeout: 0.2 }); return { got: a };', {
+      host: stub.host, stallTimeoutMs: 1000, stallCheckIntervalMs: 10,
+    });
+    expect(agentEntries(result.progress).at(-1)?.error).toBe("Timed out after 200ms of inactivity.");
+  });
+
   it("lets a per-call stallTimeout of zero opt out of the run's window", async () => {
     // The run says 40 ms; this call says off. Far past that window the child is
     // still pending — so `0` disabled the watchdog rather than merely delaying it.
@@ -1767,6 +1777,15 @@ describe("stall watchdog", () => {
     expect(result.status).toBe("failed");
     expect(result.error).toContain("Workflow stalled");
   }, 5000);
+
+  it("renders the run-level stall message with the same formatter", async () => {
+    const stub = stubHost();
+    const result = await run("while (true) {}", {
+      host: stub.host, runStallTimeoutMs: 200, stallCheckIntervalMs: 10,
+    });
+    expect(result.status).toBe("failed");
+    expect(result.error).toBe("Workflow stalled: no progress for 200ms.");
+  });
 
   it.each([
     ["NaN", Number.NaN],
