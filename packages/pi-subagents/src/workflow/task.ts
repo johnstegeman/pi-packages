@@ -251,6 +251,23 @@ export function workflowResultText(task: WorkflowTask): string {
 }
 
 /**
+ * How much of a run's outcome a transcript carrier keeps.
+ *
+ * The notification and the persisted `subagents:workflow` snapshot share this
+ * budget: a large run result (a big JSON envelope) must not bloat the session
+ * transcript, and both carriers should truncate at the same point so a reader
+ * sees the same text either way.
+ */
+export const MAX_WORKFLOW_RESULT_CHARS = 4000;
+
+/** Cap a run's outcome text to {@link MAX_WORKFLOW_RESULT_CHARS}. */
+export function truncateWorkflowResult(result: string): string {
+  return result.length > MAX_WORKFLOW_RESULT_CHARS
+    ? `${result.slice(0, MAX_WORKFLOW_RESULT_CHARS)}\n...(truncated)`
+    : result;
+}
+
+/**
  * Resolve a `resumeFromRunId` against the runs this session has seen.
  *
  * Same-session only, and deliberately so: the journal lives beside the
@@ -317,7 +334,7 @@ export function formatWorkflowNotification(task: WorkflowTask, now = Date.now())
     `<summary>Workflow "${escapeXml(task.workflowName ?? task.id)}" ${task.status} — ${totals.done}/${totals.total} agents${
       task.replayedCount > 0 ? `, ${task.replayedCount} replayed from ${escapeXml(task.resumedFrom ?? "an earlier run")}` : ""
     }${totals.timedOut > 0 ? `, ${totals.timedOut} timed out (stalled)` : ""}</summary>`,
-    `<result>${escapeXml(result.length > 4000 ? `${result.slice(0, 4000)}\n...(truncated)` : result)}</result>`,
+    `<result>${escapeXml(truncateWorkflowResult(result))}</result>`,
     `<usage><total_tokens>${task.totalTokens}</total_tokens><tool_uses>${task.totalToolCalls}</tool_uses><duration_ms>${elapsedMs(task, now)}</duration_ms></usage>`,
     `</task-notification>`,
   ].filter(Boolean).join("\n");

@@ -215,8 +215,12 @@ This fork adds a watchdog at two levels, plus the settings to tune it:
   ever came, and the orchestrator has to be able to tell a degraded review from one the user
   dismissed.
 - **Per-run:** a run that hears nothing from the worker for `runStallTimeoutMs` settles `failed`
-  with *"Workflow stalled: no progress for Ns."* and the worker is terminated. Suspended while the
-  run is `paused`, because a paused run makes no progress by design.
+  with *"Workflow stalled: no progress for Ns."* and the worker is terminated. The check is gated
+  on **nothing being in flight** (`inflight.size === 0`): a worker awaiting a child is silent by
+  design — it posts one `call` and then hears nothing until the answer — so judging silence while a
+  child runs would cap every `agent()` at the run window and throw away the per-child (or per-call
+  `agent({ stallTimeout })`) patience. Suspended while the run is `paused`, because a paused run
+  makes no progress by design.
 - **Configuration:** `workflowStallTimeoutSecs` (settings, default 600, `0` = off) is converted to
   the runtime's `stallTimeoutMs`, with the run window at twice the child window; a per-call
   `agent({ stallTimeout })` overrides both.
@@ -224,12 +228,13 @@ This fork adds a watchdog at two levels, plus the settings to tune it:
 **`get_subagent_result` resolves `wf_…` ids.** Upstream's tool only knows agents, so the run id
 `SubagentWorkflow` hands the model answered `Agent not found` — the run lives in the in-process
 `workflowTasks` map, which no tool exposes, and the run's children are excluded from the agent
-lookup. The tool now branches on the `wf_` prefix *before* the agent path and returns a status
-payload (`status`, elapsed, done/total, timed-out labels, and the result once the run settles), or
-`No workflow run "…" in this session.` for an unknown id. The agent path is unchanged — a
-non-`wf_` id resolves exactly as before — and there is deliberately no `wait: true` mode for
-workflows. The tool `description`, `promptSnippet` and `agent_id` parameter doc all name the new
-id form.
+lookup. The tool now resolves an agent record first, and only falls into the `wf_` branch when the
+string names no live agent — a caller-supplied agent `name` may itself begin with `wf_` — and
+returns a status payload (`status`, elapsed, done/total, timed-out labels, and the result once the
+run settles), or `No workflow run "…" in this session.` for an unknown id. The agent path is
+unchanged — a non-`wf_` id resolves exactly as before — and there is deliberately no `wait: true`
+mode for workflows. The tool `description`, `promptSnippet` and `agent_id` parameter doc all name
+the new id form.
 
 **Durable terminal state.** A tool-launched run persisted nothing: it lived only in the
 in-process `workflowTasks` map, so a reload left `get_subagent_result` answering `No workflow
@@ -246,9 +251,11 @@ in-memory map used to leave behind.
 
 Files: `src/index.ts` (the `wf_` branch in `get_subagent_result`, the durability entry +
 `session_start` rehydration, the setting applier, the stall-option wiring, the timed-out
-surfacing) plus `src/workflow/{runtime,progress,task,entry,worker-source,tool-description}.ts`,
-The runtime and `worker-source` hunks and the new `get_subagent_result` branch carry the in-code
-marker; the purely additive fields and settings rows do not. Covered by `test/workflow-tool.test.ts`
+surfacing) plus `src/workflow/{runtime,progress,task,entry,worker-source,tool-description}.ts`.
+The new `get_subagent_result` branch carries the in-code marker. The watchdog hunks do not — like
+the purely additive fields and settings rows, the feature is the state of our copy rather than a
+small surgical edit a reader could mistake for upstream, so marking every changed line would be
+noise (see the marker convention below). Covered by `test/workflow-tool.test.ts`
 (the `wf_` resolution, the unknown-id error, the unchanged agent path, the settled-run entry, the
 `session_start` rehydration, the interrupted run),
 `test/workflow-runtime.test.ts` (the per-child watchdog and run-level liveness),

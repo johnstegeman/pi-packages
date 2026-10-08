@@ -560,7 +560,15 @@ describe("createWorkflowHost — abort, resume and gate", () => {
     await host.spawnAgent(request({ agentId: "wf-agent-0" }));
     const resumed = await host.resumeAgent?.("wf-agent-0", "and now this");
 
-    expect(stub.resume).toHaveBeenCalledWith("manager-id-7", "and now this", undefined);
+    // The 4th arg is the liveness plumbing the watchdog needs: a resumed child
+    // reports tool/turn/usage activity like a fresh one (see the onActivity
+    // contract in runtime.ts). Asserted by shape, not identity, so the host can
+    // add another forwarding channel without breaking this.
+    expect(stub.resume).toHaveBeenCalledWith("manager-id-7", "and now this", undefined, {
+      onToolActivity: expect.any(Function),
+      onAssistantUsage: expect.any(Function),
+      onTurnEnd: expect.any(Function),
+    });
     expect(resumed).toMatchObject({ ok: true, text: "resumed" });
   });
 

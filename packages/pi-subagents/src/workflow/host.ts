@@ -368,12 +368,19 @@ export function createWorkflowHost(deps: WorkflowHostOptions): WorkflowHost {
       if (id !== undefined) manager.abort(id);
     },
 
-    async resumeAgent(agentId, prompt, onResolved) {
+    async resumeAgent(agentId, prompt, onResolved, onActivity) {
       const id = records.get(agentId);
       if (id === undefined) {
         return { ok: false, error: `Cannot resume "${agentId}" — it never started.` };
       }
-      const record = await manager.resume(id, prompt, deps.signal);
+      // The resumed child is watched by the same watchdog as a fresh one, so it
+      // gets the same liveness plumbing: without it the window is armed once and
+      // never refreshed, and a healthy long continuation is aborted for silence.
+      const record = await manager.resume(id, prompt, deps.signal, {
+        onToolActivity: () => onActivity?.(),
+        onAssistantUsage: () => onActivity?.(),
+        onTurnEnd: () => onActivity?.(),
+      });
       if (record === undefined) {
         return {
           ok: false,

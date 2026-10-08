@@ -37,7 +37,7 @@ import type { WorkflowMeta } from "../workflow/meta.js";
 import {
   buildPhaseGroups,
   collapse,
-  formatDuration,
+  formatRunDuration,
   header,
   sizeWarning,
   stats,
@@ -250,7 +250,7 @@ export function agentStatSegments(entry: WorkflowAgentEntry): string[] {
   if (model) parts.push(model);
   if (entry.tokens) parts.push(formatCompactTokens(entry.tokens));
   if (entry.toolCalls) parts.push(`${entry.toolCalls} tool call${entry.toolCalls === 1 ? "" : "s"}`);
-  if (entry.durationMs) parts.push(formatDuration(entry.durationMs));
+  if (entry.durationMs) parts.push(formatRunDuration(entry.durationMs));
   return parts;
 }
 

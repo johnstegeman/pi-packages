@@ -67,13 +67,12 @@ import { WORKFLOW_ENTRY_TYPE, type WorkflowEntryData, workflowEntryData } from "
 import { createWorkflowHost } from "./workflow/host.js";
 import { appendJournal, readJournal, type WorkflowJournalEntry } from "./workflow/journal.js";
 import { extractMeta, type WorkflowMeta, workflowCallName } from "./workflow/meta.js";
-// `formatDuration` from the progress module is aliased: the widget module (see
-// the `./ui/agent-widget.js` import) exports a same-named formatter that takes a
-// START TIMESTAMP, not a duration. Calling that one with an elapsed-ms value
-// printed a lifetime in seconds and a bogus "(running)" on a settled run.
+// The progress module's elapsed-time formatter is `formatRunDuration` (see
+// its own doc comment); the widget module's `formatDuration` takes a START
+// TIMESTAMP, so the two no longer share a name at this call site.
 import {
   elapsedMs,
-  formatDuration as formatRunDuration,
+  formatRunDuration,
   stats,
   type WorkflowEntry,
   type WorkflowRunStatus,
@@ -2959,13 +2958,18 @@ Terse command-style prompts produce shallow, generic work.
     }),
     execute: async (_toolCallId, params, signal, _onUpdate, _ctx) => {
       // LOCAL PATCH (pi-packages) — see docs/pi-subagents-local-patch.md
+      // An agent handle is caller-supplied — it may be a `name` that itself
+      // begins with `wf_` — so the agent lookup runs FIRST. Only a string that
+      // names no live agent is read as a workflow run id.
+      const record = resolveAgentRef(params.agent_id);
+      //
       // A `wf_…` id names a workflow RUN, not an agent: its children are
       // deliberately absent from the agent lookup (they are owned by the run),
       // and the run itself lives in `workflowTasks` — or, after a reload, in
       // the transcript snapshots `session_start` recovers. Without this branch
       // the id the SubagentWorkflow tool just handed the model answers
       // `Agent not found` — the reported stall-watchdog symptom.
-      if (params.agent_id.startsWith("wf_")) {
+      if (record === undefined && params.agent_id.startsWith("wf_")) {
         const view = workflowRunStatusView(params.agent_id);
         if (!view) {
           // A run the transcript shows was started but never settled: it was
@@ -3005,12 +3009,14 @@ Terse command-style prompts produce shallow, generic work.
           structuredContent: {
             agentId: params.agent_id,
             status: view.status,
-            result: view.result,
+            // A running run has no result yet; the text body says so too. An
+            // omitted field is the honest shape — `"No output."` reads as a
+            // settled run that produced nothing.
+            ...(view.status === "running" ? {} : { result: view.result }),
           },
         };
       }
 
-      const record = resolveAgentRef(params.agent_id);
       if (!record || !isTopLevelAgent(record)) {
         // LOCAL PATCH (pi-packages) — see docs/pi-subagents-local-patch.md
         return {

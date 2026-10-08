@@ -6,7 +6,7 @@ import {
   displayState,
   elapsedMs,
   footerPhaseLabel,
-  formatDuration,
+  formatRunDuration,
   gerund,
   header,
   isLive,
@@ -353,7 +353,7 @@ describe("elapsedMs", () => {
   });
 });
 
-describe("formatDuration", () => {
+describe("formatRunDuration", () => {
   it.each([
     [0, "0ms"],
     [340, "340ms"],
@@ -361,7 +361,7 @@ describe("formatDuration", () => {
     [72_000, "1m12s"],
     [3_600_000, "60m00s"],
   ])("formats %ims as %s", (ms, expected) => {
-    expect(formatDuration(ms)).toBe(expected);
+    expect(formatRunDuration(ms)).toBe(expected);
   });
 });
 

@@ -42,11 +42,17 @@ test("stage 1: first fix agent is gated + labelled", () => {
   assert.match(src, /agent\(fixPrompt, \{ label: 'fix', gate: gateCommand, agentType: 'implementer', phase: 'Fix', stallTimeout: 3600 \}\)/);
 });
 
-test("stall window: every agent() call site raises the window to 3600 s", () => {
+test("stall window: every implementer call site raises the window to 3600 s", () => {
   // Fix-round implementers legitimately run long test suites, so the 600 s
-  // default would kill a slow-but-alive child. Count the call sites so a new
-  // branch that forgot the window cannot slip past the behavior test.
-  assert.equal((src.match(/stallTimeout: 3600/g) ?? []).length, 4);
+  // default would kill a slow-but-alive child. The re-review is a reviewer
+  // reading a diff, so it keeps the run's default window instead. Count the
+  // call sites so a new branch that forgot the window cannot slip past the
+  // behavior test.
+  assert.equal((src.match(/stallTimeout: 3600/g) ?? []).length, 3);
+  assert.ok(
+    !/label: 're-review'[^\n]*stallTimeout/.test(src),
+    "the re-review is a reviewer, not an implementer — it must inherit the default window",
+  );
 });
 
 test("resume rule: resume: 'fix' without gate, then re-gated verify", () => {
@@ -257,7 +263,7 @@ const TAIL_IMPL =
 const TAIL_REVIEW =
   ". Your beads access is READ-ONLY — reading the task/gate bead is fine; never write. Report your verdict; the controller records it."
 
-test("behavior: every emitted agent() call carries stallTimeout: 3600", async () => {
+test("behavior: implementer calls carry stallTimeout: 3600; re-review inherits the default", async () => {
   // The retry path is the widest: it emits all four call sites (gated fix,
   // ungated resume, re-gated verify, re-review) in one round.
   const calls = []
@@ -279,6 +285,10 @@ test("behavior: every emitted agent() call carries stallTimeout: 3600", async ()
     ["fix", "fix", "verify", "re-review"],
   )
   for (const o of calls) {
+    if (o.label === "re-review") {
+      assert.equal(o.stallTimeout, undefined, "re-review must inherit the default window")
+      continue
+    }
     assert.equal(o.stallTimeout, 3600, o.label + " must pass stallTimeout: 3600")
   }
 })

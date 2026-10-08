@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import type { WorkflowJournalEntry } from "../src/workflow/journal.js";
 import { buildPhaseGroups, type WorkflowAgentEntry, type WorkflowEntry } from "../src/workflow/progress.js";
 import {
@@ -1425,6 +1425,31 @@ describe("stall watchdog", () => {
     expect(stub.aborted).toEqual([]);
   });
 
+  it("keeps a resumed child alive while it reports activity", async () => {
+    // The resume branch forwards its own activity hook. Without it a resumed
+    // child's window is armed once and never refreshed, so a healthy long
+    // continuation is aborted at exactly the window — the bug the SDD
+    // `fix-loop.js` resume (stallTimeout: 3600) would have hit.
+    const aborted: string[] = [];
+    const host: WorkflowHost = {
+      async spawnAgent() {
+        return { ok: true, text: "first" };
+      },
+      async resumeAgent(_id, _prompt, _onResolved, onActivity) {
+        for (let i = 0; i < 8; i++) { onActivity?.(); await sleep(15); }
+        return { ok: true, text: "resumed" };
+      },
+      abortAgent(agentId) { aborted.push(agentId); },
+    };
+    const result = await run(
+      'await agent("go", { label: "impl" });\nreturn await agent("again", { resume: "impl" });',
+      { host, stallTimeoutMs: 60, stallCheckIntervalMs: 10 },
+    );
+    expect(result.status).toBe("completed");
+    expect(result.value).toBe("resumed");
+    expect(aborted).toEqual([]);
+  });
+
   it("does not watch a child when the window is zero", async () => {
     const stub = stubHost(async () => {
       // Far past the window every other test here uses, and still a child
@@ -1532,6 +1557,58 @@ describe("stall watchdog", () => {
     expect(result.value).toEqual({ got: null });
     expect(aborted).toEqual(["wf-agent-0"]);
     expect(agentEntries(result.progress).at(-1)).toMatchObject({ state: "error", timedOut: true });
+  });
+
+  it("counts a timed-out child's output tokens", async () => {
+    // The child ran and burned tokens before the watchdog stopped it; the
+    // timed-out branch returns before the shared accumulation, so without its
+    // own `+=` the spend would vanish from `budget.spent()`.
+    const release = new Map<string, (r: WorkflowSpawnResult) => void>();
+    const host: WorkflowHost = {
+      spawnAgent(request) {
+        return new Promise<WorkflowSpawnResult>(resolve => release.set(request.agentId, resolve));
+      },
+      abortAgent(agentId) {
+        release.get(agentId)?.({ ok: false, skipped: true, error: "Stopped.", outputTokens: 30 });
+      },
+    };
+    const result = await run('const a = await agent("hang"); return { got: a, spent: budget.spent() };', {
+      host, stallTimeoutMs: 40, stallCheckIntervalMs: 10,
+    });
+    expect(result.value).toEqual({ got: null, spent: 30 });
+  });
+
+  it("lets the timeout verdict win when the child resolves ok in the same instant", async () => {
+    // A child can finish at the exact moment the watchdog stops it. The
+    // timeout wins: registering it as completed (resumable) or running its
+    // gate would let a stopped child read as a clean pass.
+    const release = new Map<string, (r: WorkflowSpawnResult) => void>();
+    const aborted: string[] = [];
+    let gateRan = false;
+    const host: WorkflowHost = {
+      spawnAgent(request) {
+        return new Promise<WorkflowSpawnResult>(resolve => release.set(request.agentId, resolve));
+      },
+      abortAgent(agentId) {
+        aborted.push(agentId);
+        // The child "finishes" exactly as the watchdog stops it.
+        release.get(agentId)?.({ ok: true, text: "late", outputTokens: 5 });
+      },
+      async runGate() {
+        gateRan = true;
+        return { ok: true, output: "" };
+      },
+    };
+    const result = await run('const a = await agent("gated", { gate: "true" }); return { got: a, spent: budget.spent() };', {
+      host, stallTimeoutMs: 40, stallCheckIntervalMs: 10,
+    });
+
+    expect(result.value).toEqual({ got: null, spent: 5 });
+    expect(aborted).toEqual(["wf-agent-0"]);
+    expect(gateRan).toBe(false);
+    const terminal = agentEntries(result.progress).filter(e => e.index === 0 && e.state !== "start");
+    expect(terminal).toHaveLength(1);
+    expect(terminal[0]).toMatchObject({ state: "error", timedOut: true });
   });
 
   it("warns when a child ignores its abort and is force-completed", async () => {
@@ -1700,5 +1777,31 @@ describe("stall watchdog", () => {
     const result = await done;
     expect(result.status).toBe("killed");
     expect(result.error).toBe("Workflow aborted.");
+  });
+
+  it("clears both watchdog intervals when the run settles", async () => {
+    // Timer hygiene (design R13): one unref'd interval per active run, and none
+    // left behind once it settles. A leaked interval keeps the process up for
+    // nothing and, worse, could abort a child of a later run.
+    const setSpy = vi.spyOn(globalThis, "setInterval");
+    const clearSpy = vi.spyOn(globalThis, "clearInterval");
+    try {
+      const stub = stubHost(async () => {
+        await sleep(30);
+        return { ok: true, text: "ok" };
+      });
+      const result = await run('const a = await agent("x"); return a;', {
+        host: stub.host, stallTimeoutMs: 40, stallCheckIntervalMs: 10,
+      });
+      expect(result.status).toBe("completed");
+
+      const created = setSpy.mock.results.map(r => r.value);
+      expect(created.length).toBeGreaterThan(0);
+      const cleared = new Set(clearSpy.mock.calls.map(c => c[0]));
+      for (const timer of created) expect(cleared.has(timer)).toBe(true);
+    } finally {
+      setSpy.mockRestore();
+      clearSpy.mockRestore();
+    }
   });
 });

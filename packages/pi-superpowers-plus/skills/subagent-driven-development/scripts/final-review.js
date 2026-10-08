@@ -215,7 +215,10 @@ const dimStatus = DIMENSIONS.map((d) => {
   return { dimension: d, ok, findings: ok ? r.findings : [] }
 })
 const failedDims = dimStatus.filter((s) => !s.ok)
-const degraded = failedDims.length === 0
+// Finder coverage loss degrades the review. This is the finder half only:
+// the verify half is folded in after the verify phase below, because a
+// verdict does not exist until the refuters have run.
+let degraded = failedDims.length === 0
   ? null
   : failedDims.length + ' of ' + dimStatus.length + ' dimension finders failed: ' + failedDims.map((s) => s.dimension).join(', ')
 
@@ -248,6 +251,19 @@ for (let i = 0; i < deduped.length; i += WAVE) {
     agent(refutation(f, i + j), { agentType: 'verifier', label: 'verify:' + (f.line ? f.file + ':' + f.line : f.file), phase: 'Verify', schema: VERDICT_SCHEMA })
   ))
   verdicts.push(...waveVerdicts)
+}
+
+// A verdict that came back null (its refuter was skipped, failed or timed
+// out) is reported by `verdictShape` as the unverified fallback. A partially
+// unverified review must never read as clean, so ANY such verdict degrades the
+// run too — the caller adjudicates on `degraded`, and silence here would let a
+// review whose verification was lost pass as fully verified. A failed finder
+// already set `degraded`, and that message is the more specific diagnosis, so
+// it wins.
+const unverified = verdicts.reduce((n, v) => (v === null || v === undefined ? n + 1 : n), 0)
+if (degraded === null && unverified > 0) {
+  degraded =
+    unverified + ' of ' + deduped.length + ' findings unverified (verifier skipped or timed out)'
 }
 
 const findings = deduped.map((f, i) => ({

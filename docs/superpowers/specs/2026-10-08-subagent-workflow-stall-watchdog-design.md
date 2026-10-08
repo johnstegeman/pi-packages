@@ -124,7 +124,8 @@ Everything is in one thread (the runtime owns the run and calls the host).
   beside `inflight`. **Arm only after** `semaphore.acquire()` and
   `inflight.add(agentId)`, so time parked behind the concurrency limit is never
   counted. Reset `lastActivity` on every heartbeat.
-- A **single `setInterval`** (tick ~30 s, `unref()`'d) scans the map; for any
+- A **single `setInterval`** (tick ~30 s for the default window, `unref()`'d)
+  scans the map; for any
   entry past its window it sets `live.timedOut`, records the reason, and calls
   `host.abortAgent(agentId)`. Cleared when the map empties, on `finish()`, and
   each entry deleted in the existing per-agent `finally`.
@@ -147,9 +148,9 @@ Everything is in one thread (the runtime owns the run and calls the host).
 
 - **Name/unit:** `agent({ stallTimeout })` — **seconds**, an *inactivity* window.
   Not `timeout`, which reads as a total-duration cap. `undefined` → settings
-  default; `0` → disabled for this call; positive integer → that window.
+  default; `0` → disabled for this call; positive number → that window.
 - **Worker (`worker-source.ts`):** add `"stallTimeout"` to `AGENT_OPTIONS`; validate
-  as a non-negative finite integer with an upper bound (≤ 86400 s) in the same
+  as a non-negative finite number with an upper bound (≤ 86400 s) in the same
   thrown-`Error` style as `effort`/`isolation`; add it to the
   `callHost("agent", { … })` payload.
 - **Runtime:** add `stallTimeout?: number` (seconds) to `AgentCallPayload`
@@ -254,7 +255,7 @@ progress by design).
   `wf_` id still errors clearly.
 - **R13 — Timer hygiene:** one `unref()`'d interval per active run, cleared on
   settle.
-- **R14 — Validation bounds:** `stallTimeout` non-negative finite integer, ≤ 24 h.
+- **R14 — Validation bounds:** `stallTimeout` non-negative finite number, ≤ 24 h.
 - **R15 — Docs/defaults pinned:** README:441 and `documented-defaults.test.ts`
   must document and pin the new default.
 - **R16 — Behavior change:** workflows that set nothing now get the watchdog on.

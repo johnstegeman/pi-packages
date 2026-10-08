@@ -316,6 +316,8 @@ interface ResumeOptions {
   onToolActivity?: (activity: ToolActivity) => void;
   /** Called once per assistant message_end with that message's usage delta. */
   onAssistantUsage?: (usage: { input: number; output: number; cacheWrite: number }) => void;
+  /** Called at the end of each resumed turn with the cumulative count. */
+  onTurnEnd?: (turnCount: number) => void;
   /** Called when the session successfully compacts. */
   onCompaction?: (info: CompactionInfo) => void;
   /**
@@ -1184,6 +1186,9 @@ export class AgentManager {
           this.onUsage?.(record, usage);
           options?.onAssistantUsage?.(usage);
         },
+        onTurnEnd: (turnCount) => {
+          options?.onTurnEnd?.(turnCount);
+        },
         onCompaction: (info) => {
           record.compactionCount++;
           this.onCompact?.(record, info);
@@ -1274,6 +1279,9 @@ export class AgentManager {
         addUsage(record.lifetimeUsage, usage);
         this.onUsage?.(record, usage);
         options.onAssistantUsage?.(usage);
+      },
+      onTurnEnd: (turnCount) => {
+        options.onTurnEnd?.(turnCount);
       },
       onCompaction: (info) => {
         record.compactionCount++;

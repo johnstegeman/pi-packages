@@ -154,9 +154,18 @@ test("findingsFile: clean run honors findingsFile with compact envelope (count: 
 });
 
 test("degraded: set when ANY finder fails (N of M, named)", () => {
-  assert.match(src, /const degraded = failedDims\.length === 0/);
+  assert.match(src, /let degraded = failedDims\.length === 0/);
   assert.match(src, /' dimension finders failed: '/);
   assert.match(src, /failedDims\.map\(\(s\) => s\.dimension\)\.join\(', '\)/);
+});
+
+test("degraded: an unverified verdict degrades too (partial verification is never clean)", () => {
+  // The unverified fallback `verdictShape` emits for a null verdict has to reach
+  // `degraded`: a controller that adjudicates on `degraded` would otherwise read a
+  // review whose refuters were skipped or timed out as a clean pass.
+  assert.match(src, /const unverified = verdicts\.reduce/);
+  assert.match(src, /if \(degraded === null && unverified > 0\) \{/);
+  assert.match(src, /' findings unverified \(verifier skipped or timed out\)'/);
 });
 
 test("no sandbox-forbidden globals", () => {
@@ -270,6 +279,42 @@ test("behavior: populated run dedupes + refutes", async () => {
   assert.equal(state.finderCalls, 5);
   assert.equal(state.refuterCalls, 2);
   assert.equal(result.degraded, null);
+})
+
+test("behavior: a null refuter verdict degrades the run and is reported unverified", async () => {
+  // The shape a timed-out or skipped verifier produces: `parallel` folds the
+  // failed child to null. The review must not read clean — `degraded` names the
+  // unverified findings and the verdict carries the documented fallback.
+  const agent = async (prompt, callOpts) => {
+    const label = callOpts?.label ?? ''
+    if (label.startsWith('find:')) {
+      const d = label.slice('find:'.length)
+      return d === 'correctness'
+        ? { findings: [{ file: 'src/a.js', line: 10, severity: 'important', description: 'off-by-one in loop' }] }
+        : { findings: [] }
+    }
+    if (label === 'writer') return 'wrote 1 lines'
+    // The refuter never returned an answer (skipped / timed out).
+    return null
+  }
+
+  const inline = await runWorkflow(src, {
+    args: { base: 'a', head: 'b', packagePath: '/x', description: 'd', gateBeadId: 'g' },
+    agent,
+  })
+  assert.equal(inline.findings.length, 1)
+  assert.equal(inline.findings[0].verification.isReal, true)
+  assert.equal(inline.findings[0].verification.reason, 'unverified (refuter skipped)')
+  assert.match(inline.degraded, /^1 of 1 findings unverified \(verifier skipped or timed out\)$/)
+
+  // The compact (findingsFile) envelope carries the same signal, so a controller
+  // reading either shape cannot mistake the run for clean.
+  const compact = await runWorkflow(src, {
+    args: { base: 'a', head: 'b', packagePath: '/x', description: 'd', gateBeadId: 'g', findingsFile: '/tmp/unverified.jsonl' },
+    agent,
+  })
+  assert.equal(compact.count, 1)
+  assert.match(compact.degraded, /findings unverified \(verifier skipped or timed out\)/)
 })
 
 // The structural pins above are source-shape only: they prove the sentences exist as

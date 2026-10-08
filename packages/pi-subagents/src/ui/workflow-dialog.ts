@@ -53,7 +53,7 @@ import type { WorkflowMeta } from "../workflow/meta.js";
 import {
   buildPhaseGroups,
   displayState,
-  formatDuration,
+  formatRunDuration,
   header,
   isLive,
   type PhaseGroup,
@@ -424,7 +424,7 @@ export function subStatusAnnotations(
   }
   if (entry.attempt != null && entry.attempt > 1) parts.push(`attempt ${entry.attempt}`);
   if (state === "queued" && entry.queuedAt != null) {
-    parts.push(`waiting ${formatDuration(Math.max(0, now - entry.queuedAt))}`);
+    parts.push(`waiting ${formatRunDuration(Math.max(0, now - entry.queuedAt))}`);
   }
   return parts;
 }
@@ -670,7 +670,7 @@ function agentRow(options: {
   }
   // The duration sits flush right, so a column of rows reads as a column of
   // durations rather than as ragged text.
-  const duration = entry.durationMs ? [{ text: `${formatDuration(entry.durationMs)} `, color: "dim" as const }] : [];
+  const duration = entry.durationMs ? [{ text: `${formatRunDuration(entry.durationMs)} `, color: "dim" as const }] : [];
   return duration.length > 0 ? rightAlign(head, duration, width) : clampLine(head, width);
 }
 
@@ -806,7 +806,7 @@ export function layoutWorkflowDialog(input: WorkflowDialogInput): WorkflowCardLi
     if (thinking) stats.push(thinking);
     if (entry.tokens) stats.push(`${formatCompactTokens(entry.tokens)} tok`);
     if (entry.toolCalls) stats.push(`${entry.toolCalls} tool call${entry.toolCalls === 1 ? "" : "s"}`);
-    if (entry.durationMs) stats.push(formatDuration(entry.durationMs));
+    if (entry.durationMs) stats.push(formatRunDuration(entry.durationMs));
     if (stats.length > 0) {
       detailRows.push(clampLine([{ text: ` ${stats.join(" · ")}`, color: "dim" }], rightWidth));
     }

@@ -18,7 +18,7 @@
 
 import type { WorkflowMeta } from "./meta.js";
 import type { WorkflowEntry, WorkflowRunStatus } from "./progress.js";
-import { type WorkflowTask, workflowResultText } from "./task.js";
+import { truncateWorkflowResult, type WorkflowTask, workflowResultText } from "./task.js";
 
 /** `customType` of the session entry a flag-launched workflow renders through. */
 export const WORKFLOW_ENTRY_TYPE = "subagents:workflow";
@@ -61,7 +61,10 @@ export function workflowEntryData(task: WorkflowTask): WorkflowEntryData {
     progress: task.workflowProgress,
     agentCount: task.agentCount,
     totalTokens: task.totalTokens,
-    result: workflowResultText(task),
+    // Capped like the notification: the transcript is not the place for an
+    // unbounded run result, and a snapshot that outgrows it is one nothing can
+    // render.
+    result: truncateWorkflowResult(workflowResultText(task)),
     ...(task.meta !== undefined ? { meta: task.meta } : {}),
   };
 }

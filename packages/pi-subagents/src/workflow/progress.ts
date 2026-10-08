@@ -390,8 +390,14 @@ export function elapsedMs(
 
 const plural = (n: number, word: string) => (n === 1 ? word : `${word}s`);
 
-/** `1m12s` / `9s` / `340ms`, matching how the rest of the extension reads. */
-export function formatDuration(ms: number): string {
+/**
+ * `1m12s` / `9s` / `340ms`, matching how the rest of the extension reads.
+ *
+ * Named `formatRunDuration`, not `formatDuration`: the widget module exports a
+ * same-named formatter that takes a START TIMESTAMP, and the two were easy to
+ * confuse at a call site. `formatRunDuration(ms)` here is an ELAPSED value.
+ */
+export function formatRunDuration(ms: number): string {
   if (ms < 1000) return `${Math.max(0, Math.round(ms))}ms`;
   const totalSeconds = Math.round(ms / 1000);
   const minutes = Math.floor(totalSeconds / 60);
@@ -443,7 +449,7 @@ export function header(
   return {
     name: task.workflowName ?? meta?.name ?? task.summary ?? task.description ?? "workflow",
     subtext: meta?.description ?? task.description ?? task.summary ?? "",
-    stats: `${doneAgents}/${totalAgents} ${plural(totalAgents, "agent")} · ${formatDuration(elapsedMs(task, now))}${suffix}`,
+    stats: `${doneAgents}/${totalAgents} ${plural(totalAgents, "agent")} · ${formatRunDuration(elapsedMs(task, now))}${suffix}`,
   };
 }
 

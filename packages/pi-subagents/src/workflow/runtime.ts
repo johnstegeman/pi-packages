@@ -238,6 +238,13 @@ export interface WorkflowHost {
      * the row above it shows the one that ran.
      */
     onResolved?: WorkflowSpawnRequest["onResolved"],
+    /**
+     * Same reporter {@link WorkflowSpawnRequest.onActivity} carries, and for the
+     * same reason: a resumed child is watched by the watchdog exactly as a fresh
+     * one is, so without this its window would be armed once and never refreshed —
+     * a healthy long continuation aborted for silence it never had.
+     */
+    onActivity?: () => void,
   ): Promise<WorkflowSpawnResult>;
   /**
    * Run a `gate` command and report whether it passed.
@@ -323,6 +330,9 @@ export interface RunWorkflowOptions {
   /**
    * How often the watchdog looks, in ms.
    *
+   * Unset, it tracks the window: `min(30s, max(100ms, stallTimeoutMs / 10))`,
+   * so the production 10-minute window keeps the documented ~30s cadence while
+   * a short window is not scanned at a cadence longer than the window itself.
    * A knob rather than a constant because the window is only meaningful to the
    * tests as something injected: they exercise a fifty-millisecond stall, not a
    * ten-minute one. Also the grace a timed-out child gets to settle after its
@@ -765,7 +775,14 @@ export async function runWorkflow(options: RunWorkflowOptions): Promise<Workflow
   /* --- stall watchdog --------------------------------------------------- */
 
   const stallTimeoutMs = options.stallTimeoutMs ?? DEFAULT_STALL_TIMEOUT_MS;
-  const stallCheckIntervalMs = options.stallCheckIntervalMs ?? 30_000;
+  const stallCheckIntervalMs =
+    options.stallCheckIntervalMs ??
+    // Tracks the window rather than a flat 30s: the default 10-minute window
+    // still scans at 30s, but a short window is not scanned at a cadence
+    // longer than the window itself (which would make the effective window up
+    // to 2× the configured one). `Math.max(100, …)` keeps a tiny window from
+    // spinning the timer.
+    Math.min(30_000, Math.max(100, Math.round(stallTimeoutMs / 10)));
   /**
    * In-flight children by runtime agent id, with the last time each said
    * anything and the window that child is judged against.
@@ -1322,7 +1339,7 @@ export async function runWorkflow(options: RunWorkflowOptions): Promise<Workflow
           try {
             const spawn: Promise<WorkflowSpawnResult> =
               resumed !== undefined && resumeAgent !== undefined
-                ? resumeAgent(resumed.agentId, payload.prompt, onResolved)
+                ? resumeAgent(resumed.agentId, payload.prompt, onResolved, () => noteActivity(agentId))
                 : host.spawnAgent({
                     agentId,
                     index,
@@ -1340,9 +1357,9 @@ export async function runWorkflow(options: RunWorkflowOptions): Promise<Workflow
                     // child's worktree does, and hands back `result.gate`.
                     ...(payload.gate !== undefined ? { gate: payload.gate } : {}),
                     onResolved,
-                    // What the watchdog listens to. A resumed child has no such
-                    // hook — `resumeAgent` takes only the follow-up prompt — so
-                    // it is watched but cannot prove it is alive.
+                    // What the watchdog listens to. The resume path forwards the
+                    // same signal below, so a long continuation proves it is alive
+                    // rather than being watched but unable to report.
                     onActivity: () => noteActivity(agentId),
                   });
             // Raced, so that a child which ignores its abort cannot leave this
@@ -1362,7 +1379,11 @@ export async function runWorkflow(options: RunWorkflowOptions): Promise<Workflow
             // throw the gate's verdict away with it.
             lastActivity.delete(agentId);
             disarmStallTimer();
-            if (result.ok) {
+            // A child can resolve `ok` in the same instant the watchdog aborts
+            // it. The timeout verdict wins: registering it as completed or
+            // running its gate would let a stopped child read as a clean pass.
+            // The timed-out branch below shapes the row instead.
+            if (result.ok && live.timedOut !== true) {
               // Recorded before the gate runs: the child itself finished, so it is
               // resumable even when its gate rejects the work — "here is what the
               // gate said, fix it" is the loop this exists for.
@@ -1431,6 +1452,10 @@ export async function runWorkflow(options: RunWorkflowOptions): Promise<Workflow
           // result alone cannot tell the two apart. The user's intent can, and
           // theirs wins the race — one row either way.
           if (live.timedOut === true && intent() !== "skip") {
+            // Counted here too: the child ran and burned output tokens before
+            // the watchdog stopped it, and the timed-out branch returns before
+            // the shared accumulation below.
+            spentOutputTokens += result.outputTokens ?? 0;
             const timedOutAt = Date.now();
             emit([
               {

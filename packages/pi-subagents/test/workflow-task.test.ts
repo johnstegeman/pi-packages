@@ -198,4 +198,18 @@ describe("snapshotting a settled run", () => {
 
     expect(workflowEntryData(task)).toMatchObject({ id: "wf_abc123", result: "all clear" });
   });
+
+  it("caps the persisted outcome so a large run result cannot bloat the transcript", () => {
+    // The snapshot lands in the session file, so an unbounded `JSON.stringify`
+    // of a large run value would grow it without limit. Same 4000-char budget
+    // as the completion notification.
+    const task = createWorkflowTask({ id: "wf_big", script: "x" });
+    task.status = "completed";
+    task.value = { blob: "x".repeat(50_000) };
+
+    const data = workflowEntryData(task);
+    expect(data.result).toBeDefined();
+    expect((data.result ?? "").length).toBeLessThanOrEqual(4000 + "\n...(truncated)".length);
+    expect(data.result?.endsWith("\n...(truncated)")).toBe(true);
+  });
 });
