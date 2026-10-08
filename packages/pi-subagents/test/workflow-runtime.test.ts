@@ -1,4 +1,5 @@
 import { readFileSync } from "node:fs";
+import { Worker } from "node:worker_threads";
 import { describe, expect, it, vi } from "vitest";
 import type { WorkflowJournalEntry } from "../src/workflow/journal.js";
 import { buildPhaseGroups, type WorkflowAgentEntry, type WorkflowEntry } from "../src/workflow/progress.js";
@@ -1686,11 +1687,16 @@ describe("stall watchdog", () => {
     // it (`live.timedOut = false`), or the next tick kills it outright.
     let calls = 0;
     const aborted: string[] = [];
+    let abortedOnce!: () => void;
+    const sawAbort = new Promise<void>(resolve => { abortedOnce = resolve; });
     const host: WorkflowHost = {
       spawnAgent(request) {
         calls++;
         if (calls === 1) return new Promise<WorkflowSpawnResult>(() => {});
         return (async () => {
+          // ~10x headroom between heartbeats and the window below: on a loaded
+          // box the old 15 ms/40 ms pairing could starve the attempt and fail
+          // the test for the scheduler's reasons rather than the code's.
           for (let i = 0; i < 4; i++) {
             request.onActivity?.();
             await sleep(15);
@@ -1700,16 +1706,19 @@ describe("stall watchdog", () => {
       },
       abortAgent(agentId) {
         aborted.push(agentId);
+        abortedOnce();
       },
     };
 
     let control: WorkflowControl | undefined;
     const done = run('const a = await agent("hang"); return { got: a };', {
-      host, stallTimeoutMs: 40, stallCheckIntervalMs: 40,
+      host, stallTimeoutMs: 200, stallCheckIntervalMs: 50,
       onControl: c => { control = c; },
     });
 
-    for (let i = 0; i < 200 && aborted.length === 0; i++) await sleep(2);
+    // No poll loop: the abort itself is the event, so a loaded box can only make
+    // the test slower, never flakier.
+    await sawAbort;
     expect(aborted).toEqual(["wf-agent-0"]);
     expect(control?.retry(0)).toBe(true);
 
@@ -1777,13 +1786,21 @@ describe("stall watchdog", () => {
     // A worker that spins before it ever calls an agent posts nothing at all,
     // so no per-child watchdog can see it: only the run-level pulse can.
     const stub = stubHost();
-    const result = await run("while (true) {}", {
-      host: stub.host,
-      runStallTimeoutMs: 50,
-      stallCheckIntervalMs: 10,
-    });
-    expect(result.status).toBe("failed");
-    expect(result.error).toContain("Workflow stalled");
+    const terminateSpy = vi.spyOn(Worker.prototype, "terminate");
+    try {
+      const result = await run("while (true) {}", {
+        host: stub.host,
+        runStallTimeoutMs: 50,
+        stallCheckIntervalMs: 10,
+      });
+      expect(result.status).toBe("failed");
+      expect(result.error).toContain("Workflow stalled");
+      // "Failed" is only half of it: the thread has to be down, or the run
+      // leaves a spinning worker behind for the rest of the session.
+      expect(terminateSpy).toHaveBeenCalledTimes(1);
+    } finally {
+      terminateSpy.mockRestore();
+    }
   }, 5000);
 
   it("renders the run-level stall message with the same formatter", async () => {
@@ -1897,7 +1914,10 @@ describe("stall watchdog", () => {
       expect(result.status).toBe("completed");
 
       const created = setSpy.mock.results.map(r => r.value);
-      expect(created.length).toBeGreaterThan(0);
+      // Two intervals for one child — one per-child and one run-level — so this
+      // pins that both watchdogs were *armed*, not merely that whatever was armed
+      // got cleared.
+      expect(created.length).toBe(2);
       const cleared = new Set(clearSpy.mock.calls.map(c => c[0]));
       for (const timer of created) expect(cleared.has(timer)).toBe(true);
     } finally {
