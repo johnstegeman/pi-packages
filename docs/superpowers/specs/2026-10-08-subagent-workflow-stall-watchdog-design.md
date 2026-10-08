@@ -156,7 +156,10 @@ Everything is in one thread (the runtime owns the run and calls the host).
 - **Runtime:** add `stallTimeout?: number` (seconds) to `AgentCallPayload`
   (`runtime.ts:458`); resolve
   `stallMs = payload.stallTimeout === undefined ? options.stallTimeoutMs : payload.stallTimeout * 1000`.
-  Per-call, so different children can have different patience.
+  Per-call, so different children can have different patience. The resolved
+  window is also carried on `WorkflowSpawnRequest.stallTimeout` as a
+  self-describing echo — the host does not read it; the runtime owns the
+  decision (it is the only place that can see the per-call override).
 - **No `resume` exclusion:** this is about liveness, not spawn config, so it
   applies to a resumed child too (unlike `effort`/`isolation`/`schema`/`gate`).
 - **Docs:** `workflow/tool-description.ts`, `docs/workflows.md`, and the SDD
