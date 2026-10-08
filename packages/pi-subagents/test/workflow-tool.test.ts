@@ -335,11 +335,49 @@ describe("createWorkflowHost — spawn mapping", () => {
     await host.spawnAgent(request({ onActivity }));
 
     const options = stub.spawnAndWait.mock.calls[0][4];
+    // Per callback, not summed: a 2/0 split across these three would total 3
+    // while one signal silently forwarded nothing, and a fourth callback would
+    // slip through a total-only assertion entirely.
     for (const name of ["onToolActivity", "onTurnEnd", "onAssistantUsage"] as const) {
       expect(typeof options[name]).toBe("function");
       options[name]();
+      expect(onActivity).toHaveBeenCalledTimes(1);
+      onActivity.mockClear();
     }
-    expect(onActivity).toHaveBeenCalledTimes(3);
+    // And nothing else: the manager legitimately receives `onSessionCreated`
+    // (and `onBeforeWorktreeCleanup` for a gated step), so every other `on*`
+    // key here is a forwarding this mapping did not intend.
+    expect(
+      Object.keys(options)
+        .filter(k => k.startsWith("on") && k !== "onSessionCreated" && k !== "onBeforeWorktreeCleanup")
+        .sort(),
+    ).toEqual(["onAssistantUsage", "onToolActivity", "onTurnEnd"]);
+  });
+
+  it("forwards the same liveness signals on the resume path", async () => {
+    // The design is explicit that a resumed child is watched by the same
+    // watchdog, so it needs the same plumbing — otherwise a long continuation
+    // is watched but unable to report, and is aborted for silence.
+    const stub = stubManager();
+    const host = createWorkflowHost({ pi: {} as any, ctx: ctx(), manager: stub.manager });
+    const onActivity = vi.fn();
+
+    // A resume is only accepted for a record that exists, so spawn first.
+    await host.spawnAgent(request());
+    await host.resumeAgent("wf-agent-0", "again", undefined, onActivity);
+
+    // The manager receives the three signals as one options object (the 4th
+    // argument of manager.resume) — the same mapping the spawn path makes.
+    const options = stub.resume.mock.calls[0][3];
+    for (const name of ["onToolActivity", "onTurnEnd", "onAssistantUsage"] as const) {
+      expect(typeof options[name]).toBe("function");
+      options[name]();
+      expect(onActivity).toHaveBeenCalledTimes(1);
+      onActivity.mockClear();
+    }
+    // Exactly these three: a dropped callback here is the same silent false
+    // positive the spawn half guards against.
+    expect(Object.keys(options).sort()).toEqual(["onAssistantUsage", "onToolActivity", "onTurnEnd"]);
   });
 
   it("does not require a request to carry onActivity", async () => {
