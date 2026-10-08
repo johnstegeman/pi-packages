@@ -330,6 +330,19 @@ export interface RunWorkflowOptions {
    */
   stallCheckIntervalMs?: number;
   /**
+   * How long the whole run may hear nothing from the worker before it is
+   * declared wedged, in ms.
+   *
+   * The per-child watchdog above only sees a child that goes quiet; a script
+   * that spins before it ever calls `agent()` — or a worker wedged between
+   * calls — posts nothing at all, and only this check can see it. Measured
+   * between worker messages and suspended while the run is paused, because a
+   * paused run is silent by design. `0` disables it. Unset takes
+   * {@link DEFAULT_STALL_TIMEOUT_MS} × 2, so a child that goes silent is
+   * stopped by the per-child watchdog well before the run's own window.
+   */
+  runStallTimeoutMs?: number;
+  /**
    * Hands the caller the run's control surface, once per run.
    *
    * A callback rather than a return value because `runWorkflow` resolves when
@@ -833,6 +846,57 @@ export async function runWorkflow(options: RunWorkflowOptions): Promise<Workflow
     if (entry !== undefined) entry.at = Date.now();
   };
 
+  /* --- run-level liveness ------------------------------------------------ */
+
+  /**
+   * When the run last heard anything at all from the worker.
+   *
+   * The per-child watchdog above only notices a child that goes quiet; this is
+   * the run's own pulse, and the only thing that sees a worker wedged before
+   * it ever calls an agent — a `while (true) {}` script posts nothing, so no
+   * child is ever registered to watch. Set on every worker message, whatever
+   * it is: a progress batch and a `call` are equally proof the worker is alive.
+   */
+  let lastWorkerMessageAt = Date.now();
+  const runStallTimeoutMs = options.runStallTimeoutMs ?? DEFAULT_STALL_TIMEOUT_MS * 2;
+  /**
+   * Set once `finish` exists, for the same reason as {@link warnForceSettle}:
+   * the timer is armed inside the run's promise, and the check has to reach
+   * the settle path that only exists there.
+   */
+  let finishRunStall: (() => void) | undefined;
+  let runStallTimer: ReturnType<typeof setInterval> | undefined;
+
+  /**
+   * The run-level half of the watchdog: silence is measured between *worker*
+   * messages, not child heartbeats, so it catches a worker that never speaks
+   * rather than a child that does not. A pause is not silence — the clock is
+   * restarted on resume — and a run that is already settling has nothing left
+   * to fail.
+   */
+  const checkRunStall = () => {
+    if (isPaused() || settled) return;
+    if (Date.now() - lastWorkerMessageAt <= runStallTimeoutMs) return;
+    finishRunStall?.();
+  };
+
+  /** One timer per run, and only while the run is alive. */
+  const armRunStallTimer = () => {
+    // `0` is the escape hatch, the same as the per-child window: a script whose
+    // worker is legitimately silent for longer than the window (a very long
+    // gate, say) opts out here.
+    if (runStallTimer !== undefined || runStallTimeoutMs <= 0) return;
+    runStallTimer = setInterval(checkRunStall, stallCheckIntervalMs);
+    // A live workflow must not be the reason the process stays up.
+    runStallTimer.unref?.();
+  };
+
+  const disarmRunStallTimer = () => {
+    if (runStallTimer === undefined) return;
+    clearInterval(runStallTimer);
+    runStallTimer = undefined;
+  };
+
   /**
    * Output tokens this run has spent, mirrored to the script as
    * `budget.spent()`.
@@ -870,7 +934,13 @@ export async function runWorkflow(options: RunWorkflowOptions): Promise<Workflow
 
   options.onControl?.({
     pause: () => { paused = true; },
-    resume: () => { paused = false; releasePause(); },
+    // A pause is silence by design, so the run-level clock restarts here: a
+    // long pause must not count against the window that follows it.
+    resume: () => {
+      paused = false;
+      lastWorkerMessageAt = Date.now();
+      releasePause();
+    },
     isPaused: () => paused,
     skip: index => {
       const live = liveAgents.get(index);
@@ -955,12 +1025,25 @@ export async function runWorkflow(options: RunWorkflowOptions): Promise<Workflow
       // a timer outliving its run would keep the process up for nothing.
       lastActivity.clear();
       disarmStallTimer();
+      disarmRunStallTimer();
       semaphore.drain();
       // Resolve only once the thread is actually down, so a caller that awaits
       // runWorkflow() is guaranteed not to be leaking one.
       const settle = () => resolve({ ...result, meta, progress, agentCount, replayedCount });
       void worker.terminate().then(settle, settle);
     };
+
+    // The settle path exists now, so the run's own liveness check can reach
+    // it. Armed here rather than with the worker: no message can arrive before
+    // this tick ends, and a worker that wedges before it ever posts is exactly
+    // what this catches.
+    finishRunStall = () => {
+      finish({
+        status: "failed",
+        error: `Workflow stalled: no progress for ${Math.round(runStallTimeoutMs / 1000)}s.`,
+      });
+    };
+    armRunStallTimer();
 
     function onAbort() {
       aborted = true;
@@ -1445,6 +1528,10 @@ export async function runWorkflow(options: RunWorkflowOptions): Promise<Workflow
     }
 
     worker.on("message", (message: WorkerMessage) => {
+      // Any message is proof the worker is alive, whatever it says: this is the
+      // run-level pulse, and it is set before the settled check so a late
+      // message cannot leave the clock stale for a check already scheduled.
+      lastWorkerMessageAt = Date.now();
       if (settled) return;
       switch (message.type) {
         case "progress":

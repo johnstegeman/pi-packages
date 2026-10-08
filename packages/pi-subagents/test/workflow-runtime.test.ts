@@ -1620,4 +1620,64 @@ describe("stall watchdog", () => {
     expect(terminal[0]).toMatchObject({ state: "done" });
     expect(terminal[0]?.timedOut).toBeUndefined();
   });
+
+  it("fails a wedged worker instead of hanging", async () => {
+    // A worker that spins before it ever calls an agent posts nothing at all,
+    // so no per-child watchdog can see it: only the run-level pulse can.
+    const stub = stubHost();
+    const result = await run("while (true) {}", {
+      host: stub.host,
+      runStallTimeoutMs: 50,
+      stallCheckIntervalMs: 10,
+    });
+    expect(result.status).toBe("failed");
+    expect(result.error).toContain("Workflow stalled");
+  }, 5000);
+
+  it("does not fail a run that is paused", async () => {
+    // A paused run is silent by design. Paused before the first agent, the run
+    // must outlive the run-level window; without the suspension it settles
+    // `failed` at the first tick. Resume then proves it was suspended, not
+    // merely slow, and that the silence clock restarts rather than counting
+    // the whole pause.
+    const stub = stubHost();
+    let control: WorkflowControl | undefined;
+    const done = run('const a = await agent("x"); return a;', {
+      host: stub.host,
+      runStallTimeoutMs: 50,
+      stallCheckIntervalMs: 10,
+      onControl: c => {
+        control = c;
+        c.pause();
+      },
+    });
+
+    const early = await Promise.race([done, sleep(150).then(() => "pending" as const)]);
+    expect(early).toBe("pending");
+
+    control?.resume();
+    const result = await done;
+    expect(result.status).toBe("completed");
+    expect(result.value).toBe("ok:x");
+  });
+
+  it("lets a zero run-level window disable the check", async () => {
+    // `0` means off here exactly as it does for the per-child window. A worker
+    // that spins silently must not be failed by the run-level check — only the
+    // caller's own abort ends this run.
+    const stub = stubHost();
+    const abort = new AbortController();
+    const done = run("while (true) {}", {
+      host: stub.host,
+      runStallTimeoutMs: 0,
+      stallCheckIntervalMs: 10,
+      signal: abort.signal,
+    });
+
+    await sleep(80); // far past the interval, and still running
+    abort.abort();
+    const result = await done;
+    expect(result.status).toBe("killed");
+    expect(result.error).toBe("Workflow aborted.");
+  });
 });
