@@ -194,8 +194,9 @@ snapshot without the field still reports its frozen duration.
     `WorkflowSpawnRequest.stallTimeout` is a self-describing echo the host does not read.
   - `T8.2`: `reference/subagent-workflows.md` stops listing `stallTimeout` as a primitive — it
     is an `agent()` option.
-  - `R4`: the same file's paraphrase becomes "degraded for any task that did not reach `done` —
-    `done_with_concerns` included".
+  - `R4`: the same file's paraphrase becomes "degraded for any task that reached neither `done`
+    nor `done_with_concerns`" (verified against `wave-parallel.js:217`, which sets `degraded` only
+    when the status is neither `done` nor `done_with_concerns`).
 - Deliberate rulings — `T2.3` and `T3.1` get a one-line comment at their site (the `"timed-out"`
   derivation in `progress.ts`; the integer check in `sanitize`), so the next reader sees a
   ruling rather than an oversight. Decisions 9 and 10 above are its record.
@@ -262,7 +263,7 @@ snapshot without the field still reports its frozen duration.
 | `R1` | force-settle grace couples to the scan cadence | B — keep; name the coupling |
 | `R2` | skip-vs-watchdog race emits a `done` row with no gate | A — skip wins |
 | `R3` | live result uncapped vs capped snapshot | A — cap the live path |
-| `R4` | reference paraphrase loose about `done_with_concerns` | B — reword |
+| `R4` | reference paraphrase loose about `done_with_concerns` | B — reword to "neither `done` nor `done_with_concerns`" |
 | `R5` | timer test pins clearing, not arming | C — pin both |
 | `R6` | e2e waits a real 4 s window | D — compliant in spirit; unchanged |
 

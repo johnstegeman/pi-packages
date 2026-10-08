@@ -154,7 +154,7 @@ Everything is in one thread (the runtime owns the run and calls the host).
   thrown-`Error` style as `effort`/`isolation`; add it to the
   `callHost("agent", { … })` payload.
 - **Runtime:** add `stallTimeout?: number` (seconds) to `AgentCallPayload`
-  (`runtime.ts:458`); resolve
+  (`runtime.ts:533`; the field lands at `runtime.ts:556`); resolve
   `stallMs = payload.stallTimeout === undefined ? options.stallTimeoutMs : payload.stallTimeout * 1000`.
   Per-call, so different children can have different patience. The resolved
   window is also carried on `WorkflowSpawnRequest.stallTimeout` as a
