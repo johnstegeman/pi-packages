@@ -1728,3 +1728,123 @@ describe("get_subagent_result — workflow ids", () => {
     expect(text).not.toContain("(running)");
   });
 });
+
+/* ------------------------------------------------------------------------- *
+ * Durable terminal state (§5d)
+ * ------------------------------------------------------------------------- */
+
+describe("durable workflow state", () => {
+  let hermetic: Hermetic;
+
+  beforeEach(() => {
+    hermetic = hermeticDir({ settings: { schedulingEnabled: false, workflowsEnabled: true } });
+  });
+
+  afterEach(async () => {
+    await flush();
+    hermetic.restore();
+    vi.restoreAllMocks();
+  });
+
+  const workflowCtx = () => ctx({ cwd: hermetic.dir });
+
+  /** A context whose session manager reports exactly the entries a reload would see. */
+  const transcriptCtx = (entries: unknown[]) =>
+    ctx({
+      cwd: hermetic.dir,
+      sessionManager: {
+        getSessionId: vi.fn(() => "s1"),
+        getBranch: vi.fn(() => []),
+        getEntries: vi.fn(() => entries),
+      },
+    });
+
+  it("appends a terminal entry when a tool-launched run settles", async () => {
+    // The CLI-flag path has always done this; the tool path did not, so a
+    // tool-launched run left nothing behind for a reload to find (§5d).
+    const booted = makePi();
+    subagentsExtension(booted.pi);
+    await booted.lifecycle.get("session_start")?.({}, workflowCtx());
+    booted.pi.appendEntry.mockClear();
+
+    const started = await booted.tools.get("SubagentWorkflow").execute(
+      "tc-durable", { script: `${inlineScript}return "all clear";\n` }, undefined, undefined, workflowCtx(),
+    );
+    const runId = (started.details as { taskId: string }).taskId;
+
+    await vi.waitFor(
+      () => expect(booted.pi.appendEntry).toHaveBeenCalledWith(WORKFLOW_ENTRY_TYPE, expect.anything()),
+      { timeout: 10_000 },
+    );
+    const [, data] = booted.pi.appendEntry.mock.calls.find((c: any[]) => c[0] === WORKFLOW_ENTRY_TYPE)!;
+    expect(data).toMatchObject({ id: runId, status: "completed", result: "all clear" });
+  });
+
+  it("rehydrates a settled run from the transcript so its id stays queryable", async () => {
+    // The run happened in a process that is gone. Without rehydration the
+    // model gets "No workflow run" for an id it was handed (§5d).
+    const booted = makePi();
+    subagentsExtension(booted.pi);
+    await booted.lifecycle.get("session_start")?.({}, transcriptCtx([
+      {
+        type: "custom",
+        customType: WORKFLOW_ENTRY_TYPE,
+        data: {
+          id: "wf_rehydrated1",
+          name: "prior-run",
+          status: "completed",
+          startTime: 1_000,
+          endTime: 2_000,
+          agentCount: 1,
+          totalTokens: 5,
+          result: "prior result",
+          progress: [{ type: "workflow_agent", index: 0, label: "step", state: "done" }],
+        },
+      },
+    ]));
+
+    const result = await booted.tools
+      .get("get_subagent_result")
+      .execute("tc-read", { agent_id: "wf_rehydrated1" }, undefined, undefined, workflowCtx());
+
+    const text = textOf(result);
+    expect(text).toContain("status: completed");
+    expect(text).toContain("prior result");
+    expect((result as any).structuredContent).toMatchObject({
+      agentId: "wf_rehydrated1",
+      status: "completed",
+      result: "prior result",
+    });
+  });
+
+  it("reports a run that was mid-flight at process death as interrupted, never running", async () => {
+    // A run that was running when the process died wrote no terminal entry —
+    // the append only happens on settle. Its tool result is the only trace,
+    // and it must never come back as a stale `running` (§5d).
+    const booted = makePi();
+    subagentsExtension(booted.pi);
+    await booted.lifecycle.get("session_start")?.({}, transcriptCtx([
+      {
+        type: "message",
+        message: {
+          role: "toolResult",
+          toolCallId: "tc-lost",
+          toolName: SUBAGENT_TOOL_NAMES.WORKFLOW,
+          content: [],
+          isError: false,
+          timestamp: 0,
+          details: { taskId: "wf_lost123456" },
+        },
+      },
+    ]));
+
+    const result = await booted.tools
+      .get("get_subagent_result")
+      .execute("tc-read", { agent_id: "wf_lost123456" }, undefined, undefined, workflowCtx());
+
+    const text = textOf(result);
+    expect((result as any).structuredContent.status).toBe("unknown");
+    expect(text).toContain("interrupted");
+    expect(text).not.toContain("status: running");
+  });
+});

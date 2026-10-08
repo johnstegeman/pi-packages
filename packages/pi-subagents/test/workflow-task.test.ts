@@ -10,6 +10,7 @@
  */
 
 import { describe, expect, it, vi } from "vitest";
+import { workflowEntryData } from "../src/workflow/entry.js";
 import type { WorkflowControl } from "../src/workflow/runtime.js";
 import {
   completeWorkflowTask,
@@ -183,5 +184,18 @@ describe("surfacing a stalled child", () => {
         { type: "workflow_agent", index: 1, label: "broke", state: "error" },
       ]),
     ).toEqual([]);
+  });
+});
+
+describe("snapshotting a settled run", () => {
+  it("carries the run id and the outcome, so a reload can still answer for it", () => {
+    // The transcript is the only thing that outlives the process. Without the
+    // id the snapshot is unqueryable after a reload; without the outcome
+    // `get_subagent_result` has nothing left to report (§5d).
+    const task = createWorkflowTask({ id: "wf_abc123", script: "x" });
+    task.status = "completed";
+    task.value = "all clear";
+
+    expect(workflowEntryData(task)).toMatchObject({ id: "wf_abc123", result: "all clear" });
   });
 });

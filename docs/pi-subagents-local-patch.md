@@ -231,15 +231,30 @@ non-`wf_` id resolves exactly as before — and there is deliberately no `wait: 
 workflows. The tool `description`, `promptSnippet` and `agent_id` parameter doc all name the new
 id form.
 
-Files: `src/index.ts` (the `wf_` branch in `get_subagent_result`, the setting applier, the
-stall-option wiring, the timed-out surfacing) plus `src/workflow/{runtime,progress,task,
-worker-source,tool-description}.ts`, `src/settings.ts`, and `src/ui/{workflow-card,workflow-dialog}.ts`.
+**Durable terminal state.** A tool-launched run persisted nothing: it lived only in the
+in-process `workflowTasks` map, so a reload left `get_subagent_result` answering `No workflow
+run …` and the outcome unrecoverable. A settled tool-launched run now appends the same
+`subagents:workflow` entry the CLI-flag path already wrote — through one `appendWorkflowEntry`
+helper both call — and that snapshot now carries the run `id` and the outcome text. `session_start`
+rebuilds a terminal-snapshot map from those entries and `get_subagent_result` reads it for a run
+the live map no longer has. It is a **parallel** map, not `workflowTasks`: a recovered run has no
+control surface, journal or abort handle, and offering it to the fleet's pause/skip/retry keys or
+to `resumeFromRunId` would promise a handle that does not exist. A run the transcript shows was
+started but never settled — its tool result is the only trace, since the terminal entry is written
+only on settle — is reported `status: unknown` / interrupted rather than the stale `running` the
+in-memory map used to leave behind.
+
+Files: `src/index.ts` (the `wf_` branch in `get_subagent_result`, the durability entry +
+`session_start` rehydration, the setting applier, the stall-option wiring, the timed-out
+surfacing) plus `src/workflow/{runtime,progress,task,entry,worker-source,tool-description}.ts`,
 The runtime and `worker-source` hunks and the new `get_subagent_result` branch carry the in-code
 marker; the purely additive fields and settings rows do not. Covered by `test/workflow-tool.test.ts`
-(the `wf_` resolution, the unknown-id error, the unchanged agent path),
+(the `wf_` resolution, the unknown-id error, the unchanged agent path, the settled-run entry, the
+`session_start` rehydration, the interrupted run),
 `test/workflow-runtime.test.ts` (the per-child watchdog and run-level liveness),
 `test/workflow-stall-wiring.test.ts` (setting → runtime seam),
-`test/workflow-{progress,task,dialog,render}.test.ts` (the timed-out row), and
+`test/workflow-{progress,task,dialog,render}.test.ts` (the timed-out row; the `workflowEntryData`
+`id`/`result` snapshot), and
 `test/settings.test.ts` / `test/documented-defaults.test.ts` (the new default).
 
 ## In-code marker convention

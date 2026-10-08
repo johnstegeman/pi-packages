@@ -75,6 +75,8 @@ import {
   elapsedMs,
   formatDuration as formatRunDuration,
   stats,
+  type WorkflowEntry,
+  type WorkflowRunStatus,
 } from "./workflow/progress.js";
 import { assertWorkflowArgs, runWorkflow } from "./workflow/runtime.js";
 import { resolveWorkflowScript } from "./workflow/saved.js";
@@ -804,6 +806,11 @@ export default function (pi: ExtensionAPI) {
   // bound session_start, so a filtered-out activation never advertises (#142).
   pi.on("session_start", async (_event, ctx) => {
     currentCtx = ctx;
+    // Before anything can ask about a run: the process that launched one is
+    // gone, so the transcript is the only place its id and outcome survive
+    // (§5d). Cheap and read-only — a session with no workflows scans nothing
+    // it can match.
+    rehydrateWorkflowRuns(ctx);
     if (ctx.hasUI) {
       widget.setUICtx(ctx.ui);
       fleet.setUICtx(ctx.ui as any);
@@ -2335,6 +2342,108 @@ Terse command-style prompts produce shallow, generic work.
   const workflowTasks = new Map<string, WorkflowTask>();
 
   /**
+   * Settled runs recovered from the session transcript, by run id.
+   *
+   * Deliberately NOT `workflowTasks`: a recovered run is not live — it has no
+   * control surface, no journal and no abort handle — and offering it to the
+   * fleet's pause/skip/retry keys or to `resumeFromRunId` would promise a
+   * handle that does not exist. This map exists so `get_subagent_result` can
+   * still answer for a run after the process that launched it is gone (§5d).
+   */
+  const recoveredWorkflowRuns = new Map<string, WorkflowEntryData>();
+
+  /**
+   * Runs the transcript shows were STARTED but never settled, by run id.
+   *
+   * A run that was mid-flight at process death wrote no terminal entry — that
+   * append only happens on settle. Without this set it would simply vanish and
+   * the caller would be told its id is unknown; "interrupted" is the honest
+   * answer, and it can never be a stale `running` (§5d).
+   */
+  const interruptedWorkflowRuns = new Set<string>();
+
+  /**
+   * Rebuild the run-status maps from the session transcript.
+   *
+   * The process that launched a run keeps `workflowTasks` in memory only, so
+   * a reload would otherwise leave `get_subagent_result("wf_…")` answering
+   * "no such run" for every run the session ever did. Two sources, because a
+   * run leaves two different traces: a settled one appends a terminal entry
+   * (the settle path), and a started one leaves its id on the tool result —
+   * which is the only trace a run killed mid-flight has (§5d).
+   */
+  function rehydrateWorkflowRuns(ctx: ExtensionContext): void {
+    recoveredWorkflowRuns.clear();
+    interruptedWorkflowRuns.clear();
+    const entries = ctx.sessionManager?.getEntries?.() ?? [];
+    const started = new Set<string>();
+    for (const entry of entries) {
+      if (entry.type === "custom" && entry.customType === WORKFLOW_ENTRY_TYPE) {
+        const data = entry.data as WorkflowEntryData | undefined;
+        // An entry written before ids were persisted cannot be resolved to a
+        // run; skipping it is the only honest thing to do with it.
+        if (typeof data?.id === "string") recoveredWorkflowRuns.set(data.id, data);
+        continue;
+      }
+      if (
+        entry.type === "message" &&
+        entry.message.role === "toolResult" &&
+        entry.message.toolName === SUBAGENT_TOOL_NAMES.WORKFLOW
+      ) {
+        const taskId = (entry.message.details as unknown as { taskId?: unknown } | undefined)?.taskId;
+        if (typeof taskId === "string") started.add(taskId);
+      }
+    }
+    for (const id of started) {
+      // A run this process is running right now is live, not interrupted:
+      // session_start can fire again (a switch) while a run is in flight.
+      if (!recoveredWorkflowRuns.has(id) && !workflowTasks.has(id)) interruptedWorkflowRuns.add(id);
+    }
+  }
+
+  /**
+   * A run as the status payload needs it, from the live task or a recovered
+   * snapshot.
+   *
+   * One shape for both because `get_subagent_result` asks the same question
+   * either way; without it the recovered branch would be a near-copy of the
+   * live one and the two would drift.
+   */
+  function workflowRunStatusView(id: string):
+    | {
+        status: WorkflowRunStatus;
+        progress: readonly WorkflowEntry[];
+        agentCount: number;
+        elapsedMs: number;
+        result: string;
+      }
+    | undefined {
+    const task = workflowTasks.get(id);
+    if (task) {
+      return {
+        status: task.status,
+        progress: task.workflowProgress,
+        agentCount: task.agentCount,
+        elapsedMs: elapsedMs(task, Date.now()),
+        result: workflowResultText(task),
+      };
+    }
+    const recovered = recoveredWorkflowRuns.get(id);
+    if (!recovered) return undefined;
+    return {
+      status: recovered.status,
+      progress: recovered.progress,
+      agentCount: recovered.agentCount,
+      // The snapshot froze the clock at settle, so this is the run's real
+      // duration rather than the time since the reload.
+      elapsedMs: elapsedMs({ startTime: recovered.startTime, endTime: recovered.endTime }, Date.now()),
+      // A snapshot written before the outcome was persisted has nothing to
+      // report; "No output." is what a live run with no value says.
+      result: recovered.result ?? "No output.",
+    };
+  }
+
+  /**
    * Workflow runs as the fleet list wants them.
    *
    * Mapped here rather than handing `WorkflowTask` over the seam: the list is
@@ -2412,6 +2521,27 @@ Terse command-style prompts produce shallow, generic work.
       completeWorkflowTask(task, result);
     } catch (err) {
       failWorkflowTask(task, err instanceof Error ? err.message : String(err));
+    }
+  }
+
+  /**
+   * Record a settled run in the session transcript.
+   *
+   * Both launch paths need this, and the entry is the only thing that
+   * outlives the process: a flag-launched run has no tool call to hang its
+   * card on, and a tool-launched run's card lives in `workflowTasks`, which
+   * a reload loses — without the entry the run is unqueryable and its result
+   * is gone (§5d).
+   */
+  function appendWorkflowEntry(task: WorkflowTask): void {
+    try {
+      pi.appendEntry<WorkflowEntryData>(WORKFLOW_ENTRY_TYPE, workflowEntryData(task));
+    } catch {
+      // A detached run can settle after its session was replaced or is
+      // shutting down, and pi refuses an entry from a stale ctx. There is
+      // nowhere left to record it, and losing the entry is better than an
+      // unhandled rejection from a promise nobody awaits. Same rule the
+      // completion nudge follows (`scheduleNudge`'s send).
     }
   }
 
@@ -2614,7 +2744,12 @@ Terse command-style prompts produce shallow, generic work.
 
       // Background, like Claude Code: the id comes back now and the run keeps
       // going without the tool call.
-      void runWorkflowTask(ctx, task).then(() => notifyWorkflowFinished(task));
+      void runWorkflowTask(ctx, task).then(() => {
+        // Same entry the flag path writes: without it this run exists only in
+        // `workflowTasks`, and a reload loses it (§5d).
+        appendWorkflowEntry(task);
+        notifyWorkflowFinished(task);
+      });
 
       return {
         content: [{
@@ -2777,7 +2912,7 @@ Terse command-style prompts produce shallow, generic work.
       // No tool call to attach a result card to, so the card becomes a session
       // entry (same layout), and the outcome is handed to the model as context
       // for its next turn rather than forcing one.
-      pi.appendEntry<WorkflowEntryData>(WORKFLOW_ENTRY_TYPE, workflowEntryData(task));
+      appendWorkflowEntry(task);
       pi.sendMessage({
         customType: "workflow-result",
         content: formatWorkflowNotification(task),
@@ -2824,37 +2959,53 @@ Terse command-style prompts produce shallow, generic work.
     }),
     execute: async (_toolCallId, params, signal, _onUpdate, _ctx) => {
       // LOCAL PATCH (pi-packages) — see docs/pi-subagents-local-patch.md
-      // A `wf_…` id names a workflow RUN, not an agent: it lives in
-      // `workflowTasks`, which no tool exposes, and the run's children are
-      // deliberately absent from the agent lookup (they are owned by the run).
-      // Without this branch the id the SubagentWorkflow tool just handed the
-      // model answers `Agent not found` — the reported stall-watchdog symptom.
+      // A `wf_…` id names a workflow RUN, not an agent: its children are
+      // deliberately absent from the agent lookup (they are owned by the run),
+      // and the run itself lives in `workflowTasks` — or, after a reload, in
+      // the transcript snapshots `session_start` recovers. Without this branch
+      // the id the SubagentWorkflow tool just handed the model answers
+      // `Agent not found` — the reported stall-watchdog symptom.
       if (params.agent_id.startsWith("wf_")) {
-        const task = workflowTasks.get(params.agent_id);
-        if (!task) {
+        const view = workflowRunStatusView(params.agent_id);
+        if (!view) {
+          // A run the transcript shows was started but never settled: it was
+          // mid-flight when the process died. Naming it interrupted beats both
+          // a bare "no such run" and the stale `running` the in-memory map
+          // would have left behind (§5d).
+          if (interruptedWorkflowRuns.has(params.agent_id)) {
+            return {
+              ...textResult(
+                `status: unknown | run "${params.agent_id}" was interrupted — the process ended while it was ` +
+                  `running, so it never settled and its result is lost.`,
+              ),
+              structuredContent: {
+                agentId: params.agent_id,
+                status: "unknown",
+                error: "workflow interrupted",
+              },
+            };
+          }
           return {
             ...textResult(`No workflow run "${params.agent_id}" in this session.`),
             structuredContent: { error: "workflow not found" },
           };
         }
-        const totals = stats(task.workflowProgress, task.agentCount);
+        const totals = stats(view.progress, view.agentCount);
         // Labels, not just the count `stats` already carries: the orchestrator
         // has to be able to name which child was lost to the stall window.
-        const timedOut = task.workflowProgress.flatMap((entry) =>
+        const timedOut = view.progress.flatMap((entry) =>
           entry.type === "workflow_agent" && entry.timedOut ? [entry.label] : [],
         );
         const summary =
-          `status: ${task.status} | agents: ${totals.done}/${totals.total}` +
-          ` | elapsed: ${formatRunDuration(elapsedMs(task, Date.now()))}` +
+          `status: ${view.status} | agents: ${totals.done}/${totals.total}` +
+          ` | elapsed: ${formatRunDuration(view.elapsedMs)}` +
           (timedOut.length > 0 ? ` | timed out: ${timedOut.join(", ")}` : "");
         return {
-          ...textResult(
-            task.status === "running" ? summary : `${summary}\n\n${workflowResultText(task)}`,
-          ),
+          ...textResult(view.status === "running" ? summary : `${summary}\n\n${view.result}`),
           structuredContent: {
-            agentId: task.id,
-            status: task.status,
-            result: workflowResultText(task),
+            agentId: params.agent_id,
+            status: view.status,
+            result: view.result,
           },
         };
       }
