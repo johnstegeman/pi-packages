@@ -67,7 +67,15 @@ import { WORKFLOW_ENTRY_TYPE, type WorkflowEntryData, workflowEntryData } from "
 import { createWorkflowHost } from "./workflow/host.js";
 import { appendJournal, readJournal, type WorkflowJournalEntry } from "./workflow/journal.js";
 import { extractMeta, type WorkflowMeta, workflowCallName } from "./workflow/meta.js";
-import { elapsedMs, stats } from "./workflow/progress.js";
+// `formatDuration` from the progress module is aliased: the widget module (see
+// the `./ui/agent-widget.js` import) exports a same-named formatter that takes a
+// START TIMESTAMP, not a duration. Calling that one with an elapsed-ms value
+// printed a lifetime in seconds and a bogus "(running)" on a settled run.
+import {
+  elapsedMs,
+  formatDuration as formatRunDuration,
+  stats,
+} from "./workflow/progress.js";
 import { assertWorkflowArgs, runWorkflow } from "./workflow/runtime.js";
 import { resolveWorkflowScript } from "./workflow/saved.js";
 import { completeWorkflowTask, createWorkflowTask, failWorkflowTask, formatWorkflowNotification, resolveResumeTarget, updateWorkflowProgressBatch, type WorkflowTask, workflowResultText, workflowRunId } from "./workflow/task.js";
@@ -2837,7 +2845,7 @@ Terse command-style prompts produce shallow, generic work.
         );
         const summary =
           `status: ${task.status} | agents: ${totals.done}/${totals.total}` +
-          ` | elapsed: ${formatDuration(elapsedMs(task, Date.now()))}` +
+          ` | elapsed: ${formatRunDuration(elapsedMs(task, Date.now()))}` +
           (timedOut.length > 0 ? ` | timed out: ${timedOut.join(", ")}` : "");
         return {
           ...textResult(

@@ -30,6 +30,28 @@ import { compileJsonSchema } from "../src/workflow/json-schema.js";
 import type { WorkflowSpawnRequest } from "../src/workflow/runtime.js";
 import { ctx, flush, type Hermetic, hermeticDir, makePi, textOf } from "./helpers/boot-extension.js";
 
+/*
+ * Capture every run record the extension creates, so a test can inject a
+ * progress row the real runtime cannot produce cheaply here: a stalled child
+ * needs a 30s watchdog tick (the runtime's default `stallCheckIntervalMs`) and
+ * the tool exposes no interval knob. The wrapper only RECORDS — the real
+ * `createWorkflowTask` still builds the record, so the timed-out test below
+ * exercises the tool's own summary path, not a copy of it.
+ */
+const capturedTasks = vi.hoisted(() => [] as { id: string; workflowProgress: any[] }[]);
+
+vi.mock("../src/workflow/task.js", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../src/workflow/task.js")>();
+  return {
+    ...actual,
+    createWorkflowTask: (init: Parameters<typeof actual.createWorkflowTask>[0]) => {
+      const task = actual.createWorkflowTask(init);
+      capturedTasks.push(task);
+      return task;
+    },
+  };
+});
+
 /* ------------------------------------------------------------------------- *
  * Fixtures
  * ------------------------------------------------------------------------- */
@@ -1631,6 +1653,11 @@ describe("get_subagent_result — workflow ids", () => {
     expect(text).toContain("status: completed");
     expect(text).toContain("agents: 0/0");
     expect(text).toContain("all clear");
+    // The elapsed figure is the progress module's, not the widget's: the widget
+    // formatter takes a START timestamp, so passing it a duration printed a
+    // lifetime in seconds and a bogus "(running)" on a settled run.
+    expect(text).toMatch(/\| elapsed: \d+(ms|s|m\d\ds)/);
+    expect(text).not.toContain("(running)");
     expect(text).not.toContain("Agent not found");
     expect((result as any).structuredContent).toEqual({
       agentId: runId,
@@ -1672,5 +1699,32 @@ describe("get_subagent_result — workflow ids", () => {
     // The wf_ branch must key off the prefix only: an ordinary id keeps
     // answering exactly as it did before.
     expect(textOf(result)).toContain("Agent not found");
+  });
+
+  it("names a timed-out child in the summary, with a real elapsed value", async () => {
+    const runId = await startRun(`${inlineScript}return "done";\n`);
+    await readSettled(runId);
+
+    // The runtime's watchdog needs a 30s tick to stop a child for real, and the
+    // tool exposes no interval knob — so the row the summary reads is injected
+    // directly. The label list is the code under test; how the row got there is
+    // the runtime's own suite's business.
+    const task = capturedTasks.find((t) => t.id === runId)!;
+    task.workflowProgress.push({
+      type: "workflow_agent",
+      index: 0,
+      label: "lost-worker",
+      state: "error",
+      timedOut: true,
+    });
+
+    const result = await tools
+      .get("get_subagent_result")
+      .execute("tc-read", { agent_id: runId }, undefined, undefined, workflowCtx());
+    const text = textOf(result);
+
+    expect(text).toContain("| timed out: lost-worker");
+    expect(text).toMatch(/\| elapsed: \d+(ms|s|m\d\ds)/);
+    expect(text).not.toContain("(running)");
   });
 });
