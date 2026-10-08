@@ -745,6 +745,13 @@ export async function runWorkflow(options: RunWorkflowOptions): Promise<Workflow
    */
   const lastActivity = new Map<string, { index: number; at: number }>();
   let stallTimer: ReturnType<typeof setInterval> | undefined;
+  /**
+   * The one line the watchdog writes itself, wired up with the run's progress
+   * sink below. `checkStalls` is defined here but that sink is created further
+   * down, so the force-settle path reaches the log through this rather than
+   * across the closure.
+   */
+  let warnForceSettle: ((agentId: string) => void) | undefined;
 
   /** The one wording for a watchdog stop, shared by the row and the abort. */
   const stallMessage = () =>
@@ -777,6 +784,10 @@ export async function runWorkflow(options: RunWorkflowOptions): Promise<Workflow
           { ok: false, skipped: true, error: "Stopped." }
         : { ok: false, error: stallMessage() },
       );
+      // Force-completion is the one path that can leak: the child never
+      // stopped, so it may still hold a process or a worktree. A leak nobody
+      // can name is a leak nobody can clean up, so say which child (design §2).
+      warnForceSettle?.(agentId);
     }
   };
 
@@ -885,6 +896,16 @@ export async function runWorkflow(options: RunWorkflowOptions): Promise<Workflow
       if (entries.length === 0) return;
       progress.push(...entries);
       options.onProgress?.(entries);
+    };
+    warnForceSettle = agentId => {
+      emit([
+        {
+          type: "workflow_log",
+          message:
+            `Workflow agent ${agentId} did not stop after its stall abort and was force-completed; ` +
+            "it may still be running (leaked process or worktree).",
+        },
+      ]);
     };
 
     const respond = (callId: number, ok: boolean, value?: unknown, error?: string, fatal?: boolean) => {
@@ -1212,6 +1233,13 @@ export async function runWorkflow(options: RunWorkflowOptions): Promise<Workflow
                 resolve({ ok: false, error: error instanceof Error ? error.message : String(error) });
               });
             });
+            // The child itself has settled — success, failure or a stop — so it
+            // is no longer a candidate for the watchdog. Deleted here, before the
+            // gate below, because the gate is not the child: a gate longer than
+            // the stall window would otherwise mark a finished child timedOut and
+            // throw the gate's verdict away with it.
+            lastActivity.delete(agentId);
+            disarmStallTimer();
             if (result.ok) {
               // Recorded before the gate runs: the child itself finished, so it is
               // resumable even when its gate rejects the work — "here is what the

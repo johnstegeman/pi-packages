@@ -1478,4 +1478,91 @@ describe("stall watchdog", () => {
     expect(aborted).toEqual(["wf-agent-0"]);
     expect(agentEntries(result.progress).at(-1)).toMatchObject({ state: "error", timedOut: true });
   });
+
+  it("warns when a child ignores its abort and is force-completed", async () => {
+    // Force-completion is the one path that can leak: the child never stopped,
+    // so it may still hold a process or a worktree. A leak nobody can name is a
+    // leak nobody can clean up, so the watchdog names the child (design §2).
+    const stub = stubHost(() => new Promise<WorkflowSpawnResult>(() => {}));
+    const result = await run('const a = await agent("hang"); return { got: a };', {
+      host: stub.host, stallTimeoutMs: 40, stallCheckIntervalMs: 10,
+    });
+
+    expect(result.value).toEqual({ got: null });
+    const logs = result.progress.filter(e => e.type === "workflow_log").map(e => e.message);
+    expect(logs.some(message => message.includes("wf-agent-0") && /force-completed/.test(message))).toBe(true);
+  });
+
+  it("retries a timed-out child without force-settling the new attempt", async () => {
+    // The first attempt ignores its abort, so only the watchdog's force-settle
+    // frees it. The user's retry lands in that window: the new attempt must get
+    // its own window rather than inheriting the verdict on the attempt before
+    // it (`live.timedOut = false`), or the next tick kills it outright.
+    let calls = 0;
+    const aborted: string[] = [];
+    const host: WorkflowHost = {
+      spawnAgent(request) {
+        calls++;
+        if (calls === 1) return new Promise<WorkflowSpawnResult>(() => {});
+        return (async () => {
+          for (let i = 0; i < 4; i++) {
+            request.onActivity?.();
+            await sleep(15);
+          }
+          return { ok: true, text: "retried" };
+        })();
+      },
+      abortAgent(agentId) {
+        aborted.push(agentId);
+      },
+    };
+
+    let control: WorkflowControl | undefined;
+    const done = run('const a = await agent("hang"); return { got: a };', {
+      host, stallTimeoutMs: 40, stallCheckIntervalMs: 40,
+      onControl: c => { control = c; },
+    });
+
+    for (let i = 0; i < 200 && aborted.length === 0; i++) await sleep(2);
+    expect(aborted).toEqual(["wf-agent-0"]);
+    expect(control?.retry(0)).toBe(true);
+
+    const result = await done;
+    expect(result.status).toBe("completed");
+    expect(result.value).toEqual({ got: "retried" });
+    // One terminal row, and it is the retry's own success — not a timeout row
+    // written over it by the verdict on the attempt before.
+    const terminal = agentEntries(result.progress).filter(e => e.index === 0 && e.state !== "start");
+    expect(terminal).toHaveLength(1);
+    expect(terminal[0]).toMatchObject({ state: "done" });
+    expect(terminal[0]?.timedOut).toBeUndefined();
+  });
+
+  it("does not time out a completed child while its gate runs", async () => {
+    // The watchdog guards the child, not its gate. The child is done the moment
+    // it settles, so a gate longer than the stall window must not be read as the
+    // child going silent: that would abort a finished child and throw the gate's
+    // verdict away with it.
+    const stub = stubHost(() => ({ ok: true, text: "work" }));
+    let gateRan = false;
+    const host: WorkflowHost = {
+      ...stub.host,
+      async runGate() {
+        gateRan = true;
+        await sleep(80); // far past the stall window below
+        return { ok: true, output: "" };
+      },
+    };
+    const result = await run('const a = await agent("gated", { gate: "true" }); return { got: a };', {
+      host, stallTimeoutMs: 40, stallCheckIntervalMs: 10,
+    });
+
+    expect(gateRan).toBe(true);
+    expect(result.value).toEqual({ got: "work" });
+    expect(stub.aborted).toEqual([]);
+    const terminal = agentEntries(result.progress).filter(e => e.state !== "start");
+    expect(terminal).toHaveLength(1);
+    expect(terminal[0]).toMatchObject({ state: "done" });
+    expect(terminal[0]?.timedOut).toBeUndefined();
+  });
 });
