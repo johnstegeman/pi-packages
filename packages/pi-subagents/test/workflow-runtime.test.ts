@@ -69,6 +69,14 @@ describe("the worker source itself", () => {
     const { WORKER_SOURCE } = await import("../src/workflow/worker-source.js");
     expect(() => new Function(WORKER_SOURCE)).not.toThrow();
   });
+
+  it("states the stallTimeout ceiling once, from settings", async () => {
+    // Two literals that must agree are two literals that can drift: the worker
+    // string is a string, so it cannot import the constant — it interpolates it.
+    const source = readFileSync(new URL("../src/workflow/worker-source.ts", import.meta.url), "utf8");
+    expect(source).not.toMatch(/\b86400\b/);
+    expect(source).toContain("STALL_TIMEOUT_SECS_CEILING");
+  });
 });
 
 describe("workflowConcurrency", () => {
