@@ -27,8 +27,8 @@ import { isScopeModelsEnabled, setScopeModelsEnabled } from "../src/model-scope.
 import type { AgentRecord } from "../src/types.js";
 import { createWorkflowHost } from "../src/workflow/host.js";
 import { compileJsonSchema } from "../src/workflow/json-schema.js";
+import type { WorkflowEntry } from "../src/workflow/progress.js";
 import type { WorkflowSpawnRequest } from "../src/workflow/runtime.js";
-import type { WorkflowTask } from "../src/workflow/task.js";
 import { ctx, flush, type Hermetic, hermeticDir, makePi, textOf } from "./helpers/boot-extension.js";
 
 /*
@@ -39,7 +39,7 @@ import { ctx, flush, type Hermetic, hermeticDir, makePi, textOf } from "./helper
  * `createWorkflowTask` still builds the record, so the timed-out test below
  * exercises the tool's own summary path, not a copy of it.
  */
-const capturedTasks = vi.hoisted(() => [] as { id: string; workflowProgress: WorkflowTask[] }[]);
+const capturedTasks = vi.hoisted(() => [] as { id: string; workflowProgress: WorkflowEntry[] }[]);
 
 vi.mock("../src/workflow/task.js", async (importOriginal) => {
   const actual = await importOriginal<typeof import("../src/workflow/task.js")>();
@@ -1810,13 +1810,15 @@ describe("durable workflow state", () => {
       { timeout: 10_000 },
     );
     const [, data] = booted.pi.appendEntry.mock.calls.find((c: any[]) => c[0] === WORKFLOW_ENTRY_TYPE)!;
+    expect(data).toMatchObject({ id: runId });
 
     const live = await booted.tools
       .get("get_subagent_result")
       .execute("tc-read", { agent_id: runId }, undefined, undefined, workflowCtx());
 
-    expect((live as any).structuredContent.result).toContain("...(truncated)");
-    expect((live as any).structuredContent.result).toBe(data.result);
+    const liveResult = (live as { structuredContent?: { result?: string } }).structuredContent;
+    expect(liveResult?.result).toContain("...(truncated)");
+    expect(liveResult?.result).toBe(data.result);
   });
 
   it("rehydrates a settled run from the transcript so its id stays queryable", async () => {
