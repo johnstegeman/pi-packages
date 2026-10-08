@@ -93,6 +93,13 @@ describe("displayState", () => {
     expect(displayState(entry, true)).toBe("skipped");
   });
 
+  it("names a watchdog stop `timed-out` rather than a plain failure", () => {
+    // Task 1's runtime emits `{ state: "error", timedOut: true }` when it stops
+    // a silent child. The row has to say the run lost an answer to the
+    // watchdog, which a bare "failed" cannot.
+    expect(displayState(agentEntry({ index: 0, state: "error", timedOut: true }), true)).toBe("timed-out");
+  });
+
   it("reports done even after the run stops", () => {
     expect(displayState(agentEntry({ index: 0, state: "done" }), false)).toBe("done");
   });
@@ -267,6 +274,18 @@ describe("stats", () => {
       agentEntry({ index: 1, state: "error" }),
     ]);
     expect(result).toMatchObject({ done: 1, failedCount: 1, started: 2, running: false });
+  });
+
+  it("counts a timed-out agent as both failed and timed out", () => {
+    // It is a failure — no answer came back — but the distinct count is what
+    // lets the notification say how many were lost to the watchdog.
+    const result = stats([agentEntry({ index: 0, state: "error", timedOut: true })], 1);
+    expect(result.timedOut).toBe(1);
+    expect(result.failedCount).toBe(1);
+  });
+
+  it("does not count an ordinary failure as timed out", () => {
+    expect(stats([agentEntry({ index: 0, state: "error" })]).timedOut).toBe(0);
   });
 
   it("does not count a queued-but-unstarted agent as started", () => {

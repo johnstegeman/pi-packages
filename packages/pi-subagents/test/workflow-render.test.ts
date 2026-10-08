@@ -105,6 +105,27 @@ describe("inline glyph mapping", () => {
     expect(rows[1]).toContain("✘ blocked");
   });
 
+  it("gives a timed-out agent the warning glyph, not a plain cross", () => {
+    // The card cannot spell out why, but a stalled row is worth telling apart
+    // from a child that ran and failed.
+    const lines = card({
+      progress: [agentEntry({ index: 0, label: "stalled", state: "error", timedOut: true })],
+    });
+    expect(treeRows(lines)[1]).toContain("⚠ stalled");
+  });
+
+  it("colours a timed-out row warning", () => {
+    const styled = styleWorkflowCardLines(
+      layoutWorkflowCard({
+        progress: [agentEntry({ index: 0, label: "stalled", state: "error", timedOut: true })],
+        task: { status: "running", workflowName: "wf", startTime: START },
+        now: START,
+      }),
+      theme,
+    );
+    expect(styled.find(l => l.includes("stalled"))).toContain("<warning>⚠</warning>");
+  });
+
   it("colours done success, error error, and leaves a running row at the terminal default", () => {
     const styled = styleWorkflowCardLines(
       layoutWorkflowCard({

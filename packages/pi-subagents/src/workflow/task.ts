@@ -76,6 +76,14 @@ export interface WorkflowTask {
   totalTokens: number;
   totalToolCalls: number;
   logs: string[];
+  /**
+   * Indices of children whose watchdog stop has already been toasted.
+   *
+   * The warning is a one-off per run and child — the run settles moments after
+   * the row appears, and the completion notification carries the count — so the
+   * batch handler needs a record of what it has already said.
+   */
+  notifiedTimedOut: Set<number>;
 
   abortController: AbortController;
   startTime: number;
@@ -121,6 +129,7 @@ export function createWorkflowTask(init: {
     totalTokens: 0,
     totalToolCalls: 0,
     logs: [],
+    notifiedTimedOut: new Set(),
     abortController: new AbortController(),
     startTime: init.startTime ?? Date.now(),
     totalPausedMs: 0,
@@ -134,12 +143,16 @@ export function createWorkflowTask(init: {
  * because every counter below is an O(log) recompute — doing it once per fan-out
  * frame instead of once per agent is the difference that keeps a 200-agent run
  * cheap to render.
+ *
+ * Returns the labels of children that just went timed-out, which the caller
+ * toasts. Kept here rather than derived by the caller because "already told" is
+ * per run and child, and the record is what remembers it.
  */
 export function updateWorkflowProgressBatch(
   task: WorkflowTask,
   entries: readonly WorkflowEntry[],
-): void {
-  if (entries.length === 0) return;
+): string[] {
+  if (entries.length === 0) return [];
   task.workflowProgress.push(...entries);
   task.progressVersion++;
 
@@ -161,6 +174,15 @@ export function updateWorkflowProgressBatch(
   task.totalTokens = totalTokens;
   task.totalToolCalls = totalToolCalls;
   task.doneCount = done;
+
+  const stalled: string[] = [];
+  for (const entry of entries) {
+    if (entry.type !== "workflow_agent" || entry.timedOut !== true) continue;
+    if (task.notifiedTimedOut.has(entry.index)) continue;
+    task.notifiedTimedOut.add(entry.index);
+    stalled.push(entry.label);
+  }
+  return stalled;
 }
 
 /**
@@ -294,7 +316,7 @@ export function formatWorkflowNotification(task: WorkflowTask, now = Date.now())
     `<status>${escapeXml(status)}</status>`,
     `<summary>Workflow "${escapeXml(task.workflowName ?? task.id)}" ${task.status} — ${totals.done}/${totals.total} agents${
       task.replayedCount > 0 ? `, ${task.replayedCount} replayed from ${escapeXml(task.resumedFrom ?? "an earlier run")}` : ""
-    }</summary>`,
+    }${totals.timedOut > 0 ? `, ${totals.timedOut} timed out (stalled)` : ""}</summary>`,
     `<result>${escapeXml(result.length > 4000 ? `${result.slice(0, 4000)}\n...(truncated)` : result)}</result>`,
     `<usage><total_tokens>${task.totalTokens}</total_tokens><tool_uses>${task.totalToolCalls}</tool_uses><duration_ms>${elapsedMs(task, now)}</duration_ms></usage>`,
     `</task-notification>`,

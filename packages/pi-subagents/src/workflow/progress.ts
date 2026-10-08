@@ -33,6 +33,7 @@ export type WorkflowDisplayState =
   | "failed"
   | "skipped"
   | "blocked"
+  | "timed-out"
   | "interrupted";
 
 /** Why an agent is on a later attempt, shown next to its row. */
@@ -142,6 +143,14 @@ export interface PhaseGroup {
 export interface WorkflowStats {
   done: number;
   failedCount: number;
+  /**
+   * The subset of `failedCount` the watchdog stopped for inactivity.
+   *
+   * A separate count, not a separate bucket: a timed-out child is still a
+   * failure, but the notification has to be able to name how many were lost
+   * to the stall window rather than to a bad answer.
+   */
+  timedOut: number;
   running: boolean;
   total: number;
   started: number;
@@ -181,6 +190,9 @@ export function collapse(progress: readonly WorkflowEntry[]): CollapsedProgress 
 export function displayState(entry: WorkflowAgentEntry, workflowActive: boolean): WorkflowDisplayState {
   if (entry.state === "done") return "done";
   if (entry.state === "error") {
+    // Ahead of skipped/blocked: a watchdog stop is the one failure the run did
+    // not choose, and the row has to say so even if a flag ever disagreed.
+    if (entry.timedOut) return "timed-out";
     if (entry.skipped) return "skipped";
     if (entry.blocked) return "blocked";
     return "failed";
@@ -331,6 +343,7 @@ export function stats(progress: readonly WorkflowEntry[], agentCount = 0): Workf
   let seen = 0;
   let done = 0;
   let failed = 0;
+  let timedOut = 0;
   let started = 0;
   let anyLive = false;
 
@@ -342,6 +355,7 @@ export function stats(progress: readonly WorkflowEntry[], agentCount = 0): Workf
       started++;
     } else if (entry.state === "error") {
       failed++;
+      if (entry.timedOut) timedOut++;
       started++;
     } else {
       anyLive = true;
@@ -354,6 +368,7 @@ export function stats(progress: readonly WorkflowEntry[], agentCount = 0): Workf
   return {
     done,
     failedCount: failed,
+    timedOut,
     running: anyLive,
     total,
     started,

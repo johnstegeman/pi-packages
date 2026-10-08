@@ -257,10 +257,17 @@ export function agentStatSegments(entry: WorkflowAgentEntry): string[] {
 /**
  * The recovered inline mapping — keyed on the raw entry state. `skipped` and
  * `blocked` are not distinguished here; that is the dialog's job.
+ *
+ * A watchdog stop is the exception: a row the runtime cut off for silence is
+ * worth telling apart from one that ran and failed, and the warning glyph is
+ * already the card's mark for "something needs attention".
  */
 function rowGlyph(entry: WorkflowAgentEntry, glyphs: WorkflowGlyphs): WorkflowCardSegment {
   if (entry.state === "done") return { text: glyphs.tick, color: "success" };
-  if (entry.state === "error") return { text: glyphs.cross, color: "error" };
+  if (entry.state === "error") {
+    if (entry.timedOut) return { text: glyphs.warning, color: "warning" };
+    return { text: glyphs.cross, color: "error" };
+  }
   return { text: glyphs.running };
 }
 

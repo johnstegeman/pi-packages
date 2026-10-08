@@ -2369,7 +2369,15 @@ Terse command-style prompts produce shallow, generic work.
           rootSessionId: ctx.sessionManager.getSessionId(),
           workflowId: task.id,
         }),
-        onProgress: entries => updateWorkflowProgressBatch(task, entries),
+        onProgress: entries => {
+          // A stalled child is worth saying out loud, but not worth a turn: the
+          // run degrades and settles moments later, and the completion
+          // notification carries the count. `notify` is the non-triggering
+          // channel; `sendMessage` here would wake the model mid-run.
+          for (const label of updateWorkflowProgressBatch(task, entries)) {
+            if (ctx.hasUI) ctx.ui.notify(`Workflow child timed out (stalled): ${label}`, "warning");
+          }
+        },
         // The dialog's pause / skip / retry keys run through this; it is dropped
         // again when the task settles.
         onControl: control => { task.control = control; },

@@ -15,8 +15,10 @@ import {
   completeWorkflowTask,
   createWorkflowTask,
   failWorkflowTask,
+  formatWorkflowNotification,
   pauseWorkflowTask,
   resumeWorkflowTask,
+  updateWorkflowProgressBatch,
   type WorkflowTask,
 } from "../src/workflow/task.js";
 
@@ -128,5 +130,58 @@ describe("settling a run", () => {
 
     expect(task.control).toBeUndefined();
     expect(task.status).toBe("failed");
+  });
+});
+
+
+describe("surfacing a stalled child", () => {
+  /** A run with one clean child and one the watchdog stopped. */
+  function stalledTask(): WorkflowTask {
+    const task = createWorkflowTask({ id: "wf_x", script: "x", scriptPath: "x", toolCallId: "c" });
+    task.workflowName = "sdd-final-review";
+    task.workflowProgress = [
+      { type: "workflow_agent", index: 0, label: "find:correctness", state: "done" },
+      { type: "workflow_agent", index: 1, label: "verify:a.ts:1", state: "error", timedOut: true },
+    ];
+    task.agentCount = 2;
+    task.status = "completed";
+    return task;
+  }
+
+  it("names timed-out children in the notification summary", () => {
+    expect(formatWorkflowNotification(stalledTask())).toContain("1 timed out (stalled)");
+  });
+
+  it("leaves the summary alone when nothing stalled", () => {
+    const task = createWorkflowTask({ id: "wf_x", script: "x" });
+    task.workflowProgress = [{ type: "workflow_agent", index: 0, label: "find", state: "done" }];
+    task.status = "completed";
+    expect(formatWorkflowNotification(task)).not.toContain("timed out");
+  });
+
+  it("reports each timed-out child once, however many batches it spans", () => {
+    // The batch handler toasts what this returns, so a row the runtime
+    // re-emits (a later batch carries its duration) must not toast twice.
+    const task = createWorkflowTask({ id: "wf_x", script: "x" });
+    const row = {
+      type: "workflow_agent",
+      index: 1,
+      label: "verify:a.ts:1",
+      state: "error",
+      timedOut: true,
+    } as const;
+
+    expect(updateWorkflowProgressBatch(task, [row])).toEqual(["verify:a.ts:1"]);
+    expect(updateWorkflowProgressBatch(task, [{ ...row, durationMs: 12 }])).toEqual([]);
+  });
+
+  it("says nothing about a skip or an ordinary failure", () => {
+    const task = createWorkflowTask({ id: "wf_x", script: "x" });
+    expect(
+      updateWorkflowProgressBatch(task, [
+        { type: "workflow_agent", index: 0, label: "dismissed", state: "error", skipped: true },
+        { type: "workflow_agent", index: 1, label: "broke", state: "error" },
+      ]),
+    ).toEqual([]);
   });
 });
