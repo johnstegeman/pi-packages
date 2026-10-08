@@ -39,7 +39,14 @@ test("args normalization + structured bad-args envelope guard", () => {
 });
 
 test("stage 1: first fix agent is gated + labelled", () => {
-  assert.match(src, /agent\(fixPrompt, \{ label: 'fix', gate: gateCommand, agentType: 'implementer', phase: 'Fix' \}\)/);
+  assert.match(src, /agent\(fixPrompt, \{ label: 'fix', gate: gateCommand, agentType: 'implementer', phase: 'Fix', stallTimeout: 3600 \}\)/);
+});
+
+test("stall window: every agent() call site raises the window to 3600 s", () => {
+  // Fix-round implementers legitimately run long test suites, so the 600 s
+  // default would kill a slow-but-alive child. Count the call sites so a new
+  // branch that forgot the window cannot slip past the behavior test.
+  assert.equal((src.match(/stallTimeout: 3600/g) ?? []).length, 4);
 });
 
 test("resume rule: resume: 'fix' without gate, then re-gated verify", () => {
@@ -249,6 +256,32 @@ const TAIL_IMPL =
   ", who closes this task's bead only after the review passes. Report DONE; the controller handles the bead."
 const TAIL_REVIEW =
   ". Your beads access is READ-ONLY — reading the task/gate bead is fine; never write. Report your verdict; the controller records it."
+
+test("behavior: every emitted agent() call carries stallTimeout: 3600", async () => {
+  // The retry path is the widest: it emits all four call sites (gated fix,
+  // ungated resume, re-gated verify, re-review) in one round.
+  const calls = []
+  let fixCalls = 0
+  const agent = async (prompt, opts) => {
+    calls.push(opts)
+    const label = opts?.label ?? ""
+    if (label === "fix") {
+      fixCalls++
+      return fixCalls === 1 ? null : "resumed and fixed"
+    }
+    if (label === "verify") return "npm test passed"
+    return "done"
+  }
+  const result = await runWorkflow(src, { args: passedArgs, agent })
+  assert.equal(result.passed, true)
+  assert.deepEqual(
+    calls.map((o) => o.label),
+    ["fix", "fix", "verify", "re-review"],
+  )
+  for (const o of calls) {
+    assert.equal(o.stallTimeout, 3600, o.label + " must pass stallTimeout: 3600")
+  }
+})
 
 test("behavior: every emitted prompt carries the beads guardrail, with the right tail", async () => {
   const prompts = []

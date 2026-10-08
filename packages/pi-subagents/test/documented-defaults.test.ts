@@ -9,6 +9,9 @@
 // is why this lives in its own file: resetModules is file-wide and hostile to
 // suites that hold module references across tests.
 
+import { readFileSync } from "node:fs";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 describe("documented defaults (README:441)", () => {
@@ -86,6 +89,16 @@ describe("documented defaults (README:441)", () => {
     const { getWorkflowStallTimeoutSecs } = await import("../src/settings.js");
     expect(getWorkflowStallTimeoutSecs()).toBe(600);
   }, HEAVY_REIMPORT_MS);
+
+  // The user-facing half of the same default: the module value is worthless to
+  // someone who cannot learn the knob exists, and the README's Persistent
+  // Settings section is the only place it is published. Pin both places a user
+  // reads it (the setting's own paragraph, and the hardcoded-defaults list).
+  it("README documents the workflow stall timeout default", () => {
+    const readme = readFileSync(join(dirname(fileURLToPath(import.meta.url)), "..", "README.md"), "utf8");
+    expect(readme).toContain("**Workflow stall timeout** (`workflowStallTimeoutSecs`, default `600`)");
+    expect(readme).toMatch(/hardcoded defaults \([^)]*workflow stall timeout `600`/);
+  });
 
   // The user-facing setting is seconds and lives in settings.ts; the runtime's
   // own fallback is milliseconds in workflow/runtime.ts. Nothing else ties the

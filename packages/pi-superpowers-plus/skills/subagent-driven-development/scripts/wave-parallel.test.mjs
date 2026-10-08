@@ -104,6 +104,14 @@ test("implementer discipline: shared-branch commit rules present", () => {
   assert.match(src, /git add <your files>/);
 });
 
+test("stall window: every agent() call site raises the window to 3600 s", () => {
+  // Wave implementers legitimately run long test suites, so the 600 s default
+  // would kill a slow-but-alive child. The high explicit window is per call
+  // site, not per script: a spread or a new branch that forgot it would be
+  // invisible to the behavior test below, so count the source too.
+  assert.equal((src.match(/stallTimeout: 3600/g) ?? []).length, 2);
+});
+
 test("no sandbox-forbidden globals", () => {
   for (const forbidden of ["Date.now(", "Math.random(", "eval(", "new Date"]) {
     assert.ok(!src.includes(forbidden), `forbidden global present: ${forbidden}`);
@@ -252,6 +260,29 @@ const TAIL_IMPL =
   ", who closes this task's bead only after the review passes. Report DONE; the controller handles the bead."
 const TAIL_REVIEW =
   ". Your beads access is READ-ONLY — reading the task/gate bead is fine; never write. Report your verdict; the controller records it."
+
+test("behavior: every emitted agent() call carries stallTimeout: 3600", async () => {
+  const calls = []
+  const agent = async (prompt, opts) => {
+    calls.push(opts)
+    const label = opts?.label ?? ""
+    if (label.startsWith("implement:")) {
+      const id = label.slice("implement:".length)
+      return { status: "done", reportFile: "/r/" + id + "-report.md" }
+    }
+    if (label.startsWith("review:")) return { specCompliant: true, issues: [], assessment: "ok" }
+    return null
+  }
+  const result = await runWorkflow(src, { args: waveArgs, agent })
+  assert.equal(result.degraded, null)
+  assert.deepEqual(
+    calls.map((o) => o.label),
+    ["implement:a", "review:a", "implement:b", "review:b"],
+  )
+  for (const o of calls) {
+    assert.equal(o.stallTimeout, 3600, o.label + " must pass stallTimeout: 3600")
+  }
+})
 
 test("behavior: every emitted prompt carries the beads guardrail, with the right tail", async () => {
   const prompts = []

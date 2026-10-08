@@ -246,8 +246,11 @@ Spawns one subagent and resolves to its final text — or, with `schema`, to a v
 | `gate` | string | A shell command run after the agent finishes; a non-zero exit fails the agent and its output becomes the error |
 | `resume` | string | Continue the child that ran under that label instead of starting fresh |
 | `schema` | object | A JSON Schema with an object root. Resolves to the validated object instead of text |
+| `stallTimeout` | number | Per-call inactivity window in **seconds**: a child that produces no tool or turn activity for that long is aborted and the call resolves `null`. `0` disables the watchdog for this call. Omitted, the run's window applies — `workflowStallTimeoutSecs`, default `600` |
 
 Any other key is rejected **by name** at the call. Note that this checks option *keys*, not option *values* — an `agentType` that names no known agent falls back to `general-purpose` silently.
+
+**The watchdog cannot tell a hung tool from a long one.** An `agent()` call is judged by *inactivity*, not duration: a bash command that hangs and one that legitimately runs for twenty minutes are indistinguishable from the parent — both are "tool started, never ended". So the window is a patience setting, not a timeout you can size to your worst-case runtime and forget. Raise it for calls that legitimately run long suites (`{ stallTimeout: 3600 }`), lower it for calls that should be quick, or opt one call out entirely with `{ stallTimeout: 0 }`. The run-wide default is `workflowStallTimeoutSecs` (default `600` seconds), settable in `subagents.json` or `/agents → Settings`. On timeout the child is aborted and its call resolves `null` — the run finishes degraded rather than hanging; the completion summary counts the stalled children (`N timed out (stalled)`), the run card flags them with a warning glyph, and the run dialog marks the child `Timed out (stalled)`.
 
 Combination rules: `resume` cannot be combined with `agentType`, `model`, `effort`, `isolation`, `gate` or `schema` — a resumed child keeps the agent type, model and tree it was started with, and its session predates the `StructuredOutput` tool.
 

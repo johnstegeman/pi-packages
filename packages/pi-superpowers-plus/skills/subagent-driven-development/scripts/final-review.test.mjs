@@ -597,6 +597,27 @@ const CORE =
 const TAIL_REVIEW =
   ". Your beads access is READ-ONLY — reading the task/gate bead is fine; never write. Report your verdict; the controller records it."
 
+test("behavior: no agent() call sets stallTimeout — final-review keeps the 600 s default", async () => {
+  // Review children are the shape the 600 s default was chosen for, so the
+  // absence of an override is a decision, not an oversight. Assert it through
+  // the harness (every emitted call's options), not the source text: a spread
+  // or a future option object could carry a window a grep would never see.
+  const opts = []
+  const { agent } = liveAgent()
+  const recordingAgent = async (prompt, callOpts) => {
+    opts.push(callOpts)
+    return agent(prompt, callOpts)
+  }
+  await runWorkflow(src, {
+    args: { base: "a", head: "b", packagePath: "/x", description: "d", gateBeadId: "g", findingsFile: "/tmp/no-stall.jsonl" },
+    agent: recordingAgent,
+  })
+  assert.ok(opts.length >= 7, "finders + refuters + writer ran: " + opts.length)
+  for (const o of opts) {
+    assert.equal(o.stallTimeout, undefined, (o.label ?? "?") + " must inherit the default window")
+  }
+})
+
 test("behavior: every emitted prompt carries the beads guardrail", async () => {
   const { state, agent } = liveAgent()
   await runWorkflow(src, {

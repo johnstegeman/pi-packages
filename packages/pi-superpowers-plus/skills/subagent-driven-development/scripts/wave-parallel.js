@@ -165,11 +165,16 @@ async function implementStage(item) {
         }
       : bad
   }
+  // An implementer legitimately runs a long test suite, and the watchdog judges
+  // inactivity, not duration: a slow `npm test` and a hung one look identical to
+  // the parent. The high explicit window keeps a long gate alive while still
+  // catching a truly hung child eventually (R1, design §3).
   const result = await agent(implementPrompt(item), {
     label: 'implement:' + item.taskBeadId,
     phase: 'Implement',
     agentType: 'implementer',
     schema: IMPLEMENT_RESULT_SCHEMA,
+    stallTimeout: 3600,
     ...(item.gate ? { gate: item.gate } : {}),
   })
   if (result === null) {
@@ -186,11 +191,14 @@ async function reviewStage(prev, item) {
     return { ...prev, skipped: true, reason: prev.reason ?? prev.status }
   }
   phase('Review')
+  // Same window as the implement stage: this reviewer's long step is one large
+  // tool call (reading a full diff), which the watchdog cannot tell from a hang.
   const spec = await agent(reviewPrompt(item), {
     label: 'review:' + item.taskBeadId,
     phase: 'Review',
     agentType: 'task-reviewer',
     schema: REVIEW_SCHEMA,
+    stallTimeout: 3600,
   })
   if (spec === null) {
     return { ...prev, status: 'review-failed', skipped: true, reason: 'reviewer returned null' }
