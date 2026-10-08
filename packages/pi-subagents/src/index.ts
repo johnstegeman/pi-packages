@@ -34,7 +34,7 @@ import { getMaxSubagentDepth, setMaxSubagentDepth } from "./nested-tools.js";
 import { createOutputFilePath, ensureOutputFile, getOutputTranscriptDefault, sessionTaskDir, setOutputTranscriptDefault, streamToOutputFile, writeInitialEntry } from "./output-file.js";
 import { SubagentScheduler } from "./schedule.js";
 import { resolveStorePath, ScheduleStore } from "./schedule-store.js";
-import { applyAndEmitLoaded, loadSettings, type SubagentsSettings, saveAndEmitChanged, type ToolDescriptionMode } from "./settings.js";
+import { applyAndEmitLoaded, getWorkflowStallTimeoutSecs, loadSettings, type SubagentsSettings, saveAndEmitChanged, setWorkflowStallTimeout, type ToolDescriptionMode } from "./settings.js";
 import { getForegroundOutcomeNote, getStatusNote, partialOutputSuffix } from "./status-note.js";
 import { type AgentConfig, type AgentInvocation, type AgentMentionMode, type AgentRecord, type JoinMode, type NotificationDetails, type SubagentType, type ViewerMarkdownMode, type WidgetMode } from "./types.js";
 import { createMentionProvider, mentionRoster, type TypeInfo } from "./ui/agent-mention.js";
@@ -1434,6 +1434,7 @@ export default function (pi: ExtensionAPI) {
       setShowCost,
       setShowModel,
       setViewerMarkdown,
+      setWorkflowStallTimeout,
     },
     (event, payload) => pi.events.emit(event, payload),
   );
@@ -2361,6 +2362,12 @@ Terse command-style prompts produce shallow, generic work.
         script: task.script,
         args: task.args,
         signal: task.abortController.signal,
+        // The user's window, converted to the milliseconds the runtime works
+        // in. Read per run, so a change in /agents → Settings applies to the
+        // next workflow rather than the next session. 0 passes straight
+        // through — the runtime reads it as "watchdog off", which is why this
+        // is a multiplication and not a `|| DEFAULT_STALL_TIMEOUT_MS`.
+        stallTimeoutMs: getWorkflowStallTimeoutSecs() * 1000,
         host: createWorkflowHost({
           pi,
           ctx,
@@ -3541,6 +3548,9 @@ Write the file using the write tool. Only write the file, nothing else.`;
       showCost: isShowCostEnabled(),
       showModel: isShowModelEnabled(),
       viewerMarkdown: getViewerMarkdown(),
+      // Seconds, 0 = off — read per run, so unlike `workflowsEnabled` above this
+      // is the effective value rather than a session-frozen one.
+      workflowStallTimeoutSecs: getWorkflowStallTimeoutSecs(),
     } satisfies SubagentsSettings;
   }
 
@@ -3557,6 +3567,7 @@ Write the file using the write tool. Only write the file, nothing else.`;
 
   const NUMERIC_IDS = new Set([
     "maxConcurrent", "maxConcurrentForeground", "defaultMaxTurns", "graceTurns", "maxSubagentDepth",
+    "workflowStallTimeoutSecs",
   ]);
 
   async function showSettings(ctx: ExtensionCommandContext) {
@@ -3566,6 +3577,7 @@ Write the file using the write tool. Only write the file, nothing else.`;
       const dmt = getDefaultMaxTurns() ?? 0;
       const gt = getGraceTurns();
       const msd = getMaxSubagentDepth();
+      const wst = getWorkflowStallTimeoutSecs();
       // Label what unset actually does — it targets general-purpose even when
       // that is unregistered (the permissive hardcoded tier), so showing "none"
       // there would advertise strict dispatch for the most permissive state.
@@ -3609,6 +3621,13 @@ Write the file using the write tool. Only write the file, nothing else.`;
           description: "Hard cap on nested delegation — main is 0, its subagents 1 (0/1 = nesting off, Enter to type)",
           currentValue: String(msd),
           values: [String(msd)],
+        },
+        {
+          id: "workflowStallTimeoutSecs",
+          label: "Workflow stall timeout",
+          description: "Workflow stall timeout (seconds, 0 = off, Enter to type)",
+          currentValue: String(wst),
+          values: [String(wst)],
         },
         {
           id: "joinMode",
@@ -3795,6 +3814,19 @@ Write the file using the write tool. Only write the file, nothing else.`;
               : `Nested depth set to ${n}. Applies to agents started from now on.`,
           );
         }
+      } else if (id === "workflowStallTimeoutSecs") {
+        // 0 is meaningful here — it disables the watchdog — so this is the
+        // `n >= 0` shape of maxSubagentDepth, not the `n >= 1` of graceTurns.
+        const n = parseInt(value, 10);
+        if (n >= 0) {
+          setWorkflowStallTimeout(n);
+          notifyApplied(
+            ctx,
+            n === 0
+              ? "Workflow stall watchdog disabled"
+              : `Workflow stall timeout set to ${n}s. Applies to workflows started from now on.`
+          );
+        }
       } else if (id === "joinMode") {
         setDefaultJoinMode(value as JoinMode);
         notifyApplied(ctx, `Default join mode set to ${value}`);
@@ -3960,6 +3992,7 @@ Write the file using the write tool. Only write the file, nothing else.`;
 
     // If a numeric field ID was returned, prompt for typed input
     if (result && NUMERIC_IDS.has(result)) {
+      // One branch per id in NUMERIC_IDS; the final else is `graceTurns`.
       const current = result === "maxConcurrent"
         ? String(manager.getMaxConcurrent())
         : result === "maxConcurrentForeground"
@@ -3968,7 +4001,9 @@ Write the file using the write tool. Only write the file, nothing else.`;
             ? String(getDefaultMaxTurns() ?? 0)
             : result === "maxSubagentDepth"
               ? String(getMaxSubagentDepth())
-              : String(getGraceTurns());
+              : result === "workflowStallTimeoutSecs"
+                ? String(getWorkflowStallTimeoutSecs())
+                : String(getGraceTurns());
 
       const label = result === "maxConcurrent"
         ? "Max concurrency (1+)"
@@ -3978,7 +4013,9 @@ Write the file using the write tool. Only write the file, nothing else.`;
             ? "Default max turns (0 = unlimited)"
             : result === "maxSubagentDepth"
               ? "Nested depth (0/1 = nesting off)"
-              : "Grace turns (1+)";
+              : result === "workflowStallTimeoutSecs"
+                ? "Workflow stall timeout (seconds, 0 = off)"
+                : "Grace turns (1+)";
 
       // Loop until user enters a valid integer or cancels (Esc / null).
       // Silently trims whitespace; rejects non-numeric input by re-prompting.

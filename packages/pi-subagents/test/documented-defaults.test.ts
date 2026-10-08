@@ -81,4 +81,19 @@ describe("documented defaults (README:441)", () => {
     const { isScopeModelsEnabled } = await import("../src/model-scope.js");
     expect(isScopeModelsEnabled()).toBe(false);
   });
+
+  it("workflow stall timeout defaults to 10 minutes", async () => {
+    const { getWorkflowStallTimeoutSecs } = await import("../src/settings.js");
+    expect(getWorkflowStallTimeoutSecs()).toBe(600);
+  }, HEAVY_REIMPORT_MS);
+
+  // The user-facing setting is seconds and lives in settings.ts; the runtime's
+  // own fallback is milliseconds in workflow/runtime.ts. Nothing else ties the
+  // two constants together, and a drift between them would give every workflow
+  // a window the settings menu does not show.
+  it("agrees with the runtime's millisecond fallback", async () => {
+    const { getWorkflowStallTimeoutSecs } = await import("../src/settings.js");
+    const { DEFAULT_STALL_TIMEOUT_MS } = await import("../src/workflow/runtime.js");
+    expect(getWorkflowStallTimeoutSecs() * 1000).toBe(DEFAULT_STALL_TIMEOUT_MS);
+  }, HEAVY_REIMPORT_MS);
 });

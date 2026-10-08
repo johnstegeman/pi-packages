@@ -333,6 +333,26 @@ describe("settings persistence", () => {
       expect(loadSettings(projectDir)).toEqual({});
     });
 
+    // 0 is the documented "watchdog off" spelling, so it has to survive the
+    // file round trip — dropping it would leave the user's off switch looking
+    // set in the menu while every workflow still ran under the default window.
+    it("keeps workflowStallTimeoutSecs 0 (watchdog off) and a normal window", () => {
+      writeProject({ workflowStallTimeoutSecs: 0 });
+      expect(loadSettings(projectDir)).toEqual({ workflowStallTimeoutSecs: 0 });
+      writeProject({ workflowStallTimeoutSecs: 900 });
+      expect(loadSettings(projectDir)).toEqual({ workflowStallTimeoutSecs: 900 });
+    });
+
+    it("drops a malformed workflowStallTimeoutSecs (negative, fractional, over-ceiling, non-number)", () => {
+      // Over the ceiling is 24 h — the same bound the per-call `stallTimeout`
+      // option enforces, so a hand-edited file cannot ask for a window no
+      // script could express.
+      for (const bad of [-1, 1.5, 86_401, "600", true, null]) {
+        writeProject({ workflowStallTimeoutSecs: bad });
+        expect(loadSettings(projectDir).workflowStallTimeoutSecs).toBeUndefined();
+      }
+    });
+
     it("accepts `none` and `false` as the disabled fallback, nothing else", () => {
       // Only the boolean needs an alias: it would otherwise be dropped, leaving
       // the PERMISSIVE default while the author believed strict was on. Every
@@ -548,6 +568,7 @@ describe("settings persistence", () => {
       setRememberAgents: vi.fn(),
         setWidgetMode: vi.fn(),
         setViewerMarkdown: vi.fn(),
+        setWorkflowStallTimeout: vi.fn(),
         setOutputTranscript: vi.fn(),
         setWorktreeIsolation: vi.fn(),
         setMaxSubagentDepth: vi.fn(),
@@ -726,6 +747,21 @@ describe("settings persistence", () => {
       expect(appliers.setDefaultMaxTurns).toHaveBeenCalledWith(0);
     });
 
+    // 0 disables the watchdog, so a truthiness guard in applySettings would
+    // silently skip the one value that turns it off — the same trap the
+    // defaultMaxTurns and maxConcurrentForeground cases above guard against.
+    it("applies workflowStallTimeoutSecs, including an explicit 0", () => {
+      applySettings({ workflowStallTimeoutSecs: 900 }, appliers);
+      expect(appliers.setWorkflowStallTimeout).toHaveBeenCalledWith(900);
+
+      applySettings({ workflowStallTimeoutSecs: 0 }, appliers);
+      expect(appliers.setWorkflowStallTimeout).toHaveBeenCalledWith(0);
+
+      vi.mocked(appliers.setWorkflowStallTimeout).mockClear();
+      applySettings({}, appliers);
+      expect(appliers.setWorkflowStallTimeout).not.toHaveBeenCalled();
+    });
+
     it("calls setBackgroundByDefault with either boolean", () => {
       applySettings({ backgroundByDefault: false }, appliers);
       expect(appliers.setBackgroundByDefault).toHaveBeenCalledWith(false);
@@ -799,6 +835,7 @@ describe("settings persistence", () => {
       setRememberAgents: vi.fn(),
         setWidgetMode: vi.fn(),
         setViewerMarkdown: vi.fn(),
+        setWorkflowStallTimeout: vi.fn(),
         setOutputTranscript: vi.fn(),
         setWorktreeIsolation: vi.fn(),
         setMaxSubagentDepth: vi.fn(),
