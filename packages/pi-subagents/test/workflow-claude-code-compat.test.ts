@@ -12,7 +12,11 @@
  */
 
 import { describe, expect, it } from "vitest";
-import { runWorkflow, type WorkflowHost } from "../src/workflow/runtime.js";
+import {
+  runWorkflow,
+  type WorkflowHost,
+  type WorkflowSpawnRequest,
+} from "../src/workflow/runtime.js";
 
 /** Claude Code's canonical review-changes example, verbatim from its tool description. */
 const CC_SCRIPT = `export const meta = {
@@ -89,5 +93,58 @@ describe("the other Claude Code globals", () => {
     ].join("\n");
 
     expect((await runWorkflow({ script, host })).value).toBe(42);
+  });
+});
+
+
+/**
+ * The per-call `agent({ stallTimeout })` option — a Claude Code-shaped script that
+ * tunes the run's inactivity watchdog for one call. The worker validates it (like
+ * `effort`) and the runtime resolves it per call; the spawn request echoes it so
+ * the host boundary can see what the script asked for.
+ */
+describe("the stallTimeout option", () => {
+  function recordingHost(): { host: WorkflowHost; calls: WorkflowSpawnRequest[] } {
+    const calls: WorkflowSpawnRequest[] = [];
+    return {
+      calls,
+      host: {
+        async spawnAgent(request) {
+          calls.push(request);
+          return { ok: true, text: "ok" };
+        },
+        abortAgent() {},
+      },
+    };
+  }
+
+  it("runs a script that sets a per-call stall window, and carries it to the host", async () => {
+    const { host, calls } = recordingHost();
+    const script = [
+      'export const meta = { name: "stall", description: "d" };',
+      'const a = await agent("x", { stallTimeout: 5 });',
+      "return a;",
+    ].join("\n");
+
+    const result = await runWorkflow({ script, host });
+
+    expect(result.error).toBeUndefined();
+    expect(result.value).toBe("ok");
+    expect(calls[0].stallTimeout).toBe(5);
+  });
+
+  it("rejects a bad stall window at the call, before anything spawns", async () => {
+    const { host, calls } = recordingHost();
+    const script = [
+      'export const meta = { name: "stall", description: "d" };',
+      'await agent("x", { stallTimeout: -1 });',
+      "return null;",
+    ].join("\n");
+
+    const result = await runWorkflow({ script, host });
+
+    expect(result.status).toBe("failed");
+    expect(result.error).toContain("agent() opts.stallTimeout must be");
+    expect(calls).toHaveLength(0);
   });
 });

@@ -75,6 +75,14 @@ describe("the agent() contract it documents", () => {
     }
   });
 
+  it("documents stallTimeout as a per-call inactivity window with 0 disabling it", () => {
+    // The option exists so a script can tune one child's patience; the prose
+    // has to say the unit and the off switch, or a model will guess at both.
+    const sentence = description.match(/opts\.stallTimeout[^.]*\./)?.[0] ?? "";
+    expect(sentence).toContain("seconds");
+    expect(sentence).toContain("0");
+  });
+
   it("documents no option the runtime would reject by name", () => {
     const named = [...description.matchAll(/opts\.(\w+)/g)].map(m => m[1]);
     expect([...new Set(named)].filter(name => !AGENT_OPTIONS.includes(name))).toEqual([]);

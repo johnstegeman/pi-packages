@@ -80,6 +80,15 @@ export interface WorkflowSpawnRequest {
   effort?: string;
   isolation?: "worktree";
   /**
+   * The per-call inactivity window the script asked for, in seconds, when it
+   * passed `agent({ stallTimeout })`.
+   *
+   * An echo of the option, not a contract: the run enforces the watchdog itself
+   * (see {@link RunWorkflowOptions.stallTimeoutMs}), so a host needs only to be
+   * able to surface it.
+   */
+  stallTimeout?: number;
+  /**
    * Called by the host once the child's EFFECTIVE configuration is known —
    * which is when its session exists, not when the spawn resolves.
    *
@@ -512,6 +521,14 @@ interface AgentCallPayload {
   effort?: string;
   /** Raw JSON Schema from `agent({ schema })`, compiled before anything spawns. */
   schema?: unknown;
+  /**
+   * Per-call inactivity window in seconds, from `agent({ stallTimeout })`.
+   *
+   * Overrides {@link RunWorkflowOptions.stallTimeoutMs} for this child alone;
+   * `0` disables the watchdog for it. Validated worker-side, so it is only ever
+   * a finite number in `[0, 86400]` by the time it lands here.
+   */
+  stallTimeout?: number;
 }
 
 type WorkerMessage =
@@ -736,14 +753,17 @@ export async function runWorkflow(options: RunWorkflowOptions): Promise<Workflow
   const stallCheckIntervalMs = options.stallCheckIntervalMs ?? 30_000;
   /**
    * In-flight children by runtime agent id, with the last time each said
-   * anything.
+   * anything and the window that child is judged against.
    *
    * Keyed by id rather than index because {@link host.abortAgent} takes an id,
    * and the index is what finds the {@link LiveAgent} to mark. Armed after the
    * semaphore, so time parked behind the concurrency limit never counts against
    * a child that has not started yet.
+   *
+   * The window is per entry, not per run: `agent({ stallTimeout })` gives one
+   * child a different patience from its siblings.
    */
-  const lastActivity = new Map<string, { index: number; at: number }>();
+  const lastActivity = new Map<string, { index: number; at: number; timeoutMs: number }>();
   let stallTimer: ReturnType<typeof setInterval> | undefined;
   /**
    * The one line the watchdog writes itself, wired up with the run's progress
@@ -754,8 +774,8 @@ export async function runWorkflow(options: RunWorkflowOptions): Promise<Workflow
   let warnForceSettle: ((agentId: string) => void) | undefined;
 
   /** The one wording for a watchdog stop, shared by the row and the abort. */
-  const stallMessage = () =>
-    `Timed out after ${Math.round(stallTimeoutMs / 1000)}s of inactivity.`;
+  const stallMessage = (timeoutMs: number) =>
+    `Timed out after ${Math.round(timeoutMs / 1000)}s of inactivity.`;
 
   const checkStalls = () => {
     const now = Date.now();
@@ -763,7 +783,7 @@ export async function runWorkflow(options: RunWorkflowOptions): Promise<Workflow
       const live = liveAgents.get(entry.index);
       if (live === undefined) continue;
       if (live.timedOut !== true) {
-        if (now - entry.at <= stallTimeoutMs) continue;
+        if (now - entry.at <= entry.timeoutMs) continue;
         // Abort, rather than answer the call here: a stop reaches a hung tool
         // call, and it lets the child settle normally — worktree cleanup and
         // all — so its slot is handed back the way any other child's is.
@@ -782,7 +802,7 @@ export async function runWorkflow(options: RunWorkflowOptions): Promise<Workflow
         // flag can say so once the child never reported one itself.
         live.intent === "skip" ?
           { ok: false, skipped: true, error: "Stopped." }
-        : { ok: false, error: stallMessage() },
+        : { ok: false, error: stallMessage(entry.timeoutMs) },
       );
       // Force-completion is the one path that can leak: the child never
       // stopped, so it may still hold a process or a worktree. A leak nobody
@@ -793,7 +813,9 @@ export async function runWorkflow(options: RunWorkflowOptions): Promise<Workflow
 
   /** One timer per run, and only while a child is actually in flight. */
   const armStallTimer = () => {
-    if (stallTimer !== undefined || stallTimeoutMs <= 0) return;
+    // Armed only by a caller that has just registered a watched child, so the
+    // run's own window being `0` must not veto a positive per-call one.
+    if (stallTimer !== undefined) return;
     stallTimer = setInterval(checkStalls, stallCheckIntervalMs);
     // A live workflow must not be the reason the process stays up.
     stallTimer.unref?.();
@@ -1030,6 +1052,11 @@ export async function runWorkflow(options: RunWorkflowOptions): Promise<Workflow
       const agentType = resumed?.agentType ?? payload.agentType ?? "general-purpose";
       const model = resumed !== undefined ? resumed.model : payload.model;
       const isolation = resumed !== undefined ? resumed.isolation : payload.isolation;
+      // Per-call patience, resolved once outside the retry loop: a per-call
+      // `stallTimeout` wins over the run's, and `0` either way means no watchdog
+      // for this child. A retry is owed the same window as the attempt before.
+      const agentStallMs =
+        payload.stallTimeout === undefined ? stallTimeoutMs : payload.stallTimeout * 1000;
       openLaunches.set(callId, label);
 
       const base: WorkflowAgentEntry = {
@@ -1192,8 +1219,8 @@ export async function runWorkflow(options: RunWorkflowOptions): Promise<Workflow
           // Armed here rather than when the call arrived: a child parked behind
           // the concurrency limit has had no chance to say anything, and timing
           // it out for the run's own queueing would be a false positive.
-          if (stallTimeoutMs > 0) {
-            lastActivity.set(agentId, { index, at: Date.now() });
+          if (agentStallMs > 0) {
+            lastActivity.set(agentId, { index, at: Date.now(), timeoutMs: agentStallMs });
             armStallTimer();
           }
 
@@ -1210,6 +1237,7 @@ export async function runWorkflow(options: RunWorkflowOptions): Promise<Workflow
                     agentType,
                     ...(model !== undefined ? { model } : {}),
                     ...(payload.effort !== undefined ? { effort: payload.effort } : {}),
+                    ...(payload.stallTimeout !== undefined ? { stallTimeout: payload.stallTimeout } : {}),
                     ...(compiledSchema !== undefined ? { schema: compiledSchema } : {}),
                     ...(isolation !== undefined ? { isolation } : {}),
                     ...(payload.phaseIndex !== undefined ? { phaseIndex: payload.phaseIndex } : {}),
@@ -1311,7 +1339,7 @@ export async function runWorkflow(options: RunWorkflowOptions): Promise<Workflow
                 durationMs: timedOutAt - startedAt,
                 state: "error",
                 timedOut: true,
-                error: stallMessage(),
+                error: stallMessage(agentStallMs),
               },
             ]);
             // `ok: false`, like any other failure: resuming this run re-runs

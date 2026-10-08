@@ -127,6 +127,18 @@ describe("script globals", () => {
     expect(calls).toHaveLength(0);
   });
 
+  it("rejects a stallTimeout that is not a number of seconds in [0, 86400]", async () => {
+    // Rejected at the call, like effort: a typo has to stop the script there
+    // rather than run the child at a window nobody meant.
+    for (const bad of ["-1", '"5"', "86401"]) {
+      const { host, calls } = stubHost();
+      const result = await run(`await agent("a", { stallTimeout: ${bad} });\nreturn null;`, { host });
+      expect(result.status).toBe("failed");
+      expect(result.error).toContain("agent() opts.stallTimeout must be");
+      expect(calls).toHaveLength(0);
+    }
+  });
+
   it("passes args through verbatim and exposes meta to the script", async () => {
     const { host } = stubHost();
     const result = await run("return { got: args, name: meta.name };", {
@@ -1425,6 +1437,49 @@ describe("stall watchdog", () => {
     });
     expect(result.value).toBe("slow");
     expect(stub.aborted).toEqual([]);
+  });
+
+  it("lets a per-call stallTimeout override the run's window", async () => {
+    // The run says 1000 ms; this call says 50 ms. The child must go at 50 ms,
+    // which the row's own duration proves without the test racing a clock.
+    const stub = stubHost(() => new Promise<WorkflowSpawnResult>(() => {})); // never resolves
+    const result = await run('const a = await agent("hang", { stallTimeout: 0.05 }); return { got: a };', {
+      host: stub.host, stallTimeoutMs: 1000, stallCheckIntervalMs: 10,
+    });
+
+    expect(result.status).toBe("completed");
+    expect(result.value).toEqual({ got: null });
+    expect(stub.aborted).toEqual(["wf-agent-0"]);
+    const terminal = agentEntries(result.progress).at(-1);
+    expect(terminal).toMatchObject({ state: "error", timedOut: true });
+    // Far below the run's 1000 ms window: the per-call 50 ms one fired.
+    expect(terminal?.durationMs ?? Number.POSITIVE_INFINITY).toBeLessThan(500);
+  });
+
+  it("lets a per-call stallTimeout of zero opt out of the run's window", async () => {
+    // The run says 40 ms; this call says off. Far past that window the child is
+    // still pending — so `0` disabled the watchdog rather than merely delaying it.
+    const release = new Map<string, (result: WorkflowSpawnResult) => void>();
+    const aborted: string[] = [];
+    const host: WorkflowHost = {
+      spawnAgent(request) {
+        return new Promise<WorkflowSpawnResult>(resolve => release.set(request.agentId, resolve));
+      },
+      abortAgent(agentId) {
+        aborted.push(agentId);
+        release.get(agentId)?.({ ok: false, skipped: true, error: "Stopped." });
+      },
+    };
+    let control: WorkflowControl | undefined;
+    const done = run('const a = await agent("hang", { stallTimeout: 0 }); return { got: a };', {
+      host, stallTimeoutMs: 40, stallCheckIntervalMs: 10, onControl: c => { control = c; },
+    });
+
+    await sleep(120);
+    expect(aborted).toEqual([]);
+    // Release the still-pending run so the test does not leak a worker thread.
+    expect(control?.skip(0)).toBe(true);
+    expect((await done).value).toEqual({ got: null });
   });
 
   it("lets a user skip win a race with the watchdog, with one row", async () => {
