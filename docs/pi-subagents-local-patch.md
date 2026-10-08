@@ -215,7 +215,7 @@ This fork adds a watchdog at two levels, plus the settings to tune it:
   ever came, and the orchestrator has to be able to tell a degraded review from one the user
   dismissed.
 - **Per-run:** a run that hears nothing from the worker for `runStallTimeoutMs` settles `failed`
-  with *"Workflow stalled: no progress for Ns."* and the worker is terminated. The check is gated
+  with *"Workflow stalled: no progress for 20m00s."* and the worker is terminated. The check is gated
   on **nothing being in flight** (`inflight.size === 0`): a worker awaiting a child is silent by
   design — it posts one `call` and then hears nothing until the answer — so judging silence while a
   child runs would cap every `agent()` at the run window and throw away the per-child (or per-call
