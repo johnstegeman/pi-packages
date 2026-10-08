@@ -79,7 +79,7 @@ import {
 } from "./workflow/progress.js";
 import { assertWorkflowArgs, runWorkflow } from "./workflow/runtime.js";
 import { resolveWorkflowScript } from "./workflow/saved.js";
-import { completeWorkflowTask, createWorkflowTask, failWorkflowTask, formatWorkflowNotification, resolveResumeTarget, updateWorkflowProgressBatch, type WorkflowTask, workflowResultText, workflowRunId } from "./workflow/task.js";
+import { completeWorkflowTask, createWorkflowTask, failWorkflowTask, formatWorkflowNotification, resolveResumeTarget, truncateWorkflowResult, updateWorkflowProgressBatch, type WorkflowTask, workflowResultText, workflowRunId } from "./workflow/task.js";
 import { fullWorkflowToolDescription } from "./workflow/tool-description.js";
 import { isWorktreeIsolationEnabled, setWorktreeIsolationEnabled } from "./worktree.js";
 import { escapeXml } from "./xml.js";
@@ -2424,7 +2424,9 @@ Terse command-style prompts produce shallow, generic work.
         progress: task.workflowProgress,
         agentCount: task.agentCount,
         elapsedMs: elapsedMs(task, Date.now()),
-        result: workflowResultText(task),
+        // Capped with the same helper the snapshot uses: the tool answer and
+        // the reloaded answer have to be the same answer.
+        result: truncateWorkflowResult(workflowResultText(task)),
       };
     }
     const recovered = recoveredWorkflowRuns.get(id);
@@ -2943,11 +2945,11 @@ Terse command-style prompts produce shallow, generic work.
     }),
     parameters: Type.Object({
       agent_id: Type.String({
-        description: "The agent ID to check, or a workflow run ID (`wf_…`) returned by SubagentWorkflow. The agent's handle also works — its `name` if you gave it one, otherwise its type (`explore`, `explore-2`).",
+        description: "The agent ID to check, or a workflow run ID (`wf_…`) returned by SubagentWorkflow. The agent's handle also works — its `name` if you gave it one, otherwise its type (`explore`, `explore-2`). A `wf_…` id answers with status only — `wait` and `verbose` apply to agents.",
       }),
       wait: Type.Optional(
         Type.Boolean({
-          description: "If true, wait for the agent to complete before returning. Default: false.",
+          description: "If true, wait for the agent to complete before returning. Default: false. Ignored for a workflow run id.",
         }),
       ),
       verbose: Type.Optional(
@@ -2991,7 +2993,7 @@ Terse command-style prompts produce shallow, generic work.
           }
           return {
             ...textResult(`No workflow run "${params.agent_id}" in this session.`),
-            structuredContent: { error: "workflow not found" },
+            structuredContent: { error: `No workflow run "${params.agent_id}" in this session.` },
           };
         }
         const totals = stats(view.progress, view.agentCount);

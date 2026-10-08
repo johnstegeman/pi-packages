@@ -28,6 +28,7 @@ import type { AgentRecord } from "../src/types.js";
 import { createWorkflowHost } from "../src/workflow/host.js";
 import { compileJsonSchema } from "../src/workflow/json-schema.js";
 import type { WorkflowSpawnRequest } from "../src/workflow/runtime.js";
+import type { WorkflowTask } from "../src/workflow/task.js";
 import { ctx, flush, type Hermetic, hermeticDir, makePi, textOf } from "./helpers/boot-extension.js";
 
 /*
@@ -38,7 +39,7 @@ import { ctx, flush, type Hermetic, hermeticDir, makePi, textOf } from "./helper
  * `createWorkflowTask` still builds the record, so the timed-out test below
  * exercises the tool's own summary path, not a copy of it.
  */
-const capturedTasks = vi.hoisted(() => [] as { id: string; workflowProgress: any[] }[]);
+const capturedTasks = vi.hoisted(() => [] as { id: string; workflowProgress: WorkflowTask[] }[]);
 
 vi.mock("../src/workflow/task.js", async (importOriginal) => {
   const actual = await importOriginal<typeof import("../src/workflow/task.js")>();
@@ -1696,7 +1697,7 @@ describe("get_subagent_result — workflow ids", () => {
       .execute("tc-read", { agent_id: "wf_deadbeef1234" }, undefined, undefined, workflowCtx());
 
     expect(textOf(result)).toContain('No workflow run "wf_deadbeef1234" in this session');
-    expect((result as any).structuredContent).toEqual({ error: "workflow not found" });
+    expect((result as any).structuredContent).toEqual({ error: 'No workflow run "wf_deadbeef1234" in this session.' });
   });
 
   it("leaves a non-workflow id on the agent path", async () => {
@@ -1786,6 +1787,36 @@ describe("durable workflow state", () => {
     );
     const [, data] = booted.pi.appendEntry.mock.calls.find((c: any[]) => c[0] === WORKFLOW_ENTRY_TYPE)!;
     expect(data).toMatchObject({ id: runId, status: "completed", result: "all clear" });
+  });
+
+  it("caps a live wf_ result exactly as the persisted snapshot is capped", async () => {
+    // The snapshot has always been capped (`truncateWorkflowResult`) and the
+    // live answer was not, so the same run read differently before and after a
+    // reload — and a long result landed in the model's context uncut.
+    const booted = makePi();
+    subagentsExtension(booted.pi);
+    await booted.lifecycle.get("session_start")?.({}, workflowCtx());
+
+    const started = await booted.tools.get("SubagentWorkflow").execute(
+      "tc-cap",
+      { script: `${inlineScript}return "x".repeat(5000);\n` },
+      undefined,
+      undefined,
+      workflowCtx(),
+    );
+    const runId = (started.details as { taskId: string }).taskId;
+    await vi.waitFor(
+      () => expect(booted.pi.appendEntry).toHaveBeenCalledWith(WORKFLOW_ENTRY_TYPE, expect.anything()),
+      { timeout: 10_000 },
+    );
+    const [, data] = booted.pi.appendEntry.mock.calls.find((c: any[]) => c[0] === WORKFLOW_ENTRY_TYPE)!;
+
+    const live = await booted.tools
+      .get("get_subagent_result")
+      .execute("tc-read", { agent_id: runId }, undefined, undefined, workflowCtx());
+
+    expect((live as any).structuredContent.result).toContain("...(truncated)");
+    expect((live as any).structuredContent.result).toBe(data.result);
   });
 
   it("rehydrates a settled run from the transcript so its id stays queryable", async () => {
