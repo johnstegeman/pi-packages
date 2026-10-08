@@ -2436,8 +2436,13 @@ Terse command-style prompts produce shallow, generic work.
       progress: recovered.progress,
       agentCount: recovered.agentCount,
       // The snapshot froze the clock at settle, so this is the run's real
-      // duration rather than the time since the reload.
-      elapsedMs: elapsedMs({ startTime: recovered.startTime, endTime: recovered.endTime }, Date.now()),
+      // duration rather than the time since the reload. Paused time is
+      // subtracted the same way the live branch does; a snapshot written
+      // before the field existed reads it as 0 and keeps its frozen window.
+      elapsedMs: elapsedMs(
+        { startTime: recovered.startTime, endTime: recovered.endTime, totalPausedMs: recovered.totalPausedMs },
+        Date.now(),
+      ),
       // A snapshot written before the outcome was persisted has nothing to
       // report; "No output." is what a live run with no value says.
       result: recovered.result ?? "No output.",
@@ -2537,12 +2542,12 @@ Terse command-style prompts produce shallow, generic work.
   function appendWorkflowEntry(task: WorkflowTask): void {
     try {
       pi.appendEntry<WorkflowEntryData>(WORKFLOW_ENTRY_TYPE, workflowEntryData(task));
-    } catch {
-      // A detached run can settle after its session was replaced or is
-      // shutting down, and pi refuses an entry from a stale ctx. There is
-      // nowhere left to record it, and losing the entry is better than an
-      // unhandled rejection from a promise nobody awaits. Same rule the
-      // completion nudge follows (`scheduleNudge`'s send).
+    } catch (error) {
+      // A detached run can settle after its session was replaced or is shutting
+      // down, and pi refuses an entry from a stale ctx. There is nowhere left to
+      // record it — but a silently dropped entry is indistinguishable from one
+      // that was never written, so say so.
+      console.warn("[pi-subagents] could not append the workflow entry:", error);
     }
   }
 

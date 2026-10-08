@@ -1888,4 +1888,123 @@ describe("durable workflow state", () => {
     expect(text).toContain("interrupted");
     expect(text).not.toContain("status: running");
   });
+
+  it("subtracts a recovered run's paused time, exactly as the live run does", async () => {
+    // The snapshot froze startTime/endTime but not the pause, so a run that sat
+    // paused overnight came back reading as a ten-hour run.
+    const booted = makePi();
+    subagentsExtension(booted.pi);
+    await booted.lifecycle.get("session_start")?.({}, transcriptCtx([
+      {
+        type: "custom",
+        customType: WORKFLOW_ENTRY_TYPE,
+        data: {
+          id: "wf_paused1", name: "paused-run", status: "completed",
+          startTime: 1_000, endTime: 601_000, totalPausedMs: 600_000,
+          agentCount: 0, totalTokens: 0, result: "done", progress: [],
+        },
+      },
+    ]));
+
+    const result = await booted.tools
+      .get("get_subagent_result")
+      .execute("tc-read", { agent_id: "wf_paused1" }, undefined, undefined, workflowCtx());
+
+    // 600 s of wall clock, all of it paused.
+    expect(textOf(result)).toContain("| elapsed: 0ms");
+  });
+
+  it("keeps a legacy snapshot's frozen duration when it has no paused field", async () => {
+    const booted = makePi();
+    subagentsExtension(booted.pi);
+    await booted.lifecycle.get("session_start")?.({}, transcriptCtx([
+      {
+        type: "custom",
+        customType: WORKFLOW_ENTRY_TYPE,
+        data: {
+          id: "wf_legacy2", name: "legacy-run", status: "completed",
+          startTime: 1_000, endTime: 601_000,
+          agentCount: 0, totalTokens: 0, result: "done", progress: [],
+        },
+      },
+    ]));
+
+    const result = await booted.tools
+      .get("get_subagent_result")
+      .execute("tc-read", { agent_id: "wf_legacy2" }, undefined, undefined, workflowCtx());
+
+    expect(textOf(result)).toContain("| elapsed: 10m00s");
+  });
+
+  it("skips a legacy entry that has no run id", async () => {
+    // An entry written before ids were persisted cannot be resolved to a run;
+    // skipping it is the only honest thing to do with it.
+    const booted = makePi();
+    subagentsExtension(booted.pi);
+    await booted.lifecycle.get("session_start")?.({}, transcriptCtx([
+      {
+        type: "custom",
+        customType: WORKFLOW_ENTRY_TYPE,
+        data: {
+          name: "id-less", status: "completed", startTime: 1_000, endTime: 2_000,
+          agentCount: 0, totalTokens: 0, result: "gone", progress: [],
+        },
+      },
+    ]));
+
+    const result = await booted.tools
+      .get("get_subagent_result")
+      .execute("tc-read", { agent_id: "wf_noid123456" }, undefined, undefined, workflowCtx());
+
+    expect(textOf(result)).toContain("No workflow run");
+  });
+
+  it("prefers a recovered terminal entry over an interrupted start of the same id", async () => {
+    // Both traces exist for the same run: it started, and it settled. The
+    // settled snapshot is the answer; the interrupted guess is only for a run
+    // with nothing else on record.
+    const booted = makePi();
+    subagentsExtension(booted.pi);
+    await booted.lifecycle.get("session_start")?.({}, transcriptCtx([
+      {
+        type: "message",
+        message: {
+          role: "toolResult", toolCallId: "tc-both", toolName: SUBAGENT_TOOL_NAMES.WORKFLOW,
+          content: [], isError: false, timestamp: 0, details: { taskId: "wf_both123456" },
+        },
+      },
+      {
+        type: "custom",
+        customType: WORKFLOW_ENTRY_TYPE,
+        data: {
+          id: "wf_both123456", name: "both", status: "completed",
+          startTime: 1_000, endTime: 2_000, agentCount: 0, totalTokens: 0,
+          result: "settled", progress: [],
+        },
+      },
+    ]));
+
+    const result = await booted.tools
+      .get("get_subagent_result")
+      .execute("tc-read", { agent_id: "wf_both123456" }, undefined, undefined, workflowCtx());
+
+    expect((result as any).structuredContent.status).toBe("completed");
+    expect(textOf(result)).toContain("settled");
+  });
+
+  it("warns instead of silently dropping an entry it cannot write", async () => {
+    const booted = makePi();
+    subagentsExtension(booted.pi);
+    await booted.lifecycle.get("session_start")?.({}, workflowCtx());
+    booted.pi.appendEntry.mockImplementation(() => { throw new Error("stale ctx"); });
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+
+    await booted.tools.get("SubagentWorkflow").execute(
+      "tc-warn", { script: `${inlineScript}return "ok";\n` }, undefined, undefined, workflowCtx(),
+    );
+
+    await vi.waitFor(() => expect(warn).toHaveBeenCalled());
+    expect(warn.mock.calls.flat().some(v => typeof v === "string" && v.includes("workflow entry"))).toBe(true);
+    warn.mockRestore();
+  });
 });
