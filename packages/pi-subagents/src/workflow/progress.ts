@@ -192,6 +192,10 @@ export function displayState(entry: WorkflowAgentEntry, workflowActive: boolean)
   if (entry.state === "error") {
     // Ahead of skipped/blocked: a watchdog stop is the one failure the run did
     // not choose, and the row has to say so even if a flag ever disagreed.
+    // Deliberately its own display state rather than folded into `"failed"`: a
+    // timeout is not the failure the user chose, so it is not hidden behind the
+    // dialog's failed filter, and `stats()`/`summarize()` already bucket
+    // `state: "error"` as failed, so the counts stay right (spec `T2.3`).
     if (entry.timedOut) return "timed-out";
     if (entry.skipped) return "skipped";
     if (entry.blocked) return "blocked";

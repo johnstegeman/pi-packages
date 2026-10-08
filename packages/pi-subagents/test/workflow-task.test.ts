@@ -176,6 +176,26 @@ describe("surfacing a stalled child", () => {
     expect(updateWorkflowProgressBatch(task, [{ ...row, durationMs: 12 }])).toEqual([]);
   });
 
+  it("reports a stall once per attempt, so a retry that stalls again is heard", () => {
+    // Keyed by index alone, a retry that stalls a second time was silent: the
+    // run's one warning had already been spent on the attempt the user threw
+    // away.
+    const task = createWorkflowTask({ id: "wf_toast", script: "return 1" });
+    const row = (attempt: number) => ({
+      type: "workflow_agent" as const,
+      index: 0,
+      label: "verifier",
+      state: "error" as const,
+      timedOut: true,
+      attempt,
+    });
+
+    expect(updateWorkflowProgressBatch(task, [row(0)])).toEqual(["verifier"]);
+    expect(updateWorkflowProgressBatch(task, [row(0)])).toEqual([]);
+    expect(updateWorkflowProgressBatch(task, [row(1)])).toEqual(["verifier"]);
+    expect(updateWorkflowProgressBatch(task, [row(1)])).toEqual([]);
+  });
+
   it("says nothing about a skip or an ordinary failure", () => {
     const task = createWorkflowTask({ id: "wf_x", script: "x" });
     expect(

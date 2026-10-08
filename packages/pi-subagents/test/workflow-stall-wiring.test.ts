@@ -18,20 +18,28 @@ vi.mock("../src/workflow/runtime.js", async (importOriginal) => {
   const actual = await importOriginal<typeof import("../src/workflow/runtime.js")>();
   return {
     ...actual,
-    runWorkflow: vi.fn(async () => ({
-      status: "completed" as const,
-      meta: { name: "wired", description: "wired" },
-      value: "done",
-      progress: [],
-      agentCount: 0,
-      replayedCount: 0,
-    })),
+    runWorkflow: vi.fn(async (options: RunWorkflowOptions) => {
+      // The runtime's watchdog row reaches the extension only through
+      // `onProgress`, so the mock has to be the one that emits it for the
+      // toast to be under test at all.
+      options.onProgress?.([
+        { type: "workflow_agent", index: 0, label: "verifier", state: "error", timedOut: true },
+      ]);
+      return {
+        status: "completed" as const,
+        meta: { name: "wired", description: "wired" },
+        value: "done",
+        progress: [],
+        agentCount: 0,
+        replayedCount: 0,
+      };
+    }),
   };
 });
 
 import subagentsExtension from "../src/index.js";
 import { getWorkflowStallTimeoutSecs, setWorkflowStallTimeout } from "../src/settings.js";
-import { runWorkflow } from "../src/workflow/runtime.js";
+import { type RunWorkflowOptions, runWorkflow } from "../src/workflow/runtime.js";
 import { ctx, flush, type Hermetic, hermeticDir, makePi } from "./helpers/boot-extension.js";
 
 const script = 'export const meta = { name: "wired", description: "wired" };\nreturn "done";\n';
@@ -121,5 +129,17 @@ describe("workflowStallTimeoutSecs — settings to runWorkflow", () => {
     // runtime's built-in window and make the user's off switch a lie — which is
     // exactly the bug this assertion locks down.
     expect(options.runStallTimeoutMs).toBe(0);
+  });
+
+  it("toasts a stalled child once, through the real extension", async () => {
+    // The toast is the only non-blocking channel the user gets while the run is
+    // still going; without this test its wording and its level are unpinned.
+    boot();
+    const c = ctx({ cwd: hermetic!.dir, hasUI: true });
+    await booted!.tools
+      .get("SubagentWorkflow")
+      .execute("tc-toast", { script }, undefined, undefined, c);
+
+    expect(c.ui.notify).toHaveBeenCalledWith("Workflow child timed out (stalled): verifier", "warning");
   });
 });
