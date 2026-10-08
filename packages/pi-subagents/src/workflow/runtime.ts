@@ -351,7 +351,7 @@ export interface RunWorkflowOptions {
    * flight: the worker posts one `call` and then hears nothing until the
    * answer, so a running child is indistinguishable from a wedged worker by
    * silence alone — judging it here would cap every `agent()` at this window.
-   * `0` disables it. Unset takes {@link DEFAULT_STALL_TIMEOUT_MS} × 2.
+   * `0` disables it. Unset or non-finite takes {@link DEFAULT_STALL_TIMEOUT_MS} × 2.
    */
   runStallTimeoutMs?: number;
   /**

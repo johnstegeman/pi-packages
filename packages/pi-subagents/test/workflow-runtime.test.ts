@@ -1768,31 +1768,19 @@ describe("stall watchdog", () => {
     expect(result.error).toContain("Workflow stalled");
   }, 5000);
 
-  it("treats a non-finite run-level window as unset", async () => {
+  it.each([
+    ["NaN", Number.NaN],
+    ["Infinity", Number.POSITIVE_INFINITY],
+  ])("treats a %s run-level window as unset", async (_label, window) => {
     // NaN fails every run on the very first tick and Infinity never fails one;
-    // both are programmatic-only values (the setting is sanitized, the per-call
-    // option is validated) and neither is a window. A wedged worker must
+    // both are programmatic-only values (the setting is sanitized and production
+    // derives the option from it) and neither is a window. A wedged worker must
     // therefore outlive many ticks instead of being failed instantly.
     const stub = stubHost();
     const abort = new AbortController();
     const done = run("while (true) {}", {
       host: stub.host,
-      runStallTimeoutMs: Number.NaN,
-      stallCheckIntervalMs: 10,
-      signal: abort.signal,
-    });
-    const early = await Promise.race([done.then(() => "settled" as const), sleep(120).then(() => "pending" as const)]);
-    expect(early).toBe("pending");
-    abort.abort();
-    expect((await done).status).toBe("killed");
-  });
-
-  it("treats an infinite run-level window as unset too", async () => {
-    const stub = stubHost();
-    const abort = new AbortController();
-    const done = run("while (true) {}", {
-      host: stub.host,
-      runStallTimeoutMs: Number.POSITIVE_INFINITY,
+      runStallTimeoutMs: window,
       stallCheckIntervalMs: 10,
       signal: abort.signal,
     });
@@ -1809,14 +1797,13 @@ describe("stall watchdog", () => {
     const source = readFileSync(new URL("../src/workflow/runtime.ts", import.meta.url), "utf8");
     const ctor = source.indexOf("new Worker(WORKER_SOURCE");
     expect(ctor).toBeGreaterThan(-1);
-    // Searched from the constructor on: the bare pattern's first match is the
-    // `resume` re-arm, which is deliberately defined above the constructor and
-    // is meant to stay there.
-    const seed = source.indexOf("lastWorkerMessageAt = Date.now()", ctor);
-    expect(seed).toBeGreaterThan(ctor);
-    // And the run's own start must not be a timestamp taken at the top of
-    // `runWorkflow`, where the worker does not exist yet.
-    expect(source.slice(0, ctor)).not.toContain("let lastWorkerMessageAt = Date.now()");
+    // Pinned between the constructor and the run's promise: the bare pattern's
+    // first match is the `resume` re-arm, defined above the constructor and
+    // meant to stay there, so an indexOf from the top cannot fail.
+    expect(source.slice(ctor, source.indexOf("return await new Promise", ctor))).toContain("lastWorkerMessageAt = Date.now()");
+    // The clock starts at the sentinel, so a missing seed fails every run
+    // instantly instead of reading as "recently alive".
+    expect(source).toContain("let lastWorkerMessageAt = 0;");
   });
 
   it("does not fail a run that is paused", async () => {
