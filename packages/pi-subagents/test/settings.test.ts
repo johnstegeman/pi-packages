@@ -362,6 +362,24 @@ describe("settings persistence", () => {
       expect(loadSettings(projectDir).workflowStallTimeoutSecs).toBeUndefined();
     });
 
+    // The menu entry and the settings file have to agree: a value the validator
+    // accepts but sanitize() then drops is one that silently reverts on the next
+    // load, which is exactly the bug this validator closes. Drive both functions
+    // over the same boundary inputs and pin them against each other — on both
+    // sides, so a bound that moves in either function fails here.
+    it("agrees with sanitize() at the ceiling", () => {
+      for (const [secs, kept] of [
+        [STALL_TIMEOUT_SECS_CEILING, true],
+        [STALL_TIMEOUT_SECS_CEILING + 1, false],
+      ] as const) {
+        writeProject({ workflowStallTimeoutSecs: secs });
+        const validatorKeeps = parseStallTimeoutSecs(String(secs)) !== undefined;
+        const fileKeeps = loadSettings(projectDir).workflowStallTimeoutSecs !== undefined;
+        expect(validatorKeeps).toBe(kept);
+        expect(fileKeeps).toBe(kept);
+      }
+    });
+
     it("accepts `none` and `false` as the disabled fallback, nothing else", () => {
       // Only the boolean needs an alias: it would otherwise be dropped, leaving
       // the PERMISSIVE default while the author believed strict was on. Every
@@ -943,12 +961,5 @@ describe("parseStallTimeoutSecs", () => {
     for (const bad of ["86401", "-1", "1.5", "abc", "", "  "]) {
       expect(parseStallTimeoutSecs(bad)).toBeUndefined();
     }
-  });
-
-  it("agrees with sanitize() at the ceiling", () => {
-    // Both boundaries, both spellings: the last value the file keeps and the
-    // first one it drops.
-    expect(parseStallTimeoutSecs(String(STALL_TIMEOUT_SECS_CEILING))).toBe(STALL_TIMEOUT_SECS_CEILING);
-    expect(parseStallTimeoutSecs(String(STALL_TIMEOUT_SECS_CEILING + 1))).toBeUndefined();
   });
 });

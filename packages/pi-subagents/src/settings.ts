@@ -382,6 +382,9 @@ export const STALL_TIMEOUT_SECS_CEILING = 86_400;
  * entry would be applied as a second value and then dropped by `sanitize()` on
  * the next load — the silent revert this exists to prevent. Empty input is
  * rejected rather than read as `0` (`Number("")` is `0`, which means "off").
+ * The accepted grammar is `Number`'s, not decimal-digits-only: `"0x10"`, `"1e3"`
+ * and `"+5"` all parse to in-range integers and are kept, because whatever this
+ * accepts must be something `sanitize()` keeps — `Number` keeps the two in step.
  */
 export function parseStallTimeoutSecs(value: string): number | undefined {
   const trimmed = value.trim();
