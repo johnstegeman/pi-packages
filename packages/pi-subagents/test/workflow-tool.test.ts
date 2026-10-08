@@ -1567,3 +1567,110 @@ describe("collisions with another extension", () => {
     expect(warnings(context)).toEqual([]);
   });
 });
+
+
+/* ------------------------------------------------------------------------- *
+ * get_subagent_result — workflow ids
+ * ------------------------------------------------------------------------- */
+
+/**
+ * A `wf_…` id is what the SubagentWorkflow tool hands the model, but the run
+ * lives in `workflowTasks` — a map no tool exposes — and its children are
+ * filtered out of the agent lookup. So `get_subagent_result("wf_…")` used to
+ * answer `Agent not found` for the very id the tool had just returned. These
+ * tests drive the REAL tool against a REAL run started through the tool.
+ */
+describe("get_subagent_result — workflow ids", () => {
+  let hermetic: Hermetic;
+  let booted: ReturnType<typeof makePi>;
+  let tools: Map<string, any>;
+
+  beforeEach(() => {
+    hermetic = hermeticDir({ settings: { schedulingEnabled: false, workflowsEnabled: true } });
+    booted = makePi();
+    subagentsExtension(booted.pi);
+    tools = booted.tools;
+  });
+
+  afterEach(async () => {
+    // Stop any never-returning script before the temp dir disappears under it.
+    await booted.lifecycle.get("session_shutdown")?.({}, ctx({ cwd: hermetic.dir }));
+    await flush();
+    hermetic.restore();
+    vi.restoreAllMocks();
+  });
+
+  const workflowCtx = () => ctx({ cwd: hermetic.dir });
+
+  /** Start a run through the real tool and return the id it handed back. */
+  async function startRun(script: string): Promise<string> {
+    const started = await tools.get("SubagentWorkflow").execute("tc-wf", { script }, undefined, undefined, workflowCtx());
+    return (started.details as { taskId: string }).taskId;
+  }
+
+  /** Poll until the run leaves "running", then return that read. */
+  async function readSettled(runId: string) {
+    for (let attempt = 0; attempt < 200; attempt++) {
+      const result = await tools
+        .get("get_subagent_result")
+        .execute("tc-read", { agent_id: runId }, undefined, undefined, workflowCtx());
+      if ((result as any).structuredContent?.status !== "running") return result;
+      await flush();
+      await new Promise((resolve) => setTimeout(resolve, 10));
+    }
+    throw new Error(`workflow ${runId} never settled`);
+  }
+
+  it("resolves a settled wf_ id to its status and result", async () => {
+    const runId = await startRun(`${inlineScript}return "all clear";\n`);
+
+    const result = await readSettled(runId);
+    const text = textOf(result);
+    // The prefix is what separates this payload from the agent one: the model
+    // asked about a run, and the answer has to say so.
+    expect(text).toContain("status: completed");
+    expect(text).toContain("agents: 0/0");
+    expect(text).toContain("all clear");
+    expect(text).not.toContain("Agent not found");
+    expect((result as any).structuredContent).toEqual({
+      agentId: runId,
+      status: "completed",
+      result: "all clear",
+    });
+  });
+
+  it("reports a live wf_ id as running, without inventing a result", async () => {
+    const runId = await startRun(`${inlineScript}await new Promise(() => {});\n`);
+
+    const result = await tools
+      .get("get_subagent_result")
+      .execute("tc-read", { agent_id: runId }, undefined, undefined, workflowCtx());
+
+    const text = textOf(result);
+    expect(text).toContain("status: running");
+    // No result body for a run that has not produced one — the agent path
+    // makes the same distinction with its "still running" line.
+    expect(text).not.toContain("No output.");
+    expect((result as any).structuredContent).toMatchObject({ agentId: runId, status: "running" });
+    expect((result as any).structuredContent.error).toBeUndefined();
+  });
+
+  it("names the run when the wf_ id is unknown", async () => {
+    const result = await tools
+      .get("get_subagent_result")
+      .execute("tc-read", { agent_id: "wf_deadbeef1234" }, undefined, undefined, workflowCtx());
+
+    expect(textOf(result)).toContain('No workflow run "wf_deadbeef1234" in this session');
+    expect((result as any).structuredContent).toEqual({ error: "workflow not found" });
+  });
+
+  it("leaves a non-workflow id on the agent path", async () => {
+    const result = await tools
+      .get("get_subagent_result")
+      .execute("tc-read", { agent_id: "3f1320a7-74ec-422" }, undefined, undefined, workflowCtx());
+
+    // The wf_ branch must key off the prefix only: an ordinary id keeps
+    // answering exactly as it did before.
+    expect(textOf(result)).toContain("Agent not found");
+  });
+});

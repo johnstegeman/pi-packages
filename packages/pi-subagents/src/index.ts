@@ -67,7 +67,7 @@ import { WORKFLOW_ENTRY_TYPE, type WorkflowEntryData, workflowEntryData } from "
 import { createWorkflowHost } from "./workflow/host.js";
 import { appendJournal, readJournal, type WorkflowJournalEntry } from "./workflow/journal.js";
 import { extractMeta, type WorkflowMeta, workflowCallName } from "./workflow/meta.js";
-import { elapsedMs } from "./workflow/progress.js";
+import { elapsedMs, stats } from "./workflow/progress.js";
 import { assertWorkflowArgs, runWorkflow } from "./workflow/runtime.js";
 import { resolveWorkflowScript } from "./workflow/saved.js";
 import { completeWorkflowTask, createWorkflowTask, failWorkflowTask, formatWorkflowNotification, resolveResumeTarget, updateWorkflowProgressBatch, type WorkflowTask, workflowResultText, workflowRunId } from "./workflow/task.js";
@@ -2788,9 +2788,10 @@ Terse command-style prompts produce shallow, generic work.
     // LOCAL PATCH (pi-packages) — see docs/pi-subagents-local-patch.md
     exposure: "codemode",
     namespace: SUBAGENTS_NAMESPACE,
+    // LOCAL PATCH (pi-packages) — see docs/pi-subagents-local-patch.md
     description:
-      "Check status and retrieve a background agent's full result — its completion notification carries only a preview. Use the agent ID returned by Agent.",
-    promptSnippet: "Check status and retrieve results from a background agent",
+      "Check status and retrieve a background agent's full result — its completion notification carries only a preview. Use the agent ID returned by Agent, or the workflow run ID returned by SubagentWorkflow (a `wf_…` id).",
+    promptSnippet: "Check status and retrieve results from a background agent or workflow run",
     // LOCAL PATCH (pi-packages) — see docs/pi-subagents-local-patch.md
     outputSchema: Type.Object({
       error: Type.Optional(Type.String()),
@@ -2800,7 +2801,7 @@ Terse command-style prompts produce shallow, generic work.
     }),
     parameters: Type.Object({
       agent_id: Type.String({
-        description: "The agent ID to check. The agent's handle also works — its `name` if you gave it one, otherwise its type (`explore`, `explore-2`).",
+        description: "The agent ID to check, or a workflow run ID (`wf_…`) returned by SubagentWorkflow. The agent's handle also works — its `name` if you gave it one, otherwise its type (`explore`, `explore-2`).",
       }),
       wait: Type.Optional(
         Type.Boolean({
@@ -2814,6 +2815,42 @@ Terse command-style prompts produce shallow, generic work.
       ),
     }),
     execute: async (_toolCallId, params, signal, _onUpdate, _ctx) => {
+      // LOCAL PATCH (pi-packages) — see docs/pi-subagents-local-patch.md
+      // A `wf_…` id names a workflow RUN, not an agent: it lives in
+      // `workflowTasks`, which no tool exposes, and the run's children are
+      // deliberately absent from the agent lookup (they are owned by the run).
+      // Without this branch the id the SubagentWorkflow tool just handed the
+      // model answers `Agent not found` — the reported stall-watchdog symptom.
+      if (params.agent_id.startsWith("wf_")) {
+        const task = workflowTasks.get(params.agent_id);
+        if (!task) {
+          return {
+            ...textResult(`No workflow run "${params.agent_id}" in this session.`),
+            structuredContent: { error: "workflow not found" },
+          };
+        }
+        const totals = stats(task.workflowProgress, task.agentCount);
+        // Labels, not just the count `stats` already carries: the orchestrator
+        // has to be able to name which child was lost to the stall window.
+        const timedOut = task.workflowProgress.flatMap((entry) =>
+          entry.type === "workflow_agent" && entry.timedOut ? [entry.label] : [],
+        );
+        const summary =
+          `status: ${task.status} | agents: ${totals.done}/${totals.total}` +
+          ` | elapsed: ${formatDuration(elapsedMs(task, Date.now()))}` +
+          (timedOut.length > 0 ? ` | timed out: ${timedOut.join(", ")}` : "");
+        return {
+          ...textResult(
+            task.status === "running" ? summary : `${summary}\n\n${workflowResultText(task)}`,
+          ),
+          structuredContent: {
+            agentId: task.id,
+            status: task.status,
+            result: workflowResultText(task),
+          },
+        };
+      }
+
       const record = resolveAgentRef(params.agent_id);
       if (!record || !isTopLevelAgent(record)) {
         // LOCAL PATCH (pi-packages) — see docs/pi-subagents-local-patch.md

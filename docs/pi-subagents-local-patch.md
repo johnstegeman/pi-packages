@@ -200,6 +200,48 @@ that reports the same error synchronously, before a run is created. Covered by
 `test/workflow-runtime.test.ts` (the predicate, the pre-worker rejection, the nested boundary)
 and, for the tool-level pre-flight, by `test/workflow-tool.test.ts`.
 
+## Divergence 7 — the workflow stall watchdog and `wf_` result lookup (`pi-packages-mol-mr91x`)
+
+Upstream's workflow runtime has no liveness check: a child whose tool call never returns, or a
+worker that stops emitting progress, leaves the run `running` forever while the orchestrator waits
+on a result that can never arrive. The reported incident — a `sdd-final-review` run that died
+silently — is that shape.
+
+This fork adds a watchdog at two levels, plus the settings to tune it:
+
+- **Per-child:** `WorkflowAgentEntry.timedOut` and a `"timed-out"` display state
+  (`src/workflow/progress.ts`), surfaced as a distinct row and as a count in the completion
+  notification (`src/workflow/task.ts`). A timed-out child is a failure, not a skip: no answer
+  ever came, and the orchestrator has to be able to tell a degraded review from one the user
+  dismissed.
+- **Per-run:** a run that hears nothing from the worker for `runStallTimeoutMs` settles `failed`
+  with *"Workflow stalled: no progress for Ns."* and the worker is terminated. Suspended while the
+  run is `paused`, because a paused run makes no progress by design.
+- **Configuration:** `workflowStallTimeoutSecs` (settings, default 600, `0` = off) is converted to
+  the runtime's `stallTimeoutMs`, with the run window at twice the child window; a per-call
+  `agent({ stallTimeout })` overrides both.
+
+**`get_subagent_result` resolves `wf_…` ids.** Upstream's tool only knows agents, so the run id
+`SubagentWorkflow` hands the model answered `Agent not found` — the run lives in the in-process
+`workflowTasks` map, which no tool exposes, and the run's children are excluded from the agent
+lookup. The tool now branches on the `wf_` prefix *before* the agent path and returns a status
+payload (`status`, elapsed, done/total, timed-out labels, and the result once the run settles), or
+`No workflow run "…" in this session.` for an unknown id. The agent path is unchanged — a
+non-`wf_` id resolves exactly as before — and there is deliberately no `wait: true` mode for
+workflows. The tool `description`, `promptSnippet` and `agent_id` parameter doc all name the new
+id form.
+
+Files: `src/index.ts` (the `wf_` branch in `get_subagent_result`, the setting applier, the
+stall-option wiring, the timed-out surfacing) plus `src/workflow/{runtime,progress,task,
+worker-source,tool-description}.ts`, `src/settings.ts`, and `src/ui/{workflow-card,workflow-dialog}.ts`.
+The runtime and `worker-source` hunks and the new `get_subagent_result` branch carry the in-code
+marker; the purely additive fields and settings rows do not. Covered by `test/workflow-tool.test.ts`
+(the `wf_` resolution, the unknown-id error, the unchanged agent path),
+`test/workflow-runtime.test.ts` (the per-child watchdog and run-level liveness),
+`test/workflow-stall-wiring.test.ts` (setting → runtime seam),
+`test/workflow-{progress,task,dialog,render}.test.ts` (the timed-out row), and
+`test/settings.test.ts` / `test/documented-defaults.test.ts` (the new default).
+
 ## In-code marker convention
 
 Divergence 3 — the code-mode exposure/namespace/outputSchema changes from Task 6 — and
