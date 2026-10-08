@@ -42,15 +42,21 @@ test("stage 1: first fix agent is gated + labelled", () => {
   assert.match(src, /agent\(fixPrompt, \{ label: 'fix', gate: gateCommand, agentType: 'implementer', phase: 'Fix', stallTimeout: 3600 \}\)/);
 });
 
+/** Source with comments removed, so a count over it cannot be inflated by prose. */
+const stripComments = (src) =>
+  src
+    .replace(/\/\*[\s\S]*?\*\//g, "")
+    .replace(/^[ \t]*\/\/.*$/gm, "");
+
 test("stall window: every implementer call site raises the window to 3600 s", () => {
   // Fix-round implementers legitimately run long test suites, so the 600 s
   // default would kill a slow-but-alive child. The re-review is a reviewer
   // reading a diff, so it keeps the run's default window instead. Count the
   // call sites so a new branch that forgot the window cannot slip past the
   // behavior test.
-  assert.equal((src.match(/stallTimeout: 3600/g) ?? []).length, 3);
+  assert.equal((stripComments(src).match(/stallTimeout: 3600/g) ?? []).length, 3);
   assert.ok(
-    !/label: 're-review'[^\n]*stallTimeout/.test(src),
+    !/label: 're-review'[^\n]*stallTimeout/.test(stripComments(src)),
     "the re-review is a reviewer, not an implementer — it must inherit the default window",
   );
 });
