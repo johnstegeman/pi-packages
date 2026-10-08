@@ -34,7 +34,7 @@ import { getMaxSubagentDepth, setMaxSubagentDepth } from "./nested-tools.js";
 import { createOutputFilePath, ensureOutputFile, getOutputTranscriptDefault, sessionTaskDir, setOutputTranscriptDefault, streamToOutputFile, writeInitialEntry } from "./output-file.js";
 import { SubagentScheduler } from "./schedule.js";
 import { resolveStorePath, ScheduleStore } from "./schedule-store.js";
-import { applyAndEmitLoaded, getWorkflowStallTimeoutSecs, loadSettings, type SubagentsSettings, saveAndEmitChanged, setWorkflowStallTimeout, type ToolDescriptionMode } from "./settings.js";
+import { applyAndEmitLoaded, getWorkflowStallTimeoutSecs, loadSettings, parseStallTimeoutSecs, STALL_TIMEOUT_SECS_CEILING, type SubagentsSettings, saveAndEmitChanged, setWorkflowStallTimeout, type ToolDescriptionMode } from "./settings.js";
 import { getForegroundOutcomeNote, getStatusNote, partialOutputSuffix } from "./status-note.js";
 import { type AgentConfig, type AgentInvocation, type AgentMentionMode, type AgentRecord, type JoinMode, type NotificationDetails, type SubagentType, type ViewerMarkdownMode, type WidgetMode } from "./types.js";
 import { createMentionProvider, mentionRoster, type TypeInfo } from "./ui/agent-mention.js";
@@ -4025,8 +4025,18 @@ Write the file using the write tool. Only write the file, nothing else.`;
       } else if (id === "workflowStallTimeoutSecs") {
         // 0 is meaningful here — it disables the watchdog — so this is the
         // `n >= 0` shape of maxSubagentDepth, not the `n >= 1` of graceTurns.
-        const n = parseInt(value, 10);
-        if (n >= 0) {
+        // The ceiling comes from the same constant `sanitize()` uses: an entry
+        // it would drop on the next load must be refused here, not applied and
+        // silently reverted.
+        const n = parseStallTimeoutSecs(value);
+        if (n === undefined) {
+          // Deliberately not `notifyApplied`: that saves the settings snapshot
+          // and emits a changed event, and nothing changed.
+          ctx.ui.notify(
+            `Workflow stall timeout must be a whole number of seconds from 0 to ${STALL_TIMEOUT_SECS_CEILING}.`,
+            "warning",
+          );
+        } else {
           setWorkflowStallTimeout(n);
           notifyApplied(
             ctx,

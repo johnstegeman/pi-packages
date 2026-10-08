@@ -6,8 +6,10 @@ import {
   applyAndEmitLoaded,
   applySettings,
   loadSettings,
+  parseStallTimeoutSecs,
   persistToastFor,
   type SettingsAppliers,
+  STALL_TIMEOUT_SECS_CEILING,
   saveAndEmitChanged,
   saveSettings,
 } from "../src/settings.js";
@@ -351,6 +353,13 @@ describe("settings persistence", () => {
         writeProject({ workflowStallTimeoutSecs: bad });
         expect(loadSettings(projectDir).workflowStallTimeoutSecs).toBeUndefined();
       }
+    });
+
+    it("keeps the exact ceiling and drops one second past it", () => {
+      writeProject({ workflowStallTimeoutSecs: 86_400 });
+      expect(loadSettings(projectDir)).toEqual({ workflowStallTimeoutSecs: 86_400 });
+      writeProject({ workflowStallTimeoutSecs: 86_401 });
+      expect(loadSettings(projectDir).workflowStallTimeoutSecs).toBeUndefined();
     });
 
     it("accepts `none` and `false` as the disabled fallback, nothing else", () => {
@@ -920,5 +929,26 @@ describe("settings persistence", () => {
         rmSync(filePosingAsCwd, { force: true });
       }
     });
+  });
+});
+
+describe("parseStallTimeoutSecs", () => {
+  // The menu entry and the settings file have to agree: a value the menu
+  // applies and sanitize() then drops on the next load is a value that silently
+  // reverted, which is exactly the bug this validator closes.
+  it("accepts the documented range and rejects everything else", () => {
+    expect(parseStallTimeoutSecs("0")).toBe(0);
+    expect(parseStallTimeoutSecs("1")).toBe(1);
+    expect(parseStallTimeoutSecs(String(STALL_TIMEOUT_SECS_CEILING))).toBe(86_400);
+    for (const bad of ["86401", "-1", "1.5", "abc", "", "  "]) {
+      expect(parseStallTimeoutSecs(bad)).toBeUndefined();
+    }
+  });
+
+  it("agrees with sanitize() at the ceiling", () => {
+    // Both boundaries, both spellings: the last value the file keeps and the
+    // first one it drops.
+    expect(parseStallTimeoutSecs(String(STALL_TIMEOUT_SECS_CEILING))).toBe(STALL_TIMEOUT_SECS_CEILING);
+    expect(parseStallTimeoutSecs(String(STALL_TIMEOUT_SECS_CEILING + 1))).toBeUndefined();
   });
 });
