@@ -887,8 +887,13 @@ export async function runWorkflow(options: RunWorkflowOptions): Promise<Workflow
    * child is ever registered to watch. Set on every worker message, whatever
    * it is: a progress batch and a `call` are equally proof the worker is alive.
    */
-  let lastWorkerMessageAt = Date.now();
-  const runStallTimeoutMs = options.runStallTimeoutMs ?? DEFAULT_STALL_TIMEOUT_MS * 2;
+  let lastWorkerMessageAt = 0;
+  // A non-finite window is not a window: NaN would fail every run on the first
+  // tick and Infinity would never fail one, so both mean "unset". `0` and
+  // negatives keep their meaning — the run-level timer is disabled at `<= 0`.
+  const runStallTimeoutMs = Number.isFinite(options.runStallTimeoutMs)
+    ? (options.runStallTimeoutMs as number)
+    : DEFAULT_STALL_TIMEOUT_MS * 2;
   /**
    * Set once `finish` exists, for the same reason as {@link warnForceSettle}:
    * the timer is armed inside the run's promise, and the check has to reach
@@ -1021,6 +1026,9 @@ export async function runWorkflow(options: RunWorkflowOptions): Promise<Workflow
       nestedCap: options.nestedCap ?? WORKFLOW_NESTED_CAP,
     },
   });
+  // Seeded here, not at the top of the run: a clock started before the worker
+  // existed counts the host-side cost of constructing it as silence.
+  lastWorkerMessageAt = Date.now();
 
   return await new Promise<WorkflowRunResult>(resolve => {
     const emit = (entries: WorkflowEntry[]) => {

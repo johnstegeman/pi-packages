@@ -1,3 +1,4 @@
+import { readFileSync } from "node:fs";
 import { describe, expect, it, vi } from "vitest";
 import type { WorkflowJournalEntry } from "../src/workflow/journal.js";
 import { buildPhaseGroups, type WorkflowAgentEntry, type WorkflowEntry } from "../src/workflow/progress.js";
@@ -1766,6 +1767,57 @@ describe("stall watchdog", () => {
     expect(result.status).toBe("failed");
     expect(result.error).toContain("Workflow stalled");
   }, 5000);
+
+  it("treats a non-finite run-level window as unset", async () => {
+    // NaN fails every run on the very first tick and Infinity never fails one;
+    // both are programmatic-only values (the setting is sanitized, the per-call
+    // option is validated) and neither is a window. A wedged worker must
+    // therefore outlive many ticks instead of being failed instantly.
+    const stub = stubHost();
+    const abort = new AbortController();
+    const done = run("while (true) {}", {
+      host: stub.host,
+      runStallTimeoutMs: Number.NaN,
+      stallCheckIntervalMs: 10,
+      signal: abort.signal,
+    });
+    const early = await Promise.race([done.then(() => "settled" as const), sleep(120).then(() => "pending" as const)]);
+    expect(early).toBe("pending");
+    abort.abort();
+    expect((await done).status).toBe("killed");
+  });
+
+  it("treats an infinite run-level window as unset too", async () => {
+    const stub = stubHost();
+    const abort = new AbortController();
+    const done = run("while (true) {}", {
+      host: stub.host,
+      runStallTimeoutMs: Number.POSITIVE_INFINITY,
+      stallCheckIntervalMs: 10,
+      signal: abort.signal,
+    });
+    const early = await Promise.race([done.then(() => "settled" as const), sleep(120).then(() => "pending" as const)]);
+    expect(early).toBe("pending");
+    abort.abort();
+    expect((await done).status).toBe("killed");
+  });
+
+  it("starts the run-level silence clock after the worker exists", async () => {
+    // Not observable in black-box timing — the difference is the host-side cost
+    // of `new Worker`, sub-millisecond here — so pin the order at the source:
+    // a seed before the constructor counts time the worker could not have spent.
+    const source = readFileSync(new URL("../src/workflow/runtime.ts", import.meta.url), "utf8");
+    const ctor = source.indexOf("new Worker(WORKER_SOURCE");
+    expect(ctor).toBeGreaterThan(-1);
+    // Searched from the constructor on: the bare pattern's first match is the
+    // `resume` re-arm, which is deliberately defined above the constructor and
+    // is meant to stay there.
+    const seed = source.indexOf("lastWorkerMessageAt = Date.now()", ctor);
+    expect(seed).toBeGreaterThan(ctor);
+    // And the run's own start must not be a timestamp taken at the top of
+    // `runWorkflow`, where the worker does not exist yet.
+    expect(source.slice(0, ctor)).not.toContain("let lastWorkerMessageAt = Date.now()");
+  });
 
   it("does not fail a run that is paused", async () => {
     // A paused run is silent by design. Paused before the first agent, the run
