@@ -199,6 +199,21 @@ describe("snapshotting a settled run", () => {
     expect(workflowEntryData(task)).toMatchObject({ id: "wf_abc123", result: "all clear" });
   });
 
+  it("persists paused time, and omits the field entirely when there is none", () => {
+    // Both directions are load-bearing. With the pause in the snapshot a
+    // recovered run reports the duration the live one did; without the field —
+    // the default, and every snapshot written before it existed — the key must
+    // be absent rather than `0`, or every legacy snapshot's bytes change.
+    const paused = createWorkflowTask({ id: "wf_paused", script: "x" });
+    paused.status = "completed";
+    paused.totalPausedMs = 600_000;
+    expect(workflowEntryData(paused)).toMatchObject({ totalPausedMs: 600_000 });
+
+    const fresh = createWorkflowTask({ id: "wf_fresh", script: "x" });
+    fresh.status = "completed";
+    expect(workflowEntryData(fresh)).not.toHaveProperty("totalPausedMs");
+  });
+
   it("caps the persisted outcome so a large run result cannot bloat the transcript", () => {
     // The snapshot lands in the session file, so an unbounded `JSON.stringify`
     // of a large run value would grow it without limit. Same 4000-char budget

@@ -1992,19 +1992,39 @@ describe("durable workflow state", () => {
     expect(textOf(result)).toContain("settled");
   });
 
-  it("warns instead of silently dropping an entry it cannot write", async () => {
+  it("warns instead of silently dropping an entry it cannot write, and still settles", async () => {
     const booted = makePi();
     subagentsExtension(booted.pi);
     await booted.lifecycle.get("session_start")?.({}, workflowCtx());
     booted.pi.appendEntry.mockImplementation(() => { throw new Error("stale ctx"); });
     const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
 
-    await booted.tools.get("SubagentWorkflow").execute(
-      "tc-warn", { script: `${inlineScript}return "ok";\n` }, undefined, undefined, workflowCtx(),
-    );
+    try {
+      const started = await booted.tools.get("SubagentWorkflow").execute(
+        "tc-warn", { script: `${inlineScript}return "ok";\n` }, undefined, undefined, workflowCtx(),
+      );
+      const runId = (started.details as { taskId: string }).taskId;
 
-    await vi.waitFor(() => expect(warn).toHaveBeenCalled());
-    expect(warn.mock.calls.flat().some(v => typeof v === "string" && v.includes("workflow entry"))).toBe(true);
-    warn.mockRestore();
+      // The dropped entry names itself with our prefix and forwards the
+      // throwing error, so the log is actionable rather than anonymous.
+      await vi.waitFor(() =>
+        expect(warn).toHaveBeenCalledWith(
+          expect.stringContaining("[pi-subagents] could not append the workflow entry:"),
+          expect.any(Error),
+        ),
+      );
+
+      // The append failed, but the run itself is done: a lost record is not
+      // a lost run.
+      const settled = await booted.tools
+        .get("get_subagent_result")
+        .execute("tc-read", { agent_id: runId }, undefined, undefined, workflowCtx());
+      expect((settled as any).structuredContent.status).toBe("completed");
+      expect(textOf(settled)).toContain("status: completed");
+    } finally {
+      // Restore in a finally so the spy cannot outlive the test however the
+      // body ends; the describe's afterEach restoreAllMocks is the backstop.
+      warn.mockRestore();
+    }
   });
 });
