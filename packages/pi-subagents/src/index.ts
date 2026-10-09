@@ -85,7 +85,8 @@ import { isWorktreeIsolationEnabled, setWorktreeIsolationEnabled } from "./workt
 import { escapeXml } from "./xml.js";
 
 // Code-mode grouping for the tools this package moves off `direct` exposure
-// (SubagentWorkflow, get_subagent_result, steer_subagent — `Agent` stays direct).
+// (SubagentWorkflow, get_subagent_result, steer_subagent) and for `Agent`, which stays
+// `direct` but joins the group so a mode-`only` budget omission is marked rather than silent.
 // LOCAL PATCH (pi-packages) — see docs/pi-subagents-local-patch.md
 const SUBAGENTS_NAMESPACE = {
   name: "subagents",
@@ -1604,6 +1605,10 @@ Terse command-style prompts produce shallow, generic work.
   const agentTool = defineTool({
     name: SUBAGENT_TOOL_NAMES.AGENT,
     label: "Agent",
+    // LOCAL PATCH (pi-packages) — see docs/pi-subagents-local-patch.md
+    // `direct` exposure is unchanged; the namespace exists so that a mode-`only` budget
+    // omission is marked ` (some tools not listed)` instead of silent.
+    namespace: SUBAGENTS_NAMESPACE,
     description: agentToolDescription,
     promptSnippet: "Launch autonomous sub-agents for complex multi-step tasks",
     promptGuidelines: [

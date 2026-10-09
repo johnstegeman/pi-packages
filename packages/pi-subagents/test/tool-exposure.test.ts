@@ -50,16 +50,19 @@ describe("code-mode exposure", () => {
 
   it("groups the moved tools under the subagents namespace", () => {
     const tools = registered();
-    for (const name of ["SubagentWorkflow", "get_subagent_result", "steer_subagent"]) {
+    for (const name of ["SubagentWorkflow", "get_subagent_result", "steer_subagent", "Agent"]) {
       expect(tools.get(name)?.namespace).toEqual(NAMESPACE);
     }
   });
 
-  it("leaves Agent direct", () => {
+  // `Agent` stays `direct` — decision 6 of the stage-A plan kept it that way — but it joins the
+  // namespace so that a mode-`only` budget omission is marked (`## subagents (some tools not
+  // listed)`) instead of silent. Residual risk (a) of the stage-B evaluation.
+  it("keeps Agent direct but namespaced", () => {
     const agent = registered().get("Agent");
     expect(agent).toBeDefined();
     expect(agent?.exposure).toBeUndefined();
-    expect(agent?.namespace).toBeUndefined();
+    expect(agent?.namespace).toEqual(NAMESPACE);
   });
 
   it("declares outputSchema on get_subagent_result", () => {

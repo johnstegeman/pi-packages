@@ -264,6 +264,29 @@ Covered by `test/workflow-tool.test.ts`
 `test/workflow-stall-wiring.test.ts` (setting → runtime seam),
 `test/workflow-{progress,task,dialog,render}.test.ts` (the timed-out row; the `workflowEntryData`
 `id`/`result` snapshot), and
+## Divergence 8 — the `Agent` namespace (`pi-packages-graey`)
+
+The `Agent` tool definition now carries `namespace: SUBAGENTS_NAMESPACE` — the same
+`{ name: "subagents", description: "Subagent dispatch and workflow orchestration" }` the three
+codemode tools already use — while its `exposure` stays unset. `Agent` remains `direct`; only its
+grouping changes.
+
+The reason is an omission that used to be silent. Under `codemode.mode: "only"` at the default
+`inlineBudget: 3000`, `Agent` is refused from the codemode tool listing. A namespace-less tool
+belongs to the group with no heading, and incompleteness is reported per namespace — so nothing in
+the listing said anything was missing. With the namespace, the `subagents` heading carries
+` (some tools not listed)` and the refusal is visible. That is residual risk (a) of the stage-B
+evaluation, whose verdict is `go-with-mitigations` for exactly this reason.
+
+The change is invisible under mode `on`: `prepareCodemodeLoadout` builds its namespace map from the
+*listed* set, which under `on` excludes every `direct` tool, so `Agent` never enters that map
+either way. The two added discovery surfaces are the namespace-aware ones —
+`describeNamespace("subagents")` and `searchTools({ namespace: "subagents" })` now return `Agent`
+alongside the codemode tools.
+
+`test/tool-exposure.test.ts` pins it: `Agent` is in the namespace loop and its `exposure` stays
+`undefined`.
+
 `test/settings.test.ts` / `test/documented-defaults.test.ts` (the new default).
 
 ## In-code marker convention
