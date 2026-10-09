@@ -5,12 +5,11 @@ finding, or a ⚠️ item you confirmed as a real gap.
 
 Before the loop starts, two routes leave it immediately:
 
-- Record Minor findings in the progress ledger as you go
-  (`Task <N>: minor (deferred): <one-liner>`), then **triage that list yourself
-  in the controller** — you hold the ledger and the rulings. The list is not an
-  assignment for the final review's finders (see `reference/final-review.md`,
-  rule 1). A roll-up nobody reads is a silent discard; you are the reader.
-  Minor findings never enter the loop.
+- **Every finding that is not Critical or Important is dispositioned when it is recorded** —
+  fix now, drop, or defer, per [disposition.md](disposition.md). A fix-now finding rides this
+  task's fix round when one is already running, and otherwise goes on the `wrap-up` list; only
+  genuine defers stay there unresolved. "Parked" is not a resting state, and a roll-up nobody
+  resolves is a silent discard.
 - A finding labeled plan-mandated — or any finding that conflicts with
   what the task text requires — is the human's decision, like any plan
   contradiction: present the finding and the task text, ask which governs.
@@ -66,8 +65,8 @@ where FIX_BASE is the head the previous review saw, and dispatch
 task bead id, the report file, and the printed diff path. The re-reviewer verdicts
 each finding ADDRESSED or NOT ADDRESSED and flags new breakage in the fix
 diff only. New Critical/Important breakage in the fix diff joins the open
-findings list. Out-of-scope observations go to the ledger as deferred
-minors — they never extend the loop.
+findings list. Out-of-scope observations are dispositioned per [disposition.md](disposition.md) — they never
+extend the loop.
 
 **After each round,** append to the ledger:
 `Task <N>: fix round <R>/5 (<X> addressed, <Y> open — <finding one-liners>; commits <a7>..<b7>)`
@@ -84,8 +83,10 @@ the cross-task context the reviewer lacks:
 - **The reviewer is wrong, or the point is contestable:** park it —
   `Task <N>: parked — <finding> — ruling: <why the code stands>`. The final
   review sees both sides.
-- **Real, but nothing downstream builds on it:** park it the same way, with
-  a ruling that says it's real and deferred.
+- **Real, but nothing downstream builds on it:** park it the same way, with a ruling that says it
+  is real. The ruling is recorded in the ledger, and the item is dispositioned at `wrap-up` —
+  fixed there, dropped, or put to the human as a defer. Parking is not filing: do not create a
+  bead for it here.
 - **Real and load-bearing** — a later task builds on it, or it reveals a
   plan defect: STOP. Append `Task <N>: BLOCKED — <reason>` and report to
   your human partner with the finding, the task text it collides with, and
