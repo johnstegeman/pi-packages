@@ -776,7 +776,8 @@ export default function piBeadsLean(pi: any) {
   });
 
   // Undeclared-argument guard, applied through `registerTool` below. See the comment
-  // on WRITE_TOOLS for why it exists and what it cannot cover.
+  // on WRITE_TOOLS for why it exists and what it cannot cover, and
+  // `docs/pi-extension-args-contract.md` for the contract it enforces.
   function guardUnknownKeys(def: any): any {
     const declared = Object.keys(def?.parameters?.properties ?? {});
     if (declared.length === 0) return def;
