@@ -992,10 +992,10 @@ real mode-`only` session on pi 1.1.0, and it does not do what this paragraph pre
 so with `Agent` in a three-entry `subagents` queue it is *admitted* into the listing — at the price
 of `edit`, a core tool, which is then evicted, and of `beads` falling from 9 listed tools to 4.
 That trade trips this spec's own disqualifier (a core tool demoted to `searchTools()` discovery is
-a reliability regression no token saving justifies), so the mitigation was reverted and
-`pi-packages-graey` is closed won't-fix: the real fix is budget-aware truncation in pi, which is
-upstream and out of scope here. Risk (a) therefore stands unmitigated, exactly as the sentence
-below anticipates.
+a reliability regression no token saving justifies), so the mitigation was reverted (`92d468a`)
+and `pi-packages-graey` is closed won't-fix: the real fix is budget-aware truncation in pi, which is
+upstream and out of scope here. Risk (a) therefore stands unmitigated, exactly as the closing
+sentence in `### Follow-ups` anticipates.
 
 **Residual risk (b) — the instruction-text leak.** The system prompt's `rules` section is
 **byte-identical between the two sessions** (1,608 chars, sha256
@@ -1012,8 +1012,8 @@ survives in `get_subagent_result`'s listed description, but that says nothing ab
 dispatch) — `Agent` also stays reachable by literal name and through
 `searchTools()`/`ALL_TOOLS`, but those are active discovery routes that assume the model already
 knows the name (risk (a)) — and it is not ours to rely on: pi could stop leaking it in any
-release. Risk (a)'s mitigation was attempted and rejected on measurement (see Step 5), so it
-stands unmitigated rather than becoming silent.
+release. Risk (a)'s mitigation was attempted and rejected on measurement (see risk (a), above),
+so it stands unmitigated rather than becoming silent.
 Tracking: **`pi-packages-peefw`**.
 
 **Why not `go`.** All four gates pass, the core tools (`read`/`edit`/`bash`/`write`) all survive
@@ -1050,7 +1050,7 @@ without changing the mode.
 
 | Bead | Kind | What |
 |---|---|---|
-| `pi-packages-graey` | mitigation (risk (a)) | Make `Agent`'s budget omission non-silent under `codemode.mode: "only"` — namespace it so its group carries ` (some tools not listed)`, or take it upstream; verify from a real mode-`only` session at `inlineBudget: 3000` |
+| `pi-packages-graey` | mitigation (risk (a)) | Attempted and rejected on measurement (2026-10-09): namespacing `Agent` never renders the ` (some tools not listed)` marker — it admits `Agent` into the listing at the price of `edit`, a core tool — so the change was reverted (`92d468a`) and this bead is closed won't-fix. The real fix is budget-aware truncation in pi (upstream, out of scope here). Revisit with a real mode-`only` session at `inlineBudget: 3000` if that ever changes. |
 | `pi-packages-peefw` | tracking (risk (b)) | Track the instruction-text leak upstream: the system-prompt `rules` block is byte-identical under `only`, so hidden tools are still taught; re-check on the next pi bump |
 | `pi-packages-1v349` | pre-adoption re-run (gates 1–2) | Re-run the two mode-`only` gate cases (1 and 2) on a pi 1.0.3 runtime before adopting stage B: they were exercised through `@earendil-works/pi-coding-agent@0.99.1`, so the result must be recorded in the Gate 1/2 findings, replacing the equivalence argument with a direct 1.0.3 observation |
 
