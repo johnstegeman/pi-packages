@@ -297,9 +297,13 @@ Consequences for what shipped:
   load-bearing - it is the only thing that makes an undeclared key loud - but its blast radius
   includes the direct path on any provider/model that does not honour strict tool sampling,
   and on those the change turns a silent-partial-success write into an error tool result.
-- **`additionalProperties: false` is not what makes pi reject.** It is what pi *asks the
-  provider for*, and that request defaults off, so whether a direct call carries an undeclared
-  key depends on the provider and model.
+- **`additionalProperties: false` is not what makes pi reject an undeclared key.** pi never
+  deletes one. What the keyword does depends on whether the tool *declares* it: a declaring tool
+  is rejected locally by pi's own validator on any provider (pi compiles that schema via
+  `getValidator(tool.parameters)`) wherever the key reaches that check, while a tool that does not
+  declare it (TypeBox's default) passes the key through and the keyword only reaches the upstream
+  request on strict-capable providers — where that request defaults off. See
+  `docs/pi-extension-args-contract.md` for the corrected two-case text.
 - **The four prose copies of the false premise were corrected** in the follow-up fix commit:
   the `WRITE_TOOLS` comment in `packages/pi-beads/src/index.ts`, the field-table prose in
   `packages/pi-beads/README.md`, the bullet in

@@ -55,8 +55,9 @@ symmetric.
 provider-independent: *where the key reaches it*, a stray key fails `Check` and pi throws
 `Validation failed for tool "<name>"`. Whether the key reaches it is a separate question — a
 provider that honours strict sampling can drop it upstream, and then the author sees a silent
-drop rather than the error. This repo's probe records exactly that outcome with the keyword
-declared (`packages/pi-beads/src/index.ts:138-140`). So the keyword is a real rejection at the
+drop rather than the error. This repo's probe records exactly that — a silent drop rather
+than a validator error — with the keyword declared
+(`packages/pi-beads/src/index.ts:138-140`). So the keyword is a real rejection at the
 local layer — it turns a stray key into a hard tool error instead of letting your `execute`
 decide what to do with it — but only where the key survives the provider.
 
