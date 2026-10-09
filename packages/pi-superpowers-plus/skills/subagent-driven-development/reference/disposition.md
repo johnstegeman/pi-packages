@@ -5,9 +5,10 @@
 > `await tools.beads_update({ ... })` — and find the deferred ones with
 > `await searchTools("beads")`. The call shapes below are that script's arguments.
 
-Every finding this cycle produces that is **not** Critical or Important gets exactly one
-disposition, decided **when it is recorded** — never left as "parked". Parked is not a resting
-state; a roll-up nobody resolves is a silent discard.
+Every finding the cycle would otherwise park gets exactly one disposition, decided **when it is
+recorded** — never left as "parked". That covers everything the fix loop does not fix, including
+residuals parked at its cap. Parked is not a resting state; a roll-up nobody resolves is a silent
+discard.
 
 ## The three outcomes
 
@@ -43,8 +44,7 @@ prevent.
 All five of these are findings for the purposes of this policy — none is exempt:
 
 1. a task reviewer's `#### Minor (Nice to Have)` items;
-2. a residual parked at the fix-loop cap — the breaker's "real, but nothing downstream builds on
-   it";
+2. a residual parked at the fix-loop cap — either breaker bullet that parks rather than fixes;
 3. an implementer's `DONE_WITH_CONCERNS` observations;
 4. the reviewer's `Recommendations` section;
 5. a plan-level observation, such as "the plan mandates a test that asserts nothing".

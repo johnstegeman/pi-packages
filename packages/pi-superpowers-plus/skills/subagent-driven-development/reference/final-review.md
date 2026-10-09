@@ -15,7 +15,7 @@
         },
       })
 
-  Deferred minors are never a reason to take this path — the controller triages them (rule 1 below).
+  The parked-findings list is never a reason to take this path — the controller dispositions it (rule 1 below).
 
   It runs in the background — wait for the completion notification. Pass `findingsFile` (a FRESH absolute path to a JSONL under the git-ignored sdd workspace — the children append to it, so a stale file for the same range from an earlier run would otherwise merge into the new run) so the workflow persists its findings instead of returning them inline: the run's return value is then the compact envelope `{ findingsFile, count, degraded, dimStatus, refuted, persisted }` (`persisted` tells whether the writer child reported writing the file — the audit below is the real check), and the full per-finding payload is read from the JSONL file — find lines carry `kind: "find"` with the dimension on the line itself (`dimension: <DIM>`) and the schema-validated findings array (each finding item carries `file`, optional `line`, `severity`, `description` — the dimension does not ride per item); verify lines carry `kind: "verify"` with the copied fields `file`, `line`, `severity`, `description` plus the adversarial `verdict { isReal, reason }`. Join verify lines to findings by `file:line` — the script's key is the location; a finding
 with no `line` keeps `file` plus its normalized description. Finders are instructed to set `line` whenever the defect sits on a single line — the key is the location, so a missing line defeats the merge — while a genuinely file-level defect still carries none. A verify line may carry
@@ -27,7 +27,7 @@ Findings with `isReal: false` are refuted — not open — unless the refutation
 
 ## Two caller-side rules (measured: getting them wrong cost 33 agents)
 
-**1. Never put the deferred-minors list in `description`.** `description` is embedded
+**1. Never put the parked-findings list in `description`.** `description` is embedded
 verbatim in *every* finder prompt as "What was implemented" — it is context, not an
 assignment. On the 2026-10-01 `ci-gate-hardening` run six deferred minors were passed there
 "for triage"; all five finders read it as their job and worked all six, re-reporting them 21
