@@ -14,7 +14,8 @@
 // drives both single-repo and umbrella topology.
 import assert from "node:assert/strict";
 import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, realpathSync, existsSync, rmSync } from "node:fs";
-import { join, delimiter } from "node:path";
+import { dirname, join, delimiter } from "node:path";
+import { fileURLToPath } from "node:url";
 import { tmpdir } from "node:os";
 import { CONC_GUARD_SH, LOCK_GUARD_SH, concEnv } from "./helpers/fake-bd.mjs";
 
@@ -37,6 +38,11 @@ const outsideDir = join(root, "outside");  // session cwd, NOT under envRootDir
 for (const d of [binDir, repoDir, workspace, projDir, umbrella, backendDir, envRootDir, outsideDir])
   mkdirSync(d, { recursive: true });
 const logFile = join(root, "bd.log");
+
+// the package root, for structural guards that read the source as text (the
+// `tool-surface.test.mjs` precedent).
+const here = dirname(fileURLToPath(import.meta.url));
+const pkgRoot = join(here, "..");
 
 function shellQuote(s) {
   return `'${String(s).replaceAll("'", "'\\''")}'`;
@@ -1129,6 +1135,55 @@ test("single-repo: a schema-declaring write tool rejects with structuredContent"
     const text = r?.content?.[0]?.text ?? "";
     assert.match(text, new RegExp(`${name}: unknown argument\\(s\\)`), text);
     assert.equal(r?.structuredContent?.error, text, `${name} must carry { error }`);
+  }
+  assert.equal(invocations().length, 0, "no rejected call may reach bd");
+});
+
+// Structural guard: the undeclared-argument guard's membership is one auditable set, and every
+// member must actually be guarded (pi-packages-7vzw). The source is read as text, the way
+// tool-surface.test.mjs reads it.
+//
+// Residual gap, deliberately not papered over: a NEW mutating tool that is registered but never
+// added to WRITE_TOOLS is still invisible here, because nothing in the source can be asked
+// "do you mutate?" statically. This test pins the inventory and its coverage; the inventory is
+// the human-reviewed list that has to be extended by hand when a write tool is added.
+const WRITE_TOOLS_SRC = readFileSync(join(pkgRoot, "src", "index.ts"), "utf8");
+const writeKeys = [
+  ...(WRITE_TOOLS_SRC.match(/const WRITE_TOOLS = new Set<string>\(\[([\s\S]*?)\]\);/)?.[1] ?? "")
+    .matchAll(/TOOL\.(\w+)/g),
+].map((m) => m[1]);
+const toolNames = new Map(
+  [...WRITE_TOOLS_SRC.matchAll(/^\s*(\w+):\s*"(beads_[a-z_]+)"/gm)].map((m) => [m[1], m[2]]),
+);
+const MUTATING = [
+  "beads_create",
+  "beads_create_list",
+  "beads_update",
+  "beads_close",
+  "beads_dep",
+  "beads_undep",
+  "beads_comment",
+  "beads_reopen",
+  "beads_promote",
+  "beads_gate_create",
+  "beads_gate_resolve",
+  "beads_mol_pour",
+  "beads_ready",
+  "beads_memories",
+];
+
+test("single-repo: the guard's membership is exactly the mutating inventory", () => {
+  const fromSource = writeKeys.map((k) => toolNames.get(k)).sort();
+  assert.deepEqual(fromSource, [...MUTATING].sort());
+});
+
+test("single-repo: every guarded tool rejects an undeclared argument", async () => {
+  const s = await openSession("single", repoDir);
+  resetLog();
+  for (const name of MUTATING) {
+    const r = await s.byName.get(name).execute("c", { zzzUndeclared: 1 });
+    const text = r?.content?.[0]?.text ?? "";
+    assert.match(text, new RegExp(`${name}: unknown argument\\(s\\): zzzUndeclared`), text);
   }
   assert.equal(invocations().length, 0, "no rejected call may reach bd");
 });
