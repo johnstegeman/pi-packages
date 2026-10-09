@@ -286,7 +286,7 @@ Template: [task-reviewer-prompt.md](task-reviewer-prompt.md)
 
 ### 4. The fix loop
 
-The loop triggers when the review reports spec ❌, any Critical or Important finding, or a ⚠️ item you confirmed as a real gap. Five rounds maximum per task; when round 5's re-review still leaves findings open, the breaker decides — park with a ruling or report BLOCKED, never a silent discard. A parked item is dispositioned at `wrap-up`, never left as a resting state.
+The loop triggers when the review reports spec ❌, any Critical or Important finding, or a ⚠️ item you confirmed as a real gap. Five rounds maximum per task; when round 5's re-review still leaves findings open, the breaker decides — park with a ruling or report BLOCKED, never a silent discard. A parked item's ruling *is* the record-time decision; the item goes on the ledger's `wrap-up` list, where the outcome is applied — never left as a resting state.
 
 > **Read now:** [reference/fix-loop.md](reference/fix-loop.md) — fix rounds, gated path, prose path, re-review scoping, ledger formats, and breaker rules. Do not start the fix loop without it.
 
@@ -298,7 +298,8 @@ message as your other bookkeeping:
 
 - `Task <N>: complete (commits <base7>..<head7>, review clean)`
 - `Task <N>: complete (commits <base7>..<head7>, <K> parked)` after a
-  tripped breaker — those parked items are dispositioned at `wrap-up`
+  tripped breaker — those parked items go on the ledger's `wrap-up` list,
+  where the outcome is applied
 
 Then close the task bead (`beads_close({ ids: "<task-id>", reason: "<summary>" })`) and move on. Never
 move to the next task while the review has open Critical/Important issues

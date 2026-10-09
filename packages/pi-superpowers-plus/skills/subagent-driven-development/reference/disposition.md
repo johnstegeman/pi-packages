@@ -34,7 +34,7 @@ Allowed only when:
 A question is not a design pass. The test:
 
 > If the only thing between you and the fix is a decision you could make in one sentence, it is not
-> a defer — make the decision and fix it.
+> a defer — make the decision and have it fixed.
 
 Collect defers and ask **once**, as a batched list, when you work the `wrap-up` step. The human's
 yes is what creates the bead. Filing one on your own authority is the failure this policy exists to
