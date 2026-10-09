@@ -1,5 +1,5 @@
 formula = "superpowers-workflow"
-description = "Brainstorm -> design -> plan -> implement -> verify -> finish"
+description = "Brainstorm -> design -> plan -> implement -> wrap-up -> verify -> finish"
 version = 1
 type = "workflow"
 

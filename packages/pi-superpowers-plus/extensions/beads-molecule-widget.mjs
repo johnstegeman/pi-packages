@@ -265,6 +265,15 @@ export function topicFor(state) {
   return state.molecule_title ?? "";
 }
 
+/**
+ * The formula's `wrap-up` step, matched by title (the formula and the widget ship together; the
+ * title is the coupling, pinned cross-file by test/workflow-formula.test.mjs). One predicate for
+ * both the phase decision and the view row, so the two can never disagree.
+ */
+export function isWrapUpStep(title) {
+  return /^Wrap up( |:)/.test(title ?? "");
+}
+
 export function phaseFor(state) {
   if (!state || !Array.isArray(state.steps)) return "brainstorming";
   const impl = state.steps.find((s) => /^Implement( |$)/.test(s.title ?? ""));
@@ -273,7 +282,7 @@ export function phaseFor(state) {
     // Implement is done, but the cycle is not: `wrap-up` dispositions the findings parked by
     // the final review, and the branch is still changing while it runs. Molecules poured
     // before that step existed have none, and keep the old behaviour.
-    const wrapUp = state.steps.find((s) => /^Wrap up( |:)/.test(s.title ?? ""));
+    const wrapUp = state.steps.find((s) => isWrapUpStep(s.title));
     if (wrapUp && wrapUp.step_status !== "done") return "implementing";
     return "finishing";
   }
@@ -581,6 +590,13 @@ export function moleculeWidgetLines(state, width, theme) {
         pinned: !!(kid.is_current || activeKid),
       });
     });
+    // `implement` done + `wrap-up` outstanding: the step actually in progress is a SIBLING of
+    // the implement head, not one of its task beads (those are all closed by now), so it renders
+    // as a top-level row and carries the only ◐ marker.
+    const wrapUp = state.steps.find((s) => isWrapUpStep(s.title));
+    if (impl.step_status === "done" && wrapUp && wrapUp.step_status !== "done") {
+      rows.push(stepRow(wrapUp, null, wrapUp));
+    }
   } else if (phase === "finishing") {
     const view = resolveRows(state.steps, FINISH_VIEW);
     const lead = leadCandidate(view.map((v) => v.step));

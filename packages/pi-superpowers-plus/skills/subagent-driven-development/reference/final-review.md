@@ -31,11 +31,12 @@ Findings with `isReal: false` are refuted — not open — unless the refutation
 verbatim in *every* finder prompt as "What was implemented" — it is context, not an
 assignment. On the 2026-10-01 `ci-gate-hardening` run six deferred minors were passed there
 "for triage"; all five finders read it as their job and worked all six, re-reporting them 21
-times, each re-statement earning its own verifier — 21 of 33 agents. **Triage the minors in the controller** (you hold the ledger *and* the rulings), and triage means
-disposition per [disposition.md](disposition.md) — fix now, drop, or defer — not filing. If the
-list is long enough to warrant a dispatch, give it ONE dedicated triage pass — never the finder
-fan-out. If finders must see
-it, it goes in the review package or a separate file, never `description`.
+times, each re-statement earning its own verifier — 21 of 33 agents.
+**Triage the parked findings in the controller** (you hold the ledger *and* the rulings), and
+triage means disposition per [disposition.md](disposition.md) — fix now, drop, or defer — not
+filing. If the list is long enough to warrant a dispatch, give it ONE dedicated triage pass —
+never the finder fan-out. If finders must see it, it goes in the review package or a separate
+file, never `description`.
 
 **2. Pass `dimensions`, scaled to the diff.** The default is all five. `performance`
 returned zero findings on a diff that added a CI job, docs and a four-line guard, yet still cost

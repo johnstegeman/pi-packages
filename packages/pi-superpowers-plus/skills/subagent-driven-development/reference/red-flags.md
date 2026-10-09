@@ -19,7 +19,7 @@ If an implementer subagent fails, errors out, or produces incomplete work:
 **Never:**
 - Start implementation on main/master branch without explicit user consent
 - Skip the task review (spec + quality)
-- Proceed with unfixed issues that are neither fixed nor parked-with-ruling
+- Proceed with unfixed issues that are neither fixed nor parked-with-ruling (a parked item still needs its `wrap-up` disposition)
 - Dispatch multiple implementation subagents in parallel (conflicts) — the sanctioned exception is a scheduled wave of DISJOINT-file tasks via `scripts/wave-parallel.js`; never free-form parallel `Agent` dispatch
 - Make a subagent read more than its own task bead (hand it the whole plan / molecule tree)
 - Skip scene-setting context (subagent needs to understand where task fits)

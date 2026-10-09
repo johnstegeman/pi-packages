@@ -190,7 +190,9 @@ const withWrapUp = (status) => ({
   ],
 });
 assert.equal(phaseFor(withWrapUp("current")), "implementing", "wrap-up outstanding -> still implementing");
-assert.equal(phaseFor(withWrapUp("ready")), "implementing", "wrap-up pending -> still implementing");
+assert.equal(phaseFor(withWrapUp("ready")), "implementing", "wrap-up ready -> still implementing");
+// The instant after `implement` closes, before `wrap-up` is ready: the `!== "done"` guard covers it.
+assert.equal(phaseFor(withWrapUp("pending")), "implementing", "wrap-up pending -> still implementing");
 assert.equal(phaseFor(withWrapUp("done")), "finishing", "wrap-up done -> finishing");
 assert.equal(
   phaseFor({
@@ -676,6 +678,37 @@ assert.ok(iLines[iC1].includes("├──"), "first child connector ├──");
 assert.ok(iLines[iC2].includes("└──"), "last child connector └──");
 assert.ok(iLines[iTask2].includes("◐"), "current child keeps ◐ marker");
 assert.ok(iLines[iTask1].includes("✓"), "closed child keeps ✓ marker");
+
+// ---------- implementing, implement done + wrap-up outstanding: the wrap-up row leads ----------
+// `wrap-up` is a SIBLING of the implement head, not one of its task beads, so it renders as a
+// top-level row — and it is the only active (◐) row, because every task bead is already closed.
+const wrapState = {
+  ...implState,
+  current_step: null,
+  steps: [
+    ...implState.steps.map((s) => ({ ...s, status: "closed", step_status: "done", is_current: false })),
+    {
+      id: "mol-9.w",
+      title: "Wrap up: disposition all parked findings",
+      status: "open",
+      issue_type: "task",
+      created_at: "t8",
+      step_status: "pending",
+      is_current: false,
+    },
+  ],
+};
+const wLines = moleculeWidgetLines(wrapState, 120);
+const wRow = wLines.findIndex((l) => l.includes("Wrap up: disposition all parked findings"));
+assert.ok(wRow !== -1, `wrap-up row rendered: ${wLines.join(" | ")}`);
+assert.ok(wLines[wRow].includes("◐"), `wrap-up row carries the ◐ marker: ${wLines[wRow]}`);
+assert.ok(
+  !wLines[wRow].includes("├──") && !wLines[wRow].includes("└──"),
+  `wrap-up reads as a top-level row, not a task-bead child: ${wLines[wRow]}`,
+);
+const activeRows = wLines.filter((l) => l.includes("◐"));
+assert.equal(activeRows.length, 1, `exactly one active row: ${wLines.join(" | ")}`);
+assert.ok(activeRows[0].includes("Wrap up"), `the active row is the wrap-up step: ${activeRows[0]}`);
 
 // ---------- finishing: verify/smoke/finish rows only ----------
 const finState = {

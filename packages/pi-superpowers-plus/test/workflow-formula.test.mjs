@@ -1,9 +1,10 @@
 // Structure contract for the shipped workflow formula
 // (docs/superpowers/specs/2026-10-09-wrap-up-instead-of-filing-deferred-minors-design.md).
 // Plain node, no dependencies: the formula is parsed line-by-line because the package ships no
-// TOML parser, and this test only reads step ids and their `needs` edges.
+// TOML parser, and this test only reads step ids, titles, and their `needs` edges.
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
+import { isWrapUpStep } from "../extensions/beads-molecule-widget.mjs";
 
 const src = readFileSync(new URL("../formulas/superpowers-workflow.formula.toml", import.meta.url), "utf8");
 
@@ -13,7 +14,7 @@ function parseSteps(text) {
   let cur = null;
   for (const line of text.split("\n")) {
     if (line.trim() === "[[steps]]") {
-      cur = { id: null, needs: [] };
+      cur = { id: null, title: "", needs: [] };
       steps.push(cur);
       continue;
     }
@@ -24,6 +25,8 @@ function parseSteps(text) {
     if (!cur) continue;
     const id = line.match(/^id\s*=\s*"([^"]+)"/);
     if (id) cur.id = id[1];
+    const title = line.match(/^title\s*=\s*"([^"]*)"/);
+    if (title) cur.title = title[1];
     const needs = line.match(/^needs\s*=\s*\[(.*)\]/);
     if (needs) cur.needs = [...needs[1].matchAll(/"([^"]+)"/g)].map((m) => m[1]);
   }
@@ -43,6 +46,13 @@ assert.deepEqual(
   steps.map((s) => s.id),
   steps.map((s) => s.id).filter((id, i, all) => all.indexOf(id) === i),
   "step ids are unique",
+);
+
+// The widget matches the wrap-up step by title, so the shipped title is the coupling. Rewording
+// it must fail here rather than silently revert the widget to reporting "finishing" early.
+assert.ok(
+  isWrapUpStep(byId.get("wrap-up").title),
+  `isWrapUpStep recognises the shipped wrap-up title: ${JSON.stringify(byId.get("wrap-up").title)}`,
 );
 
 console.log("workflow-formula: all assertions passed");

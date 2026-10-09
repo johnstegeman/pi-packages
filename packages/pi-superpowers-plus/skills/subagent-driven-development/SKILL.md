@@ -284,7 +284,7 @@ Template: [task-reviewer-prompt.md](task-reviewer-prompt.md)
 
 ### 4. The fix loop
 
-The loop triggers when the review reports spec ❌, any Critical or Important finding, or a ⚠️ item you confirmed as a real gap. Five rounds maximum per task; when round 5's re-review still leaves findings open, the breaker decides — park with a ruling or report BLOCKED, never a silent discard.
+The loop triggers when the review reports spec ❌, any Critical or Important finding, or a ⚠️ item you confirmed as a real gap. Five rounds maximum per task; when round 5's re-review still leaves findings open, the breaker decides — park with a ruling or report BLOCKED, never a silent discard. A parked item is dispositioned at `wrap-up`, never left as a resting state.
 
 > **Read now:** [reference/fix-loop.md](reference/fix-loop.md) — fix rounds, gated path, prose path, re-review scoping, ledger formats, and breaker rules. Do not start the fix loop without it.
 
@@ -296,7 +296,7 @@ message as your other bookkeeping:
 
 - `Task <N>: complete (commits <base7>..<head7>, review clean)`
 - `Task <N>: complete (commits <base7>..<head7>, <K> parked)` after a
-  tripped breaker
+  tripped breaker — those parked items are dispositioned at `wrap-up`
 
 Then close the task bead (`beads_close({ ids: "<task-id>", reason: "<summary>" })`) and move on. Never
 move to the next task while the review has open Critical/Important issues
@@ -326,7 +326,7 @@ scoped re-review, then adjudicate any residuals with the breaker rules
 above. When the final review is clean:
 1. Confirm `executing-plans` readiness — `beads_mol_ready({ id: "<implement-step-id>" })` must return no ready steps — then close the `implement` step — `beads_close({ ids: "<implement-step-id>", reason: "all tasks complete" })` — which unblocks `wrap-up`.
 2. Work the `wrap-up` step. Resolve it with `beads_list({ label: "step:wrap-up", mol: "<root-id>" })` and claim it. Disposition every parked finding per [reference/disposition.md](reference/disposition.md): fix it now, drop it as a non-issue with a recorded reason, or put the genuine defers to your human partner as ONE batched question and file only what they approve. Then report fixes, drops (with reasons), and defers, and close `wrap-up` — `beads_close({ ids: "<wrap-up-step-id>", reason: "<fixed N, dropped M, deferred K (beads …)>" })` — which unblocks `verify`. **If the molecule has no `step:wrap-up`** (it was poured before this step existed), skip straight to step 3.
-3. Delete this plan's workspace (the record now lives in git). This runs **after** step 2: the ledger is the wrap-up step's input, so deleting it earlier destroys the list being worked.
+3. Delete this plan's workspace (the record now lives in git). This runs **after the wrap-up step**: the ledger is the wrap-up step's input, so deleting it earlier destroys the list being worked.
 4. Claim `verify` (`beads_update({ id: "<verify-step-id>", claim: true })` — resolve `<verify-step-id>`/`<finish-step-id>` with `beads_list({ label: "step:verify" | "step:finish", mol: "<root-id>" })`) and proceed to that work before the finishing handoff below — use `/skill:verification-before-completion`, which closes `verify`, surfaces the human `smoke-test-approved` gate, and works `finish`.
 5. Then announce "I'm using the finishing-a-development-branch skill to complete this work." and hand off: **REQUIRED SUB-SKILL:** `/skill:finishing-a-development-branch` — tell the user to type `/finish` to load it.
 
@@ -336,7 +336,7 @@ After generating the package, choose the review path:
 
 > **Read now:** [reference/final-review.md](reference/final-review.md) — the final-review workflow payload and args, plus the findings-file audit. Read before choosing the workflow path.
 
-- **Workflow path** (preferred when `SubagentWorkflow` is present and the branch is large or broad — multi-file, many commits, security-sensitive): invoke the skill's final-review workflow per `reference/final-review.md`. Deferred minors are never a reason to take this path — the controller triages them (rule 1 in that reference).
+- **Workflow path** (preferred when `SubagentWorkflow` is present and the branch is large or broad — multi-file, many commits, security-sensitive): invoke the skill's final-review workflow per `reference/final-review.md`. The parked-findings list is never a reason to take this path — the controller dispositions it (rule 1 in that reference).
 - **Single-reviewer path** (fallback — `SubagentWorkflow` absent, a small plan, or a degraded workflow run): dispatch the `code-reviewer` agent with the [code-reviewer.md](../requesting-code-review/code-reviewer.md) template, passing the printed package path.
 
 ## Integration

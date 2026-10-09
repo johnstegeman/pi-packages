@@ -1,4 +1,4 @@
-# Disposition: what happens to a finding that is not Critical/Important
+# Disposition: what happens to a finding the cycle would otherwise park
 
 > **Reaching beads tools:** every `beads_*` tool has `codemode`/`deferred` exposure, so
 > none is in your tool list. Call them from a `codemode` script —
