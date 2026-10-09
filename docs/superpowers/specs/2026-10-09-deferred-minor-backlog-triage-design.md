@@ -7,6 +7,38 @@ Backlog bead: `pi-packages-6t1xv` (closes at the end of this cycle)
 
 All line numbers are as of `7fe85aa`.
 
+## Revision 2026-10-09 — ruling B: the namespace mitigation was measured and rejected
+
+The Fix B narrative below — decision 11, §2, §3.2's edit 3 and permitted note, §3.3's `graey`
+expectation and the disposition table's row 5 — describes the state as planned, before the
+mitigation was measured. It was built (`002f29f`: `Agent` joins the `subagents` namespace) and then
+**rejected on measurement**, so those passages are superseded by this section.
+
+**What was measured.** On pi 1.1.0, in a real `codemode.mode: "only"` session at
+`inlineBudget: 3000`, the `subagents` heading never carries the ` (some tools not listed)` marker.
+`selectCatalog` round-robins groups, so with `Agent` in a three-entry `subagents` queue it is
+*admitted* into the listing instead — at the price of `edit`, a core tool, which is evicted, and
+with `beads` falling from 9 listed tools to 4.
+
+**The ruling.** That trade trips the spec's own disqualifier ("a core tool demoted to
+`searchTools()` discovery is a reliability regression no token saving justifies"), so the change
+was reverted (`92d468a`, `da57de4`) and `pi-packages-graey` closes won't-fix. The real fix is
+budget-aware truncation in pi, which is upstream and out of scope here (decision 3).
+
+**Consequences for the plan.** Tasks 2, 3, 6 and 7 were re-pointed: Task 2's deliverable became the
+reverted state; Task 3's expectations became the post-revert measurement; Task 6's risk (a) note
+records the rejection; Task 7's `graey` closing reason is won't-fix.
+
+**A second measurement-driven correction.** §3.1 (`sw30`) below states that
+`additionalProperties: false` is not enforced by pi. That is wrong for a tool that *declares* the
+keyword: pi's own validator compiles the declared schema, so the key is rejected on any provider
+where it reaches that check. `docs/pi-extension-args-contract.md` carries the corrected two-case
+text; read it as the authority.
+
+**Lesson for the next triage.** The `graey` bead's own comment of 2026-10-05 had already predicted
+this exact side effect. The plan was written from bead *descriptions* without reading their
+comments; triage must read them.
+
 ## Problem
 
 `pi-packages-6t1xv` is the single kickoff point for the accumulated deferred-minor /
@@ -41,9 +73,9 @@ the definition of a pile that cannot drain.
 Every row of `pi-packages-6t1xv` is **closed** (fixed, or won't-fix with a recorded reason) or
 **re-filed with a design-pass scope**. No row is left as an unowned follow-up. The in-repo
 fixes land with tests, and the two claims that were only *argued* rather than *verified* are
-verified on the runtime we actually run: that `Agent`'s budget omission is now marked
-(§3.3), and whether the `rules`-block leak still exists (§3.3).
-verified on the runtime we actually run.
+verified on the runtime we actually run: whether `Agent`'s budget omission can be marked
+(§3.3 — measured and rejected; see the Revision section), and whether the `rules`-block leak
+still exists (§3.3).
 
 ## Decisions (from brainstorming)
 
@@ -73,12 +105,15 @@ verified on the runtime we actually run.
 10. **`2cly` and `6f0p` are the only design passes.** Re-filed as fresh beads, originals closed
     with reasons naming their successors, `jnr7` stays open as the umbrella with the `6f0p`
     successor reparented under it.
-11. **`graey`'s mitigation is implemented here, not carried.** The spike's verdict named two
-    options for risk (a) — "namespace it, or take it upstream". Verified against the 1.1.0
-    binary, the in-repo one is available: `getNamespace: (name) =>
+11. **`graey`'s mitigation was attempted in-repo, then measured and rejected.** The spike's
+    verdict named two options for risk (a) — "namespace it, or take it upstream". The in-repo one
+    looked available: `getNamespace: (name) =>
     this._toolDefinitions.get(name)?.definition.namespace` (`73760557`), and pi's own docs
-    sanction an extension-declared namespace (`docs/extensions.md:162`). Upstream was the
-    fallback, not the dependency.
+    sanction an extension-declared namespace (`docs/extensions.md:162`). But the mode-`only`
+    session showed the marker never renders and the namespace instead admits `Agent` at the price
+    of `edit`, so the change was reverted (`92d468a`, `da57de4`) and `graey` closes won't-fix —
+    superseded by the Revision section. Upstream (budget-aware truncation) is the real fix, and
+    decision 3 keeps it out of scope.
 12. **Execution is Approach 2**: one branch, the two package fixes in parallel (disjoint file
     sets), the controller writes the records alongside, then one gate run.
 
@@ -92,7 +127,7 @@ Every row, its outcome, and the record that exists afterwards:
 | 2 | `1v349` gates 1–2 re-run | **close as moot** | reason: B is unadopted, so there is nothing to pre-verify; the re-run is a devDep bump to a published `1.1.0`, not an upstream wait; revisit only if B is adopted |
 | 3 | `peefw` rules leak | **verify on 1.1.0, then close** | two-session diff as a bead comment; closes "fixed upstream in 1.1.0" or "won't-fix — upstream pi behaviour" |
 | 4 | `f7ber` spec wording | **fix in-session** | four edits to `docs/superpowers/specs/2026-09-30-codemode-adoption-design.md` (§3.2) |
-| 5 | `graey` Agent omission | **fix in-session, verified** | `namespace` on `agentTool` + updated test + `docs/pi-subagents-local-patch.md` entry + the `only`-session check |
+| 5 | `graey` Agent omission | **measured and rejected** — superseded by the Revision section | the `only`-session check found the ` (some tools not listed)` marker never renders and `Agent` displaces `edit`; change reverted (`92d468a`, `da57de4`); closes won't-fix |
 | 6 | `7vzw` guard coverage | **fix in-session** | schema-safe rejection in `packages/pi-beads/src/index.ts` + tests |
 | 7 | `sw30` args contract | **decide (candidate 2), record, close** | `docs/pi-extension-args-contract.md` |
 | 8 | `qbr6` skill preloading | **close as not-wanted** | reason names the missing consumer |
@@ -183,7 +218,8 @@ heading, and incompleteness is reported per namespace, so nothing in the listing
 is missing. That is residual risk (a), and it is why the stage-B verdict is
 `go-with-mitigations` rather than `go`.
 
-**Two edits to `packages/pi-subagents/src/index.ts`:**
+**Two edits to `packages/pi-subagents/src/index.ts` were planned; the namespace addition was
+reverted (`92d468a`, `da57de4`) — superseded by the Revision section:**
 
 1. **`agentTool` (`:1604-1607`) gains `namespace: SUBAGENTS_NAMESPACE`**, carrying the file's
    existing `// LOCAL PATCH (pi-packages) — see docs/pi-subagents-local-patch.md` marker.
@@ -275,8 +311,6 @@ permitted line:
    **Also permitted, and required by edit 3:** one line inside risk (a) recording that its
    mitigation landed (commit + date). The verdict word `go-with-mitigations` is **not** touched
    — its remaining condition is risk (b), which is upstream.
-   landed (commit + date). The verdict word `go-with-mitigations` is **not** touched — its
-   remaining condition is risk (b), which is upstream.
 
    **Not changed:** the `**Deliverable:**` / `**Test artifacts:**` adjacency (f7ber lists it as
    non-blocking; the authorization clause in the same sentence resolves it).
@@ -295,8 +329,10 @@ After Fix B lands, one harness serves both `graey` and `peefw`, reusing the spik
 - **`graey`** — read the `only` session's `codemode` description: the `## subagents` heading
   must carry ` (some tools not listed)` and list exactly `steer_subagent` +
   `get_subagent_result`, with `Agent` absent. That is the bead's own acceptance test ("verify
-  from a real mode-`only` session at `inlineBudget: 3000`"), so `graey` closes *fixed and
-  verified* rather than fixed-and-hoped.
+  from a real mode-`only` session at `inlineBudget: 3000`"), so `graey` was to close *fixed and
+  verified* rather than fixed-and-hoped. Superseded by the Revision section: as run, the heading
+  never carried the marker — `Agent` was admitted into the listing and `edit` was evicted — so the
+  change was reverted (`92d468a`, `da57de4`) and `graey` closed won't-fix.
 
 Parsers stay scratch, as the spike's `parse-tools.mjs` did; the durable record is the bead
 comment plus the numbers already in the spec.
