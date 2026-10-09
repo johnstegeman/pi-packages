@@ -10,9 +10,9 @@ import {
   writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { test } from "node:test";
-import { seedFormula } from "../extensions/formula-seed.mjs";
+import { detectRepoLocalShadow, seedFormula } from "../extensions/formula-seed.mjs";
 
 const FORMULA = "superpowers-workflow.formula.toml";
 
@@ -158,6 +158,86 @@ test("missing source -> skipped-error (no throw)", async () => {
     const r = await seedFormula(join(s.dir, "pkg", "formulas", "nope.formula.toml"), s.targetDir);
     assert.equal(r.action, "skipped-error");
     assert.equal(existsSync(join(s.targetDir, FORMULA)), false);
+  } finally {
+    cleanup(s);
+  }
+});
+
+// ---- detectRepoLocalShadow: bd search path #2 (<checkout>/.beads/formulas/) can hold a
+// stale real file that silently wins over the user-level seed. The helper only reports it.
+
+test("shadow: absent repo-local file -> null", async () => {
+  const s = scratch();
+  try {
+    assert.equal(await detectRepoLocalShadow(s.dir, s.source), null);
+  } finally {
+    cleanup(s);
+  }
+});
+
+test("shadow: byte-identical repo-local file -> null", async () => {
+  const s = scratch();
+  try {
+    const repoPath = join(s.dir, ".beads", "formulas", FORMULA);
+    mkdirSync(dirname(repoPath), { recursive: true });
+    writeFileSync(repoPath, readFileSync(s.source));
+    assert.equal(await detectRepoLocalShadow(s.dir, s.source), null);
+  } finally {
+    cleanup(s);
+  }
+});
+
+test("shadow: differing real file -> descriptor naming both paths", async () => {
+  const s = scratch();
+  try {
+    const repoPath = join(s.dir, ".beads", "formulas", FORMULA);
+    mkdirSync(dirname(repoPath), { recursive: true });
+    writeFileSync(repoPath, "stale copy with no wrap-up step\n");
+    const r = await detectRepoLocalShadow(s.dir, s.source);
+    assert.ok(r, "a differing file is reported");
+    assert.equal(r.path, repoPath);
+    assert.equal(r.sourcePath, s.source);
+    assert.equal(r.kind, "file");
+  } finally {
+    cleanup(s);
+  }
+});
+
+test("shadow: differing foreign symlink -> kind symlink", async () => {
+  const s = scratch();
+  try {
+    const repoPath = join(s.dir, ".beads", "formulas", FORMULA);
+    mkdirSync(dirname(repoPath), { recursive: true });
+    const other = join(s.dir, "other.formula.toml");
+    writeFileSync(other, "other formula\n");
+    symlinkSync(other, repoPath);
+    const r = await detectRepoLocalShadow(s.dir, s.source);
+    assert.equal(r?.path, repoPath);
+    assert.equal(r?.kind, "symlink");
+  } finally {
+    cleanup(s);
+  }
+});
+
+test("shadow: unreadable repo-local file (dangling symlink) -> null, never throws", async () => {
+  const s = scratch();
+  try {
+    const repoPath = join(s.dir, ".beads", "formulas", FORMULA);
+    mkdirSync(dirname(repoPath), { recursive: true });
+    symlinkSync(join(s.dir, "gone.formula.toml"), repoPath);
+    assert.equal(await detectRepoLocalShadow(s.dir, s.source), null);
+  } finally {
+    cleanup(s);
+  }
+});
+
+test("shadow: missing source -> null, never throws", async () => {
+  const s = scratch();
+  try {
+    const repoPath = join(s.dir, ".beads", "formulas", FORMULA);
+    mkdirSync(dirname(repoPath), { recursive: true });
+    writeFileSync(repoPath, "repo copy\n");
+    assert.equal(await detectRepoLocalShadow(s.dir, join(s.dir, "nope.formula.toml")), null);
   } finally {
     cleanup(s);
   }
