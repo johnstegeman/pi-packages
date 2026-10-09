@@ -276,6 +276,7 @@ needed.
   never `HEAD~1`, which silently truncates multi-commit tasks. Never
   dispatch a task reviewer without a diff file.
 > **Read now:** [reference/task-review.md](reference/task-review.md) — reviewer inputs, the Global Constraints lens, anti-pre-judging directives, and the cannot-verify rule. Read before dispatching a task reviewer.
+> **Read now:** [reference/disposition.md](reference/disposition.md) — what happens to a finding that is not Critical/Important: fix now, drop, or defer. Read before acting on any review finding.
 
 Template: [task-reviewer-prompt.md](task-reviewer-prompt.md)
 
@@ -355,6 +356,7 @@ After generating the package, choose the review path:
 - [reference/recovery.md](reference/recovery.md) — @handle recovery, session boundary, resume semantics, and workspace recovery.
 - [reference/dispatch-implementer.md](reference/dispatch-implementer.md) — canonical handle, cost attribution, report-file naming, and the bead-management guardrail.
 - [reference/task-review.md](reference/task-review.md) — reviewer inputs, Global Constraints lens, anti-pre-judging directives, cannot-verify rule.
+- [reference/disposition.md](reference/disposition.md) — the disposition policy for non-Critical/Important findings.
 - [reference/fix-loop.md](reference/fix-loop.md) — fix rounds, gated path, prose path, re-review scoping, ledger formats, breaker rules.
 - [reference/final-review.md](reference/final-review.md) — final-review workflow payload/args and the findings-file audit.
 - [reference/red-flags.md](reference/red-flags.md) — failure handling, orchestrator non-negotiables, and the red-flag catalog.
