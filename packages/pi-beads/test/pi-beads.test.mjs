@@ -14,7 +14,8 @@
 // drives both single-repo and umbrella topology.
 import assert from "node:assert/strict";
 import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, realpathSync, existsSync, rmSync } from "node:fs";
-import { join, delimiter } from "node:path";
+import { dirname, join, delimiter } from "node:path";
+import { fileURLToPath } from "node:url";
 import { tmpdir } from "node:os";
 import { CONC_GUARD_SH, LOCK_GUARD_SH, concEnv } from "./helpers/fake-bd.mjs";
 
@@ -37,6 +38,11 @@ const outsideDir = join(root, "outside");  // session cwd, NOT under envRootDir
 for (const d of [binDir, repoDir, workspace, projDir, umbrella, backendDir, envRootDir, outsideDir])
   mkdirSync(d, { recursive: true });
 const logFile = join(root, "bd.log");
+
+// the package root, for structural guards that read the source as text (the
+// `tool-surface.test.mjs` precedent).
+const here = dirname(fileURLToPath(import.meta.url));
+const pkgRoot = join(here, "..");
 
 function shellQuote(s) {
   return `'${String(s).replaceAll("'", "'\\''")}'`;
@@ -1097,6 +1103,113 @@ test("single-repo: beads_ready rejects an undeclared argument instead of claimin
   const text = r?.content?.[0]?.text ?? "";
   assert.match(text, /beads_ready: unknown argument\(s\): limt/, text);
   assert.equal(invocations().length, 0, "an undeclared argument must not reach bd");
+});
+
+// beads_memories mutates (`bd remember` / `bd forget`) and emits beads:changed, so it is a
+// write tool and must be guarded like the rest: a typo must not be silently dropped.
+test("single-repo: beads_memories rejects an undeclared argument instead of mutating", async () => {
+  const s = await openSession("single", repoDir);
+  const before = s.emitted.length;
+  resetLog();
+  const r = await s.byName.get("beads_memories").execute("c", {
+    action: "remember",
+    content: "x",
+    keys: "k",
+  });
+  const text = r?.content?.[0]?.text ?? "";
+  assert.match(text, /beads_memories: unknown argument\(s\): keys/, text);
+  assert.equal(invocations().length, 0, "an undeclared argument must not reach bd");
+  assert.equal(s.emitted.length, before, "a rejected call must not emit beads:changed");
+});
+
+// Both schema-declaring write tools must reject with structuredContent, not text alone: the
+// package's own invariant is that an outputSchema tool always sets it (see jsonResult).
+test("single-repo: a schema-declaring write tool rejects with structuredContent", async () => {
+  const s = await openSession("single", repoDir);
+  resetLog();
+  for (const [name, args] of [
+    ["beads_memories", { action: "remember", content: "x", keys: "k" }],
+    ["beads_ready", { claim: true, limt: 5 }],
+  ]) {
+    const r = await s.byName.get(name).execute("c", args);
+    const text = r?.content?.[0]?.text ?? "";
+    assert.match(text, new RegExp(`${name}: unknown argument\\(s\\)`), text);
+    assert.equal(r?.structuredContent?.error, text, `${name} must carry { error }`);
+  }
+  assert.equal(invocations().length, 0, "no rejected call may reach bd");
+});
+
+// Structural guard: the undeclared-argument guard's membership is one auditable set, and every
+// member must actually be guarded (pi-packages-7vzw). The source is read as text, the way
+// tool-surface.test.mjs reads it.
+//
+// Residual gap, deliberately not papered over: a NEW mutating tool that is registered but never
+// added to WRITE_TOOLS is still invisible here, because nothing in the source can be asked
+// "do you mutate?" statically. This test pins the inventory and its coverage; the inventory is
+// the human-reviewed list that has to be extended by hand when a write tool is added.
+const WRITE_TOOLS_SRC = readFileSync(join(pkgRoot, "src", "index.ts"), "utf8");
+const writeKeys = [
+  ...(WRITE_TOOLS_SRC.match(/const WRITE_TOOLS = new Set<string>\(\[([\s\S]*?)\]\);/)?.[1] ?? "")
+    .matchAll(/TOOL\.(\w+)/g),
+].map((m) => m[1]);
+// Scoped to the `TOOL = { … }` object body: an unrelated `key: "beads_*"` literal elsewhere
+// in the file must not silently shadow an entry here.
+const TOOL_BLOCK = WRITE_TOOLS_SRC.match(/const TOOL = \{([\s\S]*?)\n\};/)?.[1] ?? "";
+const toolNames = new Map(
+  [...TOOL_BLOCK.matchAll(/^\s*(\w+):\s*"(beads_[a-z_]+)"/gm)].map((m) => [m[1], m[2]]),
+);
+const MUTATING = [
+  "beads_create",
+  "beads_create_list",
+  "beads_update",
+  "beads_close",
+  "beads_dep",
+  "beads_undep",
+  "beads_comment",
+  "beads_reopen",
+  "beads_promote",
+  "beads_gate_create",
+  "beads_gate_resolve",
+  "beads_mol_pour",
+  "beads_ready",
+  "beads_memories",
+];
+
+test("single-repo: the guard's membership is exactly the mutating inventory", () => {
+  const fromSource = writeKeys.map((k) => toolNames.get(k)).sort();
+  assert.ok(writeKeys.length > 0, "could not parse WRITE_TOOLS from src/index.ts");
+  assert.deepEqual(fromSource, [...MUTATING].sort());
+});
+
+test("single-repo: every inventory tool is guarded, and the inventory is the source's set", async () => {
+  const s = await openSession("single", repoDir);
+  resetLog();
+  for (const name of MUTATING) {
+    const r = await s.byName.get(name).execute("c", { zzzUndeclared: 1 });
+    const text = r?.content?.[0]?.text ?? "";
+    assert.match(text, new RegExp(`${name}: unknown argument\\(s\\): zzzUndeclared`), text);
+  }
+  assert.equal(invocations().length, 0, "no rejected call may reach bd");
+});
+
+// Every write tool that declares an `outputSchema` must reject with `structuredContent.error`:
+// the guard branches on `def.outputSchema` and assumes every output schema carries an optional
+// `error` property. Derived from the registered tools, so a future schema-declaring write tool
+// is covered without editing this test.
+test("single-repo: every schema-declaring write tool rejects with structuredContent.error", async () => {
+  const s = await openSession("single", repoDir);
+  resetLog();
+  const schemaDeclaring = writeKeys
+    .map((k) => toolNames.get(k))
+    .filter((name) => s.byName.get(name)?.outputSchema !== undefined);
+  assert.ok(schemaDeclaring.length > 0, "expected at least one schema-declaring write tool");
+  for (const name of schemaDeclaring) {
+    const r = await s.byName.get(name).execute("c", { zzzUndeclared: 1 });
+    const text = r?.content?.[0]?.text ?? "";
+    assert.match(text, new RegExp(`${name}: unknown argument\\(s\\): zzzUndeclared`), text);
+    assert.equal(r?.structuredContent?.error, text, `${name} must carry { error }`);
+  }
+  assert.equal(invocations().length, 0, "no rejected call may reach bd");
 });
 
 test("single-repo: beads_dep --type plumbing and default (no --type)", async () => {

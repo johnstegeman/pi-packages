@@ -55,7 +55,10 @@ describe("code-mode exposure", () => {
     }
   });
 
-  it("leaves Agent direct", () => {
+  // `Agent` stays `direct` AND namespace-less. The namespace is not merely unnecessary: measured
+  // on pi 1.1.0 it admits `Agent` into the mode-`only` listing and evicts `edit`, a core tool
+  // (`pi-packages-graey`, closed won't-fix). Do not add it back without a fresh measurement.
+  it("leaves Agent direct and namespace-less", () => {
     const agent = registered().get("Agent");
     expect(agent).toBeDefined();
     expect(agent?.exposure).toBeUndefined();

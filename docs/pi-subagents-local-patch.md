@@ -82,6 +82,10 @@ Covered by `test/tool-exposure.test.ts` (instantiates the real extension with a 
 inspects the registered tool objects) and by the `structuredContent` assertion in
 `test/foreground-result-retrieval.test.ts`.
 
+`Agent` is deliberately **not** in this namespace: measured on pi 1.1.0, adding it admits `Agent`
+into a `codemode.mode: "only"` listing at the price of `edit`, a core tool (`pi-packages-graey`,
+closed won't-fix).
+
 ## Divergence 4 — codemode activation in subagent sessions (Task 7)
 
 `src/agent-runner.ts` builds every subagent session's `DefaultResourceLoader`, and an
@@ -268,9 +272,12 @@ Covered by `test/workflow-tool.test.ts`
 
 ## In-code marker convention
 
-Divergence 3 — the code-mode exposure/namespace/outputSchema changes from Task 6 — and
-Divergence 4 — Task 7's codemode activation delta — **are** marked, because each is a small,
-surgical edit a future reader could otherwise mistake for upstream behaviour. The marker is:
+Divergences 3 — the code-mode exposure/namespace/outputSchema changes from Task 6 — 4 — Task 7's
+codemode activation delta — and 7's `get_subagent_result` branch, whose `wf_` lookup sits inside a
+tool upstream knows only as an agent lookup — **are** marked, because each is a small, surgical
+edit a future reader could otherwise mistake for upstream behaviour. The rest of Divergence 7 is
+not: its watchdog hunks and durability helpers are additive blocks that are plainly this copy's
+own state (see its section above). The marker is:
 
 ```ts
 // LOCAL PATCH (pi-packages) — see docs/pi-subagents-local-patch.md

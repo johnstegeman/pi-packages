@@ -85,7 +85,9 @@ import { isWorktreeIsolationEnabled, setWorktreeIsolationEnabled } from "./workt
 import { escapeXml } from "./xml.js";
 
 // Code-mode grouping for the tools this package moves off `direct` exposure
-// (SubagentWorkflow, get_subagent_result, steer_subagent — `Agent` stays direct).
+// (SubagentWorkflow, get_subagent_result, steer_subagent — `Agent` stays direct and stays
+// namespace-less: giving it this namespace admits it into a mode-`only` listing at the price
+// of `edit`, a core tool — measured on pi 1.1.0, `pi-packages-graey`, closed won't-fix).
 // LOCAL PATCH (pi-packages) — see docs/pi-subagents-local-patch.md
 const SUBAGENTS_NAMESPACE = {
   name: "subagents",
