@@ -766,7 +766,7 @@ on, and `prepareCodemodeLoadout` does not hide it: `hiddenDeclarations` is `dire
 and `codemode` is `model-only`, not `direct`. The seven `direct` tools are hidden; codemode is
 not. Observed tool list: `codemode` (n=1).
 
-#### Gate 4 — codemode-absent (settings `-builtin:codemode`) / `--no-extensions` degradation
+#### Gate 4 — codemode-absent (`-ne`, no `builtin:codemode`) / `--no-extensions` degradation
 
 **PASS — neither path bricks.** Real sessions under `codemode.mode: "only"`
 (`/tmp/codemode-stage-b/proj-degraded/.pi/settings.json`). The declared list is the model-facing
@@ -986,6 +986,16 @@ callable as `tools.Agent`, but a model that does not already know it exists will
 That is a real behaviour change bought with 2,380 tokens, and it is the reason this verdict is
 not `go`. Mitigation: **`pi-packages-graey`** — make the omission non-silent (namespace `Agent`
 so its group carries the marker, or take it upstream).
+**Measured and rejected 2026-10-09.** The in-repo mitigation was built, reviewed, and tested in a
+real mode-`only` session on pi 1.1.0, and it does not do what this paragraph predicted: the
+`subagents` heading never carries ` (some tools not listed)`. `selectCatalog` round-robins groups,
+so with `Agent` in a three-entry `subagents` queue it is *admitted* into the listing — at the price
+of `edit`, a core tool, which is then evicted, and of `beads` falling from 9 listed tools to 4.
+That trade trips this spec's own disqualifier (a core tool demoted to `searchTools()` discovery is
+a reliability regression no token saving justifies), so the mitigation was reverted and
+`pi-packages-graey` is closed won't-fix: the real fix is budget-aware truncation in pi, which is
+upstream and out of scope here. Risk (a) therefore stands unmitigated, exactly as the sentence
+below anticipates.
 
 **Residual risk (b) — the instruction-text leak.** The system prompt's `rules` section is
 **byte-identical between the two sessions** (1,608 chars, sha256
@@ -997,16 +1007,19 @@ tool, and counting it is what yields the 1,290-of-1,608 (80.2%) figure. Because 
 is a *declaration* measurement, the leak does not reduce it; what it changes is the meaning of
 "hidden" — declarations are hidden, the instruction text that describes them is not. It is also
 why the isolated trial needed no `searchTools()`/`describeTool()` call. That cuts both ways: the
-leak is currently the only *passive* cue that `Agent` exists — `Agent` also stays reachable by
-literal name and through `searchTools()`/`ALL_TOOLS`, but those are active discovery routes that
-assume the model already knows the name (risk (a)) — and it is not ours to rely on: pi could
-stop leaking it in any release, at which point (a) becomes a genuinely silent tool.
+leak is currently the only *passive* cue to `Agent`'s *dispatch guidance* (its bare name also
+survives in `get_subagent_result`'s listed description, but that says nothing about how to
+dispatch) — `Agent` also stays reachable by literal name and through
+`searchTools()`/`ALL_TOOLS`, but those are active discovery routes that assume the model already
+knows the name (risk (a)) — and it is not ours to rely on: pi could stop leaking it in any
+release. Risk (a)'s mitigation was attempted and rejected on measurement (see Step 5), so it
+stands unmitigated rather than becoming silent.
 Tracking: **`pi-packages-peefw`**.
 
 **Why not `go`.** All four gates pass, the core tools (`read`/`edit`/`bash`/`write`) all survive
 at 3000, and the trial's ergonomic cost is bounded (two authored scripts instead of four direct
 calls, no retries, the anchor survived). But a gate pass licenses the *mechanism*, not the
-surface: risk (a) is a silent loss of the primary dispatch tool whose only *passive* cue is the
+surface: risk (a) is a silent loss of the primary dispatch tool whose passive cue was the
 accidental leak in (b) (the active discovery route is deliberate but assumes the model already
 knows the name), and it has a cheap real fix. Naming that fix and doing it before
 adoption is exactly the difference between `go` and `go-with-mitigations`.
@@ -1054,5 +1067,5 @@ most-important-first". The 1.0.3 source is **round-robin across groups, cheapest
 white-box cross-check (§Truncation) reproduced the transcript's 17-tool listing exactly under
 that rule. The §3 sentence is therefore corrected in place, with the original wording quoted in
 the correction note there. The other two stage-A claims the spike re-checked are the
-`-builtin:codemode` flag (Correction B, in §Method's gate-4 row) and the `wc -l` / `rules`
+`-builtin:codemode` claim (Correction B, in §Method's gate-4 row) and the `wc -l` / `rules`
 explanation (Correction C, in §Trial); both are applied.
