@@ -2950,7 +2950,7 @@ Terse command-style prompts produce shallow, generic work.
     }),
     parameters: Type.Object({
       agent_id: Type.String({
-        description: "The agent ID to check, or a workflow run ID (`wf_…`) returned by SubagentWorkflow. The agent's handle also works — its `name` if you gave it one, otherwise its type (`explore`, `explore-2`). A `wf_…` id answers with status only — `wait` and `verbose` apply to agents.",
+        description: "The agent ID to check, or a workflow run ID (`wf_…`) returned by SubagentWorkflow. The agent's handle also works — its `name` if you gave it one, otherwise its type (`explore`, `explore-2`). A `wf_…` id answers with a status summary and, once the run has settled, its result — but ignores `wait` and `verbose`, which apply to agents.",
       }),
       wait: Type.Optional(
         Type.Boolean({

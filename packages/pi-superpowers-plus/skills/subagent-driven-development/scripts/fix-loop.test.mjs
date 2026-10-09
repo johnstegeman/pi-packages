@@ -42,11 +42,16 @@ test("stage 1: first fix agent is gated + labelled", () => {
   assert.match(src, /agent\(fixPrompt, \{ label: 'fix', gate: gateCommand, agentType: 'implementer', phase: 'Fix', stallTimeout: 3600 \}\)/);
 });
 
-/** Source with comments removed, so a count over it cannot be inflated by prose. */
+/**
+ * Source with comments removed, so a count over it cannot be inflated by prose.
+ * Block comments and `//` comments — whole-line or trailing — go; a `//` with no
+ * whitespace before it stays, so a `https://` inside a string is not mangled.
+ */
 const stripComments = (src) =>
   src
     .replace(/\/\*[\s\S]*?\*\//g, "")
-    .replace(/^[ \t]*\/\/.*$/gm, "");
+    .replace(/^[ \t]*\/\/.*$/gm, "")
+    .replace(/[ \t]+\/\/.*$/gm, "");
 
 test("stall window: every implementer call site raises the window to 3600 s", () => {
   // Fix-round implementers legitimately run long test suites, so the 600 s

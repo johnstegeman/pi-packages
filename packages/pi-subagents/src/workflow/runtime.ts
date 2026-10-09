@@ -1466,6 +1466,21 @@ export async function runWorkflow(options: RunWorkflowOptions): Promise<Workflow
             continue;
           }
 
+          // One builder for both terminal emits, so a field added to one cannot
+          // go missing from the other: the rows differ only in the timestamp
+          // they settled at and the verdict the caller adds on top. Closes over
+          // `result`, so it is defined once the try/finally has left it final.
+          const terminalRow = (at: number) => ({
+            ...base,
+            queuedAt,
+            startedAt,
+            ...attemptMark,
+            lastProgressAt: at,
+            durationMs: at - startedAt,
+            ...(result.tokens !== undefined ? { tokens: result.tokens } : {}),
+            ...(result.toolCalls !== undefined ? { toolCalls: result.toolCalls } : {}),
+          });
+
           // The watchdog stopped this child, so the call is a timeout rather
           // than a failure or a skip — whatever the abort made the host report.
           //
@@ -1482,16 +1497,7 @@ export async function runWorkflow(options: RunWorkflowOptions): Promise<Workflow
             // shared accumulation below.
             spentOutputTokens += result.outputTokens ?? 0;
             const timedOutAt = Date.now();
-            const stopCommon = {
-              ...base,
-              queuedAt,
-              startedAt,
-              ...attemptMark,
-              lastProgressAt: timedOutAt,
-              durationMs: timedOutAt - startedAt,
-              ...(result.tokens !== undefined ? { tokens: result.tokens } : {}),
-              ...(result.toolCalls !== undefined ? { toolCalls: result.toolCalls } : {}),
-            };
+            const stopCommon = terminalRow(timedOutAt);
             // `ok: false`, like any other failure: resuming this run re-runs
             // this child live, which is the honest thing to do with a call that
             // never produced an answer.
@@ -1514,16 +1520,7 @@ export async function runWorkflow(options: RunWorkflowOptions): Promise<Workflow
           spentOutputTokens += result.outputTokens ?? 0;
 
           const finishedAt = Date.now();
-          const common = {
-            ...base,
-            queuedAt,
-            startedAt,
-            ...attemptMark,
-            lastProgressAt: finishedAt,
-            durationMs: finishedAt - startedAt,
-            ...(result.tokens !== undefined ? { tokens: result.tokens } : {}),
-            ...(result.toolCalls !== undefined ? { toolCalls: result.toolCalls } : {}),
-          };
+          const common = terminalRow(finishedAt);
 
           if (result.ok) {
             const text = result.text ?? "";

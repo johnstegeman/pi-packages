@@ -203,9 +203,11 @@ snapshot without the field still reports its frozen duration.
 
 ### 3. Tests (bucket C)
 
-- **new** `test/workflow-host.test.ts` — `T1.3`: `spawnAgent` forwards
-  `onToolActivity`/`onTurnEnd`/`onAssistantUsage` into `request.onActivity`; a request without
-  it is untouched. No host-level test file exists today.
+- `test/workflow-tool.test.ts` — `T1.3`: in the existing `createWorkflowHost — spawn mapping`
+  describe, `spawnAgent` forwards `onToolActivity`/`onTurnEnd`/`onAssistantUsage` into
+  `request.onActivity`, and a request without it is untouched. No new host-level test file was
+  needed: the premise that none existed was wrong — the file already held four
+  `createWorkflowHost — …` describes.
 - `test/workflow-runtime.test.ts` — `T1.5` de-flake: await the abort through a deferred instead
   of the 200×2 ms poll, and widen the window/cadence margins so a loaded box cannot starve the
   second attempt. The assertion still catches the stale verdict, because an unreset `timedOut`
@@ -230,8 +232,8 @@ snapshot without the field still reports its frozen duration.
 |---|---|---|
 | `T1.1` | retry-branch `noteActivity` redundant | B — delete the call |
 | `T1.2` | `"600s"` vs design `"<N>m"` | B — `formatRunDuration`; design doc updated |
-| `T1.3` | host `onActivity` forwarding untested | C — new `test/workflow-host.test.ts` |
-| `T1.4` | `warnForceSettle` called unconditionally | A — gate on `forceSettle` |
+| `T1.3` | host `onActivity` forwarding untested | C — `createWorkflowHost — spawn mapping` in `test/workflow-tool.test.ts` |
+| `T1.4` | `warnForceSettle` called unconditionally | A — gate on `forceSettle`, landed WITHOUT a covering test: the state is unreachable (the activity entry is deleted in the same settle path that clears `forceSettle`), so no black-box test can construct it — human-ruled pre-flight, the one ruled exception to the "every bucket-A item is fixed with a covering test" acceptance criterion below |
 | `T1.5` | retry test timing-sensitive | C — deferred await + wider margins |
 | `T2.1` | stall toast line untested | C — wiring test |
 | `T2.2` | `notifiedTimedOut` keyed by index, never cleared | A — key by `index:attempt` |
@@ -261,7 +263,7 @@ snapshot without the field still reports its frozen duration.
 | `T8.2` | reference doc lists `stallTimeout` as a primitive | B — reword |
 | `T8.3` | documented-defaults drift test had no RED evidence | D — observation; guard stays |
 | `R1` | force-settle grace couples to the scan cadence | B — keep; name the coupling |
-| `R2` | skip-vs-watchdog race emits a `done` row with no gate | A — skip wins |
+| `R2` | skip-vs-watchdog race emits a `done` row with no gate | A — skip wins; the timeout row now also carries the stopped child's `tokens`/`toolCalls` (human-ruled keep: additive metadata, and `spentOutputTokens` already counted those tokens for the budget) |
 | `R3` | live result uncapped vs capped snapshot | A — cap the live path |
 | `R4` | reference paraphrase loose about `done_with_concerns` | B — reword to "neither `done` nor `done_with_concerns`" |
 | `R5` | timer test pins clearing, not arming | C — pin both |

@@ -75,8 +75,14 @@ describe("the worker source itself", () => {
     // Two literals that must agree are two literals that can drift: the worker
     // string is a string, so it cannot import the constant — it interpolates it.
     const source = readFileSync(new URL("../src/workflow/worker-source.ts", import.meta.url), "utf8");
-    expect(source).not.toMatch(/\b86400\b/);
-    expect(source).toContain("STALL_TIMEOUT_SECS_CEILING");
+    // Both spellings: the repo writes the ceiling as `86_400`, and `\b86400\b`
+    // does not match that (`_` is a word character), so the drift this guards
+    // against could come back in the repo's own style unnoticed.
+    expect(source).not.toMatch(/\b86_?400\b/);
+    // Naming the constant proves nothing on its own — the import alone satisfies
+    // it. Pin it where it is used: the comparison and the message's bound.
+    expect(source).toContain(`stallTimeout > \${STALL_TIMEOUT_SECS_CEILING}`);
+    expect(source).toContain(`[0, \${STALL_TIMEOUT_SECS_CEILING}]`);
   });
 });
 
