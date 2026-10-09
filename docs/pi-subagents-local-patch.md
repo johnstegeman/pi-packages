@@ -264,6 +264,8 @@ Covered by `test/workflow-tool.test.ts`
 `test/workflow-stall-wiring.test.ts` (setting → runtime seam),
 `test/workflow-{progress,task,dialog,render}.test.ts` (the timed-out row; the `workflowEntryData`
 `id`/`result` snapshot), and
+`test/settings.test.ts` / `test/documented-defaults.test.ts` (the new default).
+
 ## Divergence 8 — the `Agent` namespace (`pi-packages-graey`)
 
 The `Agent` tool definition now carries `namespace: SUBAGENTS_NAMESPACE` — the same
@@ -287,13 +289,12 @@ alongside the codemode tools.
 `test/tool-exposure.test.ts` pins it: `Agent` is in the namespace loop and its `exposure` stays
 `undefined`.
 
-`test/settings.test.ts` / `test/documented-defaults.test.ts` (the new default).
-
 ## In-code marker convention
 
-Divergence 3 — the code-mode exposure/namespace/outputSchema changes from Task 6 — and
-Divergence 4 — Task 7's codemode activation delta — **are** marked, because each is a small,
-surgical edit a future reader could otherwise mistake for upstream behaviour. The marker is:
+Divergences 3 — the code-mode exposure/namespace/outputSchema changes from Task 6 —, 4 — Task 7's
+codemode activation delta —, and 8 — the `Agent` namespace above — **are** marked, because each is
+a small, surgical edit a future reader could otherwise mistake for upstream behaviour. The marker
+is:
 
 ```ts
 // LOCAL PATCH (pi-packages) — see docs/pi-subagents-local-patch.md
