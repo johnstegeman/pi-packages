@@ -8,7 +8,8 @@ Decision: `pi-packages-sw30` (2026-10-09). Enforcement in practice:
 
 **`execute` may receive undeclared top-level keys** unless the schema itself declares
 `additionalProperties: false` (see below). The JSON schema a tool declares is what the model is
-*asked* to respect; pi adds no enforcement the schema does not ask for. So a tool that cannot
+*asked* to respect; pi adds no *local* enforcement the schema does not ask for, though it does
+add the keyword to the request it sends **upstream** — see below. So a tool that cannot
 apply a key must reject it by name rather than answer success — otherwise a typo silently drops
 the caller's intent, which is the failure `pi-packages-5ov5` closed for `pi-beads`' write tools.
 
@@ -16,8 +17,9 @@ the caller's intent, which is the failure `pi-packages-5ov5` closed for `pi-bead
 
 Provenance: the pi 1.1.0 binary
 `/Users/jstegeman/.local/share/mise/installs/pi/1.1.0/pi/pi`, sha256
-`daea10db90f7806cd0ae5be89fcf819d47b5ed3df99b7c79c31186a1cd6a6501`. Every offset below is an
-embedded-bundle byte offset (`grep -aob`) in that binary's JS bundle, recorded the way
+`daea10db90f7806cd0ae5be89fcf819d47b5ed3df99b7c79c31186a1cd6a6501`. Every offset below is the
+byte offset of `function <name>` in that binary's embedded JS bundle
+(`grep -aob "function <name>"`), recorded the way
 `docs/superpowers/specs/2026-09-30-codemode-adoption-design.md:534` records its own.
 
 `validateToolArguments` (embedded-bundle offset `67915977`) clones the arguments, normalises
@@ -40,8 +42,8 @@ undeclared argument survives to `execute` on either path.
 **New since `pi-packages-sw30` was written (that note is 0.99.2):** 1.1.0 adds a JSON-schema
 coercion pass, `coerceWithJsonSchema` (embedded-bundle offset `67912771`). It rewrites **declared**
 keys only — `applySchemaObjectCoercion` (embedded-bundle offset `67911007`) never deletes an
-mean `execute` can receive a *coerced* value for a declared key (a string `"5"` arriving as the
-number `5`, say) and an untouched value for an undeclared one.
+undeclared one — but it does mean `execute` can receive a *coerced* value for a declared key (a
+string `"5"` arriving as the number `5`, say) and an untouched value for an undeclared one.
 
 ## `additionalProperties: false`
 
@@ -49,10 +51,14 @@ What the keyword does depends on whether **your tool declares it**, and the two 
 symmetric.
 
 **Your tool declares the keyword.** pi compiles its validator from that same schema —
-`validateToolArguments` calls `getValidator(tool.parameters)` — so a stray key fails `Check`
-and pi throws `Validation failed for tool "<name>"` on **any** provider, strict or not.
-Declaring the keyword is a real, provider-independent rejection: it turns a stray key into a
-hard tool error instead of letting your `execute` decide what to do with it.
+`validateToolArguments` calls `getValidator(tool.parameters)` — so pi's own check is
+provider-independent: *where the key reaches it*, a stray key fails `Check` and pi throws
+`Validation failed for tool "<name>"`. Whether the key reaches it is a separate question — a
+provider that honours strict sampling can drop it upstream, and then the author sees a silent
+drop rather than the error. This repo's probe records exactly that outcome with the keyword
+declared (`packages/pi-beads/src/index.ts:138-140`). So the keyword is a real rejection at the
+local layer — it turns a stray key into a hard tool error instead of letting your `execute`
+decide what to do with it — but only where the key survives the provider.
 
 **Your tool does not declare it** (TypeBox's default). pi passes the key through, and only
 provider-side strict sampling might have discouraged it upstream. pi adds the keyword to the
