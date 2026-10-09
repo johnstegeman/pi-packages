@@ -82,6 +82,10 @@ Covered by `test/tool-exposure.test.ts` (instantiates the real extension with a 
 inspects the registered tool objects) and by the `structuredContent` assertion in
 `test/foreground-result-retrieval.test.ts`.
 
+`Agent` is deliberately **not** in this namespace: measured on pi 1.1.0, adding it admits `Agent`
+into a `codemode.mode: "only"` listing at the price of `edit`, a core tool (`pi-packages-graey`,
+closed won't-fix).
+
 ## Divergence 4 — codemode activation in subagent sessions (Task 7)
 
 `src/agent-runner.ts` builds every subagent session's `DefaultResourceLoader`, and an
@@ -266,32 +270,11 @@ Covered by `test/workflow-tool.test.ts`
 `id`/`result` snapshot), and
 `test/settings.test.ts` / `test/documented-defaults.test.ts` (the new default).
 
-## Divergence 8 — the `Agent` namespace (`pi-packages-graey`)
-
-The `Agent` tool definition now carries `namespace: SUBAGENTS_NAMESPACE` — the same
-`{ name: "subagents", description: "Subagent dispatch and workflow orchestration" }` the three
-codemode tools already use — while its `exposure` stays unset. `Agent` remains `direct`; only its
-grouping changes.
-
-The reason is an omission that used to be silent. Under `codemode.mode: "only"` at the default
-`inlineBudget: 3000`, `Agent` is refused from the codemode tool listing. A namespace-less tool
-belongs to the group with no heading, and incompleteness is reported per namespace — so nothing in
-the listing said anything was missing. With the namespace, the `subagents` heading carries
-` (some tools not listed)` and the refusal is visible. That is residual risk (a) of the stage-B
-evaluation, whose verdict is `go-with-mitigations` for exactly this reason.
-
-The change is invisible under mode `on`: `prepareCodemodeLoadout` builds its namespace map from the
-*listed* set, which under `on` excludes every `direct` tool, so `Agent` never enters that map
-either way. The two added discovery surfaces are the namespace-aware ones —
-`describeNamespace("subagents")` and `searchTools({ namespace: "subagents" })` now return `Agent`
-alongside the codemode tools.
-
-`test/tool-exposure.test.ts` pins it: `Agent` is in the namespace loop and its `exposure` stays
-`undefined`.
-
 ## In-code marker convention
 
-Divergences 3 — the code-mode exposure/namespace/outputSchema changes from Task 6 —, 4 — Task 7's
+Divergences 3 — the code-mode exposure/namespace/outputSchema changes from Task 6 — and 4 — Task 7's
+codemode activation delta — **are** marked, because each is a small, surgical edit a future
+reader could otherwise mistake for upstream behaviour. The marker is:
 codemode activation delta —, and 8 — the `Agent` namespace above — **are** marked, because each is
 a small, surgical edit a future reader could otherwise mistake for upstream behaviour. The marker
 is:
