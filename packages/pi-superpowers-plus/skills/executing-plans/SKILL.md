@@ -68,9 +68,17 @@ Based on feedback:
 
 After all tasks complete and verified — confirm with `beads_mol_ready({ id: "<implement-step-id>" })`
   returning no ready steps — close the `implement` step itself
-(`beads_close({ ids: "<implement-step-id>", reason: "all tasks complete" })`), which unblocks `verify`.
-Claim `verify` (`beads_update({ id: "<verify-step-id>", claim: true })`) and proceed to that work before the
-finishing-a-development-branch handoff below.
+(`beads_close({ ids: "<implement-step-id>", reason: "all tasks complete" })`), which unblocks `wrap-up`.
+
+Work `wrap-up` next (`beads_list({ label: "step:wrap-up", mol: "<root-id>" })`). This path has no
+task reviewer, so there is usually nothing on the list — but any finding raised during a batch
+report is dispositioned here, per
+[reference/disposition.md](../subagent-driven-development/reference/disposition.md): fix now, drop
+a non-issue with a reason, or put a genuine defer to your human partner as one batched question.
+Close `wrap-up`, which unblocks `verify`, then claim `verify`
+(`beads_update({ id: "<verify-step-id>", claim: true })`) and proceed to that work before the
+finishing-a-development-branch handoff below. If the molecule has no `step:wrap-up` (poured before
+the step existed), go straight to `verify`.
 
 - Announce: "I'm using the finishing-a-development-branch skill to complete this work."
 - **REQUIRED SUB-SKILL:** Use `/skill:finishing-a-development-branch` — tell the user to type `/finish` to load it.

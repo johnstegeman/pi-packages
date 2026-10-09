@@ -98,6 +98,7 @@ digraph process {
     "Final findings? ONE fix dispatch, one scoped re-review, adjudicate residuals" [shape=box];
     "Final review clean" [shape=box];
     "Close implement step" [shape=box];
+    "Work the wrap-up step (disposition parked findings)" [shape=box];
     "Claim verify (/skill:verification-before-completion)" [shape=box];
     "Use /skill:finishing-a-development-branch" [shape=box style=filled fillcolor=lightgreen];
 
@@ -130,7 +131,8 @@ digraph process {
     "Dispatch final code reviewer (../requesting-code-review/code-reviewer.md)" -> "Final findings? ONE fix dispatch, one scoped re-review, adjudicate residuals";
     "Final findings? ONE fix dispatch, one scoped re-review, adjudicate residuals" -> "Final review clean";
     "Final review clean" -> "Close implement step";
-    "Close implement step" -> "Claim verify (/skill:verification-before-completion)";
+    "Close implement step" -> "Work the wrap-up step (disposition parked findings)";
+    "Work the wrap-up step (disposition parked findings)" -> "Claim verify (/skill:verification-before-completion)";
     "Claim verify (/skill:verification-before-completion)" -> "Use /skill:finishing-a-development-branch";
 }
 ```
@@ -322,10 +324,11 @@ the requesting-code-review skill, passing the printed package path.
 Final review findings get ONE fix dispatch (a fresh implementer) plus one
 scoped re-review, then adjudicate any residuals with the breaker rules
 above. When the final review is clean:
-1. Delete this plan's workspace (the record now lives in git).
-2. Confirm `executing-plans` readiness — `beads_mol_ready({ id: "<implement-step-id>" })` must return no ready steps — then close the `implement` step — `beads_close({ ids: "<implement-step-id>", reason: "all tasks complete" })` — which unblocks `verify`.
-3. Claim `verify` (`beads_update({ id: "<verify-step-id>", claim: true })` — resolve `<verify-step-id>`/`<finish-step-id>` with `beads_list({ label: "step:verify" | "step:finish", mol: "<root-id>" })`) and proceed to that work before the finishing handoff below — use `/skill:verification-before-completion`, which closes `verify`, surfaces the human `smoke-test-approved` gate, and works `finish`.
-4. Then announce "I'm using the finishing-a-development-branch skill to complete this work." and hand off: **REQUIRED SUB-SKILL:** `/skill:finishing-a-development-branch` — tell the user to type `/finish` to load it.
+1. Confirm `executing-plans` readiness — `beads_mol_ready({ id: "<implement-step-id>" })` must return no ready steps — then close the `implement` step — `beads_close({ ids: "<implement-step-id>", reason: "all tasks complete" })` — which unblocks `wrap-up`.
+2. Work the `wrap-up` step. Resolve it with `beads_list({ label: "step:wrap-up", mol: "<root-id>" })` and claim it. Disposition every parked finding per [reference/disposition.md](reference/disposition.md): fix it now, drop it as a non-issue with a recorded reason, or put the genuine defers to your human partner as ONE batched question and file only what they approve. Then report fixes, drops (with reasons), and defers, and close `wrap-up` — `beads_close({ ids: "<wrap-up-step-id>", reason: "<fixed N, dropped M, deferred K (beads …)>" })` — which unblocks `verify`. **If the molecule has no `step:wrap-up`** (it was poured before this step existed), skip straight to step 3.
+3. Delete this plan's workspace (the record now lives in git). This runs **after** step 2: the ledger is the wrap-up step's input, so deleting it earlier destroys the list being worked.
+4. Claim `verify` (`beads_update({ id: "<verify-step-id>", claim: true })` — resolve `<verify-step-id>`/`<finish-step-id>` with `beads_list({ label: "step:verify" | "step:finish", mol: "<root-id>" })`) and proceed to that work before the finishing handoff below — use `/skill:verification-before-completion`, which closes `verify`, surfaces the human `smoke-test-approved` gate, and works `finish`.
+5. Then announce "I'm using the finishing-a-development-branch skill to complete this work." and hand off: **REQUIRED SUB-SKILL:** `/skill:finishing-a-development-branch` — tell the user to type `/finish` to load it.
 
 After generating the package, choose the review path:
 
