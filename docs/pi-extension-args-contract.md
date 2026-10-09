@@ -6,12 +6,19 @@ Decision: `pi-packages-sw30` (2026-10-09). Enforcement in practice:
 
 ## The contract
 
-**`execute` may receive undeclared top-level keys.** The JSON schema a tool declares is what the
-model is *asked* to respect; pi does not enforce it. So a tool that cannot apply a key must
-reject it by name rather than answer success — otherwise a typo silently drops the caller's
-intent, which is the failure `pi-packages-5ov5` closed for `pi-beads`' write tools.
+**`execute` may receive undeclared top-level keys** unless the schema itself declares
+`additionalProperties: false` (see below). The JSON schema a tool declares is what the model is
+*asked* to respect; pi adds no enforcement the schema does not ask for. So a tool that cannot
+apply a key must reject it by name rather than answer success — otherwise a typo silently drops
+the caller's intent, which is the failure `pi-packages-5ov5` closed for `pi-beads`' write tools.
 
 ## What pi does, verified on pi 1.1.0
+
+Provenance: the pi 1.1.0 binary
+`/Users/jstegeman/.local/share/mise/installs/pi/1.1.0/pi/pi`, sha256
+`daea10db90f7806cd0ae5be89fcf819d47b5ed3df99b7c79c31186a1cd6a6501`. Every offset below is an
+embedded-bundle byte offset (`grep -aob`) in that binary's JS bundle, recorded the way
+`docs/superpowers/specs/2026-09-30-codemode-adoption-design.md:534` records its own.
 
 `validateToolArguments` (embedded-bundle offset `67915977`) clones the arguments, normalises
 optional nulls for **declared** keys, validates, and then returns `args` **unchanged**:
@@ -22,6 +29,7 @@ normalizeOptionalNulls(args, tool.parameters);   // declared keys only
 exports_value.Convert(tool.parameters, args);
 const validator2 = getValidator(tool.parameters);
 ...
+// Elided: the 1.1.0-only JSON-schema coercion block added in this region — see below.
 if (validator2.Check(args)) return args;          // returned UNCHANGED
 ```
 
@@ -30,20 +38,34 @@ Both call paths reach it — the direct one (`prepareToolCall`) and the codemode
 undeclared argument survives to `execute` on either path.
 
 **New since `pi-packages-sw30` was written (that note is 0.99.2):** 1.1.0 adds a JSON-schema
-coercion pass, `coerceWithJsonSchema` (offset `67912771`). It rewrites **declared** keys only —
-`applySchemaObjectCoercion` (offset `67911007`) never deletes an undeclared one — but it does
+coercion pass, `coerceWithJsonSchema` (embedded-bundle offset `67912771`). It rewrites **declared**
+keys only — `applySchemaObjectCoercion` (embedded-bundle offset `67911007`) never deletes an
 mean `execute` can receive a *coerced* value for a declared key (a string `"5"` arriving as the
 number `5`, say) and an untouched value for an undeclared one.
 
 ## `additionalProperties: false`
 
-**Not enforced by pi.** It is forwarded to strict-capable providers only. On a provider without
-strict sampling support the keyword is inert; on one with support, a model that emits an extra
-key anyway trips pi's own `validator2.Check(args)` and pi throws
-`Validation failed for tool "<name>"`. That is a loud side effect worth knowing about, not a
-guarantee to rely on. pi's own strict-sampling request defaults **off**
+What the keyword does depends on whether **your tool declares it**, and the two cases are not
+symmetric.
+
+**Your tool declares the keyword.** pi compiles its validator from that same schema —
+`validateToolArguments` calls `getValidator(tool.parameters)` — so a stray key fails `Check`
+and pi throws `Validation failed for tool "<name>"` on **any** provider, strict or not.
+Declaring the keyword is a real, provider-independent rejection: it turns a stray key into a
+hard tool error instead of letting your `execute` decide what to do with it.
+
+**Your tool does not declare it** (TypeBox's default). pi passes the key through, and only
+provider-side strict sampling might have discouraged it upstream. pi adds the keyword to the
+schema it sends **upstream** — `makeStrictJsonSchema` clones the schema for that request, and
+the local validator never sees that copy — and that request defaults **off**
 (`convertResponsesTools`: `defaultStrict = options?.strict === undefined ? false :
-options.strict`), so the default posture of the whole system is "undeclared keys pass through".
+options.strict`). So on a provider without strict support the keyword is inert, and on one with
+support a model that emits an extra key anyway still has it reach your `execute`.
+
+That is why this repo's answer is the guard rather than the keyword: `pi-beads`' write tools
+declare no `additionalProperties: false`, so `execute` rejects an undeclared key by name
+(`packages/pi-beads/src/index.ts:781`) and the failure names the field the caller passed
+instead of surfacing as a validator error.
 
 ## History
 
