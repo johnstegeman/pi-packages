@@ -46,6 +46,24 @@ Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ---
 
+## [0.10.0] — 2026-10-09
+
+- **A cycle now wraps up its own findings instead of filing them.** The workflow molecule gains a
+  `wrap-up` step between `implement` and `verify`, so the whole-branch review's non-blocking
+  findings are dispositioned before `verify` runs — fixed in-session, dropped as a non-issue with a
+  recorded reason, or deferred to the human as one batched question and filed only on approval.
+  Previously the only exit for such a finding was a new bead, because the SDD ledger is deleted
+  when `implement` closes; the ledger now outlives the step that reads it. The policy lives in
+  `skills/subagent-driven-development/reference/disposition.md` and covers all five channels that
+  park work: task-review minors, fix-loop cap residuals, `DONE_WITH_CONCERNS` observations,
+  reviewer `Recommendations`, and plan-level observations. Molecule-driven runs only — a standalone
+  `/requesting-code-review` keeps "note Minor issues for later". Molecules poured before this
+  release have no `wrap-up` step and are skipped.
+- **The widget no longer reports "finishing" while the branch is still changing.** `phaseFor` stays
+  on `implementing` until `wrap-up` is done, so the phase label matches the work.
+
+---
+
 ## [0.9.0] — 2026-09-04
 
 ### Added
