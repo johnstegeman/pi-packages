@@ -153,16 +153,15 @@ const beadsExposure = (name: string) => ({
 //
 // Deliberate limits: top-level keys only (a `tasks[]` item in beads_create_list is a
 // nested surface with no schema of its own to derive from), and write-capable tools only.
-// `beads_memories` is the one mutating tool deliberately left out: it declares an
-// `outputSchema`, which the guard's plain `textResult` rejection would violate; bead
-// pi-packages-7vzw tracks a schema-respecting rejection for it. (`beads_ready` declares an
-// `outputSchema` too and IS in the set, because `claim: true` makes it mutating; its
-// rejection path carries text only - the same 7vzw gap, accepted here so the mutation is
-// guarded.)
+// Every mutating tool is in the set, including the two that declare an `outputSchema`
+// (`beads_memories`, `beads_ready`): a rejection carries `structuredContent` whenever the
+// tool declares one, so schema-declaring tools are guarded rather than excluded.
+// The contract this enforces is documented in `docs/pi-extension-args-contract.md`.
 const WRITE_TOOLS = new Set<string>([
   // `beads_ready` is a read tool except for `claim: true`, which runs
   // `bd update <id> --claim`; guarded because it can mutate.
   TOOL.ready,
+  TOOL.memories,
   TOOL.create,
   TOOL.createList,
   TOOL.update,
@@ -791,10 +790,13 @@ export default function piBeadsLean(pi: any) {
       async execute(...args: any[]) {
         const [, params] = args;
         const unknown = Object.keys(params ?? {}).filter((k) => !allowed.has(k));
-        if (unknown.length > 0)
-          return textResult(
-            `${def.name}: unknown argument(s): ${unknown.join(", ")} (accepted: ${declared.join(", ")})`,
-          );
+        if (unknown.length > 0) {
+          const msg = `${def.name}: unknown argument(s): ${unknown.join(", ")} (accepted: ${declared.join(", ")})`;
+          // A tool that declares an `outputSchema` must carry `structuredContent` on every
+          // return path (see `jsonResult`). Every pi-beads output schema spreads
+          // `ERROR_PROP`, so `{ error }` is valid for all of them.
+          return def.outputSchema === undefined ? textResult(msg) : textResult(msg, { error: msg });
+        }
         return run(...args);
       },
     };

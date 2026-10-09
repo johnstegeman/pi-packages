@@ -1099,6 +1099,40 @@ test("single-repo: beads_ready rejects an undeclared argument instead of claimin
   assert.equal(invocations().length, 0, "an undeclared argument must not reach bd");
 });
 
+// beads_memories mutates (`bd remember` / `bd forget`) and emits beads:changed, so it is a
+// write tool and must be guarded like the rest: a typo must not be silently dropped.
+test("single-repo: beads_memories rejects an undeclared argument instead of mutating", async () => {
+  const s = await openSession("single", repoDir);
+  const before = s.emitted.length;
+  resetLog();
+  const r = await s.byName.get("beads_memories").execute("c", {
+    action: "remember",
+    content: "x",
+    keys: "k",
+  });
+  const text = r?.content?.[0]?.text ?? "";
+  assert.match(text, /beads_memories: unknown argument\(s\): keys/, text);
+  assert.equal(invocations().length, 0, "an undeclared argument must not reach bd");
+  assert.equal(s.emitted.length, before, "a rejected call must not emit beads:changed");
+});
+
+// Both schema-declaring write tools must reject with structuredContent, not text alone: the
+// package's own invariant is that an outputSchema tool always sets it (see jsonResult).
+test("single-repo: a schema-declaring write tool rejects with structuredContent", async () => {
+  const s = await openSession("single", repoDir);
+  resetLog();
+  for (const [name, args] of [
+    ["beads_memories", { action: "remember", content: "x", keys: "k" }],
+    ["beads_ready", { claim: true, limt: 5 }],
+  ]) {
+    const r = await s.byName.get(name).execute("c", args);
+    const text = r?.content?.[0]?.text ?? "";
+    assert.match(text, new RegExp(`${name}: unknown argument\\(s\\)`), text);
+    assert.equal(r?.structuredContent?.error, text, `${name} must carry { error }`);
+  }
+  assert.equal(invocations().length, 0, "no rejected call may reach bd");
+});
+
 test("single-repo: beads_dep --type plumbing and default (no --type)", async () => {
   const s = await openSession("single", repoDir);
   resetLog();
