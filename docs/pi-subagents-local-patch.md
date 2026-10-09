@@ -275,9 +275,6 @@ Covered by `test/workflow-tool.test.ts`
 Divergences 3 — the code-mode exposure/namespace/outputSchema changes from Task 6 — and 4 — Task 7's
 codemode activation delta — **are** marked, because each is a small, surgical edit a future
 reader could otherwise mistake for upstream behaviour. The marker is:
-codemode activation delta —, and 8 — the `Agent` namespace above — **are** marked, because each is
-a small, surgical edit a future reader could otherwise mistake for upstream behaviour. The marker
-is:
 
 ```ts
 // LOCAL PATCH (pi-packages) — see docs/pi-subagents-local-patch.md
