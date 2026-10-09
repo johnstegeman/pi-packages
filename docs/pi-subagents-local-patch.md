@@ -272,9 +272,12 @@ Covered by `test/workflow-tool.test.ts`
 
 ## In-code marker convention
 
-Divergences 3 — the code-mode exposure/namespace/outputSchema changes from Task 6 — and 4 — Task 7's
-codemode activation delta — **are** marked, because each is a small, surgical edit a future
-reader could otherwise mistake for upstream behaviour. The marker is:
+Divergences 3 — the code-mode exposure/namespace/outputSchema changes from Task 6 — 4 — Task 7's
+codemode activation delta — and 7's `get_subagent_result` branch, whose `wf_` lookup sits inside a
+tool upstream knows only as an agent lookup — **are** marked, because each is a small, surgical
+edit a future reader could otherwise mistake for upstream behaviour. The rest of Divergence 7 is
+not: its watchdog hunks and durability helpers are additive blocks that are plainly this copy's
+own state (see its section above). The marker is:
 
 ```ts
 // LOCAL PATCH (pi-packages) — see docs/pi-subagents-local-patch.md

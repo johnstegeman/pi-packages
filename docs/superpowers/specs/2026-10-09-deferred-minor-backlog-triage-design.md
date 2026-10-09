@@ -72,8 +72,8 @@ the definition of a pile that cannot drain.
 
 Every row of `pi-packages-6t1xv` is **closed** (fixed, or won't-fix with a recorded reason) or
 **re-filed with a design-pass scope**. No row is left as an unowned follow-up. The in-repo
-fixes land with tests, and the two claims that were only *argued* rather than *verified* are
-verified on the runtime we actually run: whether `Agent`'s budget omission can be marked
+fixes land with tests, and the two claims that were only *argued* rather than *tested* are
+settled on the runtime we actually run: whether `Agent`'s budget omission can be marked
 (§3.3 — measured and rejected; see the Revision section), and whether the `rules`-block leak
 still exists (§3.3).
 
@@ -368,15 +368,15 @@ the lockfile is updated and committed with it.
 
 ## Out of scope
 
-- **Adopting stage B** (`codemode.mode: "only"`). This cycle fixes a mitigation for it and
-  verifies that mitigation; it does not flip the setting, and it does not create the adoption
-  bead. If stage B is ever adopted, the spec's mitigation list plus §3.3's method are the
-  checklist.
+- **Adopting stage B** (`codemode.mode: "only"`). This cycle **attempted** a mitigation for it,
+  measured the result, and rejected it (see the Revision section): risk (a) stands unmitigated.
+  It does not flip the setting, and it does not create the adoption bead. If stage B is ever
+  adopted, the spec's mitigation list plus §3.3's method are the checklist.
 - **Anything upstream.** No pi issue, no pi PR, no SDK bump. Decision 3.
 - **The two successors' actual implementation** — each needs its own brainstorm, spec and plan.
 - **The epic `jnr7`'s own theme.** It stays open with the `6f0p` successor under it.
 - **Any change to a verdict word, gate result or measured number** in the codemode spec
-  (§3.2's four edits are wording, plus the permitted mitigation note).
+  (§3.2's four edits are wording, plus the attempted-and-rejected mitigation note).
 - **`pi-packages-i8o5` and `pi-packages-d2r6`**, which the pile explicitly excludes as
   active/planned work rather than deferred minors.
 
@@ -387,7 +387,7 @@ the lockfile is updated and committed with it.
 | The membership test cannot infer mutability, so a future mutating tool could still be left out of `WRITE_TOOLS` | Stated as the test's own residual gap; the test pins today's inventory, its coverage, and the source-parsed set-equality, which is strictly more than the bead asked for |
 | Adding a namespace to `Agent` changes something under mode `on` | Verified against the bundle: `prepareCodemodeLoadout` builds namespaces from the *listed* set, which under `on` excludes every `direct` tool; the two new discovery surfaces (`describeNamespace`, `searchTools`) are additive |
 | The two verification sessions differ for unrelated reasons | The spike already hit this: the `cwd` section differs (50 → 52 chars) when the two sessions run from differently-named dirs. The comparison is on `sections.rules` only, and the session pair runs from the **same** dir to keep even that identical |
-| The `f7ber` edits touch a spec whose verdict we are not re-litigating | The four edits are wording; the permitted fifth adds an implementation note inside risk (a). No verdict word, gate result or number changes, which is `f7ber`'s own acceptance criterion 3 |
+| The `f7ber` edits touch a spec whose verdict we are not re-litigating | The four edits are wording; the permitted fifth adds a note inside risk (a) recording the attempted mitigation and its rejection. No verdict word, gate result or number changes, which is `f7ber`'s own acceptance criterion 3 |
 | A "small" fix turns out to need a design pass | The policy already has that door: it becomes a defer ruling made mid-flight, with the successor bead filed the same way as `2cly`/`6f0p` |
 
 ## Files
