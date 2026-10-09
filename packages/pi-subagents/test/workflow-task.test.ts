@@ -176,6 +176,26 @@ describe("surfacing a stalled child", () => {
     expect(updateWorkflowProgressBatch(task, [{ ...row, durationMs: 12 }])).toEqual([]);
   });
 
+  it("reports a stall once per attempt, so a retry that stalls again is heard", () => {
+    // Keyed by index alone, a retry that stalls a second time was silent: the
+    // run's one warning had already been spent on the attempt the user threw
+    // away.
+    const task = createWorkflowTask({ id: "wf_toast", script: "return 1" });
+    const row = (attempt: number) => ({
+      type: "workflow_agent" as const,
+      index: 0,
+      label: "verifier",
+      state: "error" as const,
+      timedOut: true,
+      attempt,
+    });
+
+    expect(updateWorkflowProgressBatch(task, [row(0)])).toEqual(["verifier"]);
+    expect(updateWorkflowProgressBatch(task, [row(0)])).toEqual([]);
+    expect(updateWorkflowProgressBatch(task, [row(1)])).toEqual(["verifier"]);
+    expect(updateWorkflowProgressBatch(task, [row(1)])).toEqual([]);
+  });
+
   it("says nothing about a skip or an ordinary failure", () => {
     const task = createWorkflowTask({ id: "wf_x", script: "x" });
     expect(
@@ -197,6 +217,21 @@ describe("snapshotting a settled run", () => {
     task.value = "all clear";
 
     expect(workflowEntryData(task)).toMatchObject({ id: "wf_abc123", result: "all clear" });
+  });
+
+  it("persists paused time, and omits the field entirely when there is none", () => {
+    // Both directions are load-bearing. With the pause in the snapshot a
+    // recovered run reports the duration the live one did; without the field —
+    // the default, and every snapshot written before it existed — the key must
+    // be absent rather than `0`, or every legacy snapshot's bytes change.
+    const paused = createWorkflowTask({ id: "wf_paused", script: "x" });
+    paused.status = "completed";
+    paused.totalPausedMs = 600_000;
+    expect(workflowEntryData(paused)).toMatchObject({ totalPausedMs: 600_000 });
+
+    const fresh = createWorkflowTask({ id: "wf_fresh", script: "x" });
+    fresh.status = "completed";
+    expect(workflowEntryData(fresh)).not.toHaveProperty("totalPausedMs");
   });
 
   it("caps the persisted outcome so a large run result cannot bloat the transcript", () => {

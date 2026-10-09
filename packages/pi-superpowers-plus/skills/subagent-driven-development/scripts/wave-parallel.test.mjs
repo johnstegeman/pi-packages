@@ -104,12 +104,36 @@ test("implementer discipline: shared-branch commit rules present", () => {
   assert.match(src, /git add <your files>/);
 });
 
+/**
+ * Source with comments removed, so a count over it cannot be inflated by prose.
+ * Block comments and `//` comments — whole-line or trailing — go; a `//` with no
+ * whitespace before it stays, so a `https://` inside a string is not mangled.
+ */
+const stripComments = (src) =>
+  src
+    .replace(/\/\*[\s\S]*?\*\//g, "")
+    .replace(/^[ \t]*\/\/.*$/gm, "")
+    .replace(/[ \t]+\/\/.*$/gm, "");
+
+test("stall window: the call-site count ignores comments", () => {
+  // The count is a source assertion by design — it catches a call site the
+  // behaviour test cannot enumerate — but it must not be tripped by prose. A
+  // comment that mentions the option used to count as a call site, in either
+  // form: a line of its own, or trailing real code.
+  const withWholeLine = src + "\n// was stallTimeout: 3600 before the refactor\n";
+  assert.equal((stripComments(withWholeLine).match(/stallTimeout: 3600/g) ?? []).length, 2);
+  // The trailing line carries one real call site and one comment mention: the
+  // code still counts (3); 4 would mean the comment leaked through.
+  const withTrailing = src + "\nagent(p, { stallTimeout: 3600 }); // was stallTimeout: 3600\n";
+  assert.equal((stripComments(withTrailing).match(/stallTimeout: 3600/g) ?? []).length, 3);
+});
+
 test("stall window: every agent() call site raises the window to 3600 s", () => {
   // Wave implementers legitimately run long test suites, so the 600 s default
   // would kill a slow-but-alive child. The high explicit window is per call
   // site, not per script: a spread or a new branch that forgot it would be
   // invisible to the behavior test below, so count the source too.
-  assert.equal((src.match(/stallTimeout: 3600/g) ?? []).length, 2);
+  assert.equal((stripComments(src).match(/stallTimeout: 3600/g) ?? []).length, 2);
 });
 
 test("no sandbox-forbidden globals", () => {

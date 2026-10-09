@@ -44,6 +44,7 @@
  * resume: a script that reads the clock produces a different prefix on the
  * second run and the replay silently diverges.
  */
+import { STALL_TIMEOUT_SECS_CEILING } from "../settings.js";
 
 /**
  * Runs inside the realm, ahead of the script body, on a single line.
@@ -484,17 +485,18 @@ async function agentIn(scope, prompt, opts) {
 
   // A number of seconds, not a string: optionalText would coerce the shape
   // away, and 0 has to stay a number to mean "off". Rejected at the call site
-  // like effort, and bounded by the same 86400 s ceiling as settings'
-  // STALL_TIMEOUT_SECS_CEILING so the global knob and this one cannot disagree.
+  // like effort, and bounded by the ceiling this module interpolates from
+  // settings' STALL_TIMEOUT_SECS_CEILING — one constant, so the global knob and
+  // this one cannot disagree.
   const stallTimeout = options.stallTimeout;
   if (stallTimeout !== undefined) {
     if (
       typeof stallTimeout !== "number" ||
       !Number.isFinite(stallTimeout) ||
       stallTimeout < 0 ||
-      stallTimeout > 86400
+      stallTimeout > ${STALL_TIMEOUT_SECS_CEILING}
     ) {
-      throw new Error("agent() opts.stallTimeout must be a number of seconds in [0, 86400] (0 disables the stall watchdog).");
+      throw new Error("agent() opts.stallTimeout must be a number of seconds in [0, ${STALL_TIMEOUT_SECS_CEILING}] (0 disables the stall watchdog).");
     }
   }
 

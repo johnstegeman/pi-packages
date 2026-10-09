@@ -1,3 +1,5 @@
+import { readFileSync } from "node:fs";
+import { Worker } from "node:worker_threads";
 import { describe, expect, it, vi } from "vitest";
 import type { WorkflowJournalEntry } from "../src/workflow/journal.js";
 import { buildPhaseGroups, type WorkflowAgentEntry, type WorkflowEntry } from "../src/workflow/progress.js";
@@ -67,6 +69,20 @@ describe("the worker source itself", () => {
     // here turns a twenty-minute bisect into a red test.
     const { WORKER_SOURCE } = await import("../src/workflow/worker-source.js");
     expect(() => new Function(WORKER_SOURCE)).not.toThrow();
+  });
+
+  it("states the stallTimeout ceiling once, from settings", async () => {
+    // Two literals that must agree are two literals that can drift: the worker
+    // string is a string, so it cannot import the constant — it interpolates it.
+    const source = readFileSync(new URL("../src/workflow/worker-source.ts", import.meta.url), "utf8");
+    // Both spellings: the repo writes the ceiling as `86_400`, and `\b86400\b`
+    // does not match that (`_` is a word character), so the drift this guards
+    // against could come back in the repo's own style unnoticed.
+    expect(source).not.toMatch(/\b86_?400\b/);
+    // Naming the constant proves nothing on its own — the import alone satisfies
+    // it. Pin it where it is used: the comparison and the message's bound.
+    expect(source).toContain(`stallTimeout > \${STALL_TIMEOUT_SECS_CEILING}`);
+    expect(source).toContain(`[0, \${STALL_TIMEOUT_SECS_CEILING}]`);
   });
 });
 
@@ -1481,6 +1497,16 @@ describe("stall watchdog", () => {
     expect(terminal?.durationMs ?? Number.POSITIVE_INFINITY).toBeLessThan(500);
   });
 
+  it("renders a sub-second window as a duration, not as 0s", async () => {
+    // `Math.round(200 / 1000)` printed "Timed out after 0s", which reads as a
+    // watchdog that fired instantly rather than one with a 200 ms window.
+    const stub = stubHost(() => new Promise<WorkflowSpawnResult>(() => {})); // never resolves
+    const result = await run('const a = await agent("hang", { stallTimeout: 0.2 }); return { got: a };', {
+      host: stub.host, stallTimeoutMs: 1000, stallCheckIntervalMs: 10,
+    });
+    expect(agentEntries(result.progress).at(-1)?.error).toBe("Timed out after 200ms of inactivity.");
+  });
+
   it("lets a per-call stallTimeout of zero opt out of the run's window", async () => {
     // The run says 40 ms; this call says off. Far past that window the child is
     // still pending — so `0` disabled the watchdog rather than merely delaying it.
@@ -1528,6 +1554,41 @@ describe("stall watchdog", () => {
     expect(result.status).toBe("completed");
     // Exactly one terminal row, and it is the user's: the watchdog does not
     // report over an intent the user already expressed.
+    const terminal = agentEntries(result.progress).filter(e => e.index === 0 && e.state !== "start");
+    expect(terminal).toHaveLength(1);
+    expect(terminal[0]).toMatchObject({ state: "error", skipped: true });
+    expect(terminal[0]?.timedOut).toBeUndefined();
+  });
+
+  it("reports a user skip as a skip even when the child resolves ok as it is aborted", async () => {
+    // The watchdog marks the child timedOut and aborts it; the child's own
+    // result lands in the same instant, and the user's skip is already in
+    // flight. The skip wins: the gate never ran, so the script must get the
+    // same null a plain skip gives rather than text nothing verified.
+    const release = new Map<string, (r: WorkflowSpawnResult) => void>();
+    let gateRan = false;
+    let control: WorkflowControl | undefined;
+    const host: WorkflowHost = {
+      spawnAgent(request) {
+        return new Promise<WorkflowSpawnResult>(resolve => release.set(request.agentId, resolve));
+      },
+      abortAgent(agentId) {
+        // Recorded before the settle path sees the result — this is what makes
+        // the race deterministic instead of timing-dependent.
+        control?.skip(0);
+        release.get(agentId)?.({ ok: true, text: "late" });
+      },
+      async runGate() {
+        gateRan = true;
+        return { ok: true, output: "" };
+      },
+    };
+    const result = await run('const a = await agent("gated", { gate: "true" }); return { got: a };', {
+      host, stallTimeoutMs: 40, stallCheckIntervalMs: 10, onControl: c => { control = c; },
+    });
+
+    expect(result.value).toEqual({ got: null });
+    expect(gateRan).toBe(false);
     const terminal = agentEntries(result.progress).filter(e => e.index === 0 && e.state !== "start");
     expect(terminal).toHaveLength(1);
     expect(terminal[0]).toMatchObject({ state: "error", skipped: true });
@@ -1632,11 +1693,16 @@ describe("stall watchdog", () => {
     // it (`live.timedOut = false`), or the next tick kills it outright.
     let calls = 0;
     const aborted: string[] = [];
+    let abortedOnce!: () => void;
+    const sawAbort = new Promise<void>(resolve => { abortedOnce = resolve; });
     const host: WorkflowHost = {
       spawnAgent(request) {
         calls++;
         if (calls === 1) return new Promise<WorkflowSpawnResult>(() => {});
         return (async () => {
+          // ~10x headroom between heartbeats and the window below: on a loaded
+          // box the old 15 ms/40 ms pairing could starve the attempt and fail
+          // the test for the scheduler's reasons rather than the code's.
           for (let i = 0; i < 4; i++) {
             request.onActivity?.();
             await sleep(15);
@@ -1646,16 +1712,19 @@ describe("stall watchdog", () => {
       },
       abortAgent(agentId) {
         aborted.push(agentId);
+        abortedOnce();
       },
     };
 
     let control: WorkflowControl | undefined;
     const done = run('const a = await agent("hang"); return { got: a };', {
-      host, stallTimeoutMs: 40, stallCheckIntervalMs: 40,
+      host, stallTimeoutMs: 200, stallCheckIntervalMs: 50,
       onControl: c => { control = c; },
     });
 
-    for (let i = 0; i < 200 && aborted.length === 0; i++) await sleep(2);
+    // No poll loop: the abort itself is the event, so a loaded box can only make
+    // the test slower, never flakier.
+    await sawAbort;
     expect(aborted).toEqual(["wf-agent-0"]);
     expect(control?.retry(0)).toBe(true);
 
@@ -1723,14 +1792,69 @@ describe("stall watchdog", () => {
     // A worker that spins before it ever calls an agent posts nothing at all,
     // so no per-child watchdog can see it: only the run-level pulse can.
     const stub = stubHost();
+    const terminateSpy = vi.spyOn(Worker.prototype, "terminate");
+    try {
+      const result = await run("while (true) {}", {
+        host: stub.host,
+        runStallTimeoutMs: 50,
+        stallCheckIntervalMs: 10,
+      });
+      expect(result.status).toBe("failed");
+      expect(result.error).toContain("Workflow stalled");
+      // "Failed" is only half of it: the thread has to be down, or the run
+      // leaves a spinning worker behind for the rest of the session.
+      expect(terminateSpy).toHaveBeenCalledTimes(1);
+    } finally {
+      terminateSpy.mockRestore();
+    }
+  }, 5000);
+
+  it("renders the run-level stall message with the same formatter", async () => {
+    const stub = stubHost();
     const result = await run("while (true) {}", {
-      host: stub.host,
-      runStallTimeoutMs: 50,
-      stallCheckIntervalMs: 10,
+      host: stub.host, runStallTimeoutMs: 200, stallCheckIntervalMs: 10,
     });
     expect(result.status).toBe("failed");
-    expect(result.error).toContain("Workflow stalled");
-  }, 5000);
+    expect(result.error).toBe("Workflow stalled: no progress for 200ms.");
+  });
+
+  it.each([
+    ["NaN", Number.NaN],
+    ["Infinity", Number.POSITIVE_INFINITY],
+  ])("treats a %s run-level window as unset", async (_label, window) => {
+    // NaN fails every run on the very first tick and Infinity never fails one;
+    // both are programmatic-only values (the setting is sanitized and production
+    // derives the option from it) and neither is a window. A wedged worker must
+    // therefore outlive many ticks instead of being failed instantly.
+    const stub = stubHost();
+    const abort = new AbortController();
+    const done = run("while (true) {}", {
+      host: stub.host,
+      runStallTimeoutMs: window,
+      stallCheckIntervalMs: 10,
+      signal: abort.signal,
+    });
+    const early = await Promise.race([done.then(() => "settled" as const), sleep(120).then(() => "pending" as const)]);
+    expect(early).toBe("pending");
+    abort.abort();
+    expect((await done).status).toBe("killed");
+  });
+
+  it("starts the run-level silence clock after the worker exists", async () => {
+    // Not observable in black-box timing — the difference is the host-side cost
+    // of `new Worker`, sub-millisecond here — so pin the order at the source:
+    // a seed before the constructor counts time the worker could not have spent.
+    const source = readFileSync(new URL("../src/workflow/runtime.ts", import.meta.url), "utf8");
+    const ctor = source.indexOf("new Worker(WORKER_SOURCE");
+    expect(ctor).toBeGreaterThan(-1);
+    // Pinned between the constructor and the run's promise: the bare pattern's
+    // first match is the `resume` re-arm, defined above the constructor and
+    // meant to stay there, so an indexOf from the top cannot fail.
+    expect(source.slice(ctor, source.indexOf("return await new Promise", ctor))).toContain("lastWorkerMessageAt = Date.now()");
+    // The clock starts at the sentinel, so a missing seed fails every run
+    // instantly instead of reading as "recently alive".
+    expect(source).toContain("let lastWorkerMessageAt = 0;");
+  });
 
   it("does not fail a run that is paused", async () => {
     // A paused run is silent by design. Paused before the first agent, the run
@@ -1796,7 +1920,10 @@ describe("stall watchdog", () => {
       expect(result.status).toBe("completed");
 
       const created = setSpy.mock.results.map(r => r.value);
-      expect(created.length).toBeGreaterThan(0);
+      // Two intervals for one child — one per-child and one run-level — so this
+      // pins that both watchdogs were *armed*, not merely that whatever was armed
+      // got cleared.
+      expect(created.length).toBe(2);
       const cleared = new Set(clearSpy.mock.calls.map(c => c[0]));
       for (const timer of created) expect(cleared.has(timer)).toBe(true);
     } finally {

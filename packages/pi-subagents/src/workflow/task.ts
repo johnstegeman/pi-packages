@@ -77,13 +77,16 @@ export interface WorkflowTask {
   totalToolCalls: number;
   logs: string[];
   /**
-   * Indices of children whose watchdog stop has already been toasted.
+   * ``${index}:${attempt}`` of every child whose watchdog stop has already been
+   * toasted.
    *
-   * The warning is a one-off per run and child — the run settles moments after
-   * the row appears, and the completion notification carries the count — so the
-   * batch handler needs a record of what it has already said.
+   * The warning is a one-off per attempt — the run settles moments after the row
+   * appears, and the completion notification carries the count — so the batch
+   * handler needs a record of what it has already said. Keyed by attempt as well
+   * as index: a retry that stalls again is news, and keying by index alone
+   * swallowed it.
    */
-  notifiedTimedOut: Set<number>;
+  notifiedTimedOut: Set<string>;
 
   abortController: AbortController;
   startTime: number;
@@ -146,7 +149,7 @@ export function createWorkflowTask(init: {
  *
  * Returns the labels of children that just went timed-out, which the caller
  * toasts. Kept here rather than derived by the caller because "already told" is
- * per run and child, and the record is what remembers it.
+ * per run, child and attempt, and the record is what remembers it.
  */
 export function updateWorkflowProgressBatch(
   task: WorkflowTask,
@@ -178,8 +181,9 @@ export function updateWorkflowProgressBatch(
   const stalled: string[] = [];
   for (const entry of entries) {
     if (entry.type !== "workflow_agent" || entry.timedOut !== true) continue;
-    if (task.notifiedTimedOut.has(entry.index)) continue;
-    task.notifiedTimedOut.add(entry.index);
+    const key = `${entry.index}:${entry.attempt ?? 0}`;
+    if (task.notifiedTimedOut.has(key)) continue;
+    task.notifiedTimedOut.add(key);
     stalled.push(entry.label);
   }
   return stalled;

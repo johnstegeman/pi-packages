@@ -75,6 +75,14 @@ describe("the agent() contract it documents", () => {
     }
   });
 
+  it("names stallTimeout in the inline agent() signature", () => {
+    // The prose lists `opts.stallTimeout`; the signature above it did not, so a
+    // model reading the shape rather than the paragraph would not know the
+    // option exists.
+    const signature = description.match(/agent\(prompt: string, opts\?: \{[^}]*\}/)?.[0] ?? "";
+    expect(signature).toContain("stallTimeout");
+  });
+
   it("documents stallTimeout as a per-call inactivity window with 0 disabling it", () => {
     // The option exists so a script can tune one child's patience; the prose
     // has to say the unit and the off switch, or a model will guess at both.

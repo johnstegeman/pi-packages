@@ -18,7 +18,7 @@ import { Worker } from "node:worker_threads";
 import { type JournalKeyInput, journalKey, type WorkflowJournalEntry } from "./journal.js";
 import { type CompiledSchema, compileJsonSchema } from "./json-schema.js";
 import { extractMeta, type WorkflowMeta } from "./meta.js";
-import type { WorkflowAgentEntry, WorkflowEntry } from "./progress.js";
+import { formatRunDuration, type WorkflowAgentEntry, type WorkflowEntry } from "./progress.js";
 import { WORKER_SOURCE } from "./worker-source.js";
 
 /** Matches the `script` field's `maxLength` in the tool schema. */
@@ -351,7 +351,7 @@ export interface RunWorkflowOptions {
    * flight: the worker posts one `call` and then hears nothing until the
    * answer, so a running child is indistinguishable from a wedged worker by
    * silence alone — judging it here would cap every `agent()` at this window.
-   * `0` disables it. Unset takes {@link DEFAULT_STALL_TIMEOUT_MS} × 2.
+   * `0` disables it. Unset or non-finite takes {@link DEFAULT_STALL_TIMEOUT_MS} × 2.
    */
   runStallTimeoutMs?: number;
   /**
@@ -807,7 +807,7 @@ export async function runWorkflow(options: RunWorkflowOptions): Promise<Workflow
 
   /** The one wording for a watchdog stop, shared by the row and the abort. */
   const stallMessage = (timeoutMs: number) =>
-    `Timed out after ${Math.round(timeoutMs / 1000)}s of inactivity.`;
+    `Timed out after ${formatRunDuration(timeoutMs)} of inactivity.`;
 
   const checkStalls = () => {
     const now = Date.now();
@@ -828,7 +828,18 @@ export async function runWorkflow(options: RunWorkflowOptions): Promise<Workflow
       // watchdog exists to prevent. Answer the call ourselves. The child may be
       // left running — the lesser evil, and why this is the second tick rather
       // than the first — but the run is free either way.
-      live.forceSettle?.(
+      //
+      // That grace IS one scan tick, so it is not an independent bound: it
+      // tracks `min(30s, max(100ms, window/10))` and a short window is answered
+      // a tick sooner.
+      const forceSettle = live.forceSettle;
+      // Nothing to answer means nothing was force-completed, so the warning
+      // below must not fire for it: the warning names a leak, and a leak needs
+      // the act. Unreachable in practice — the entry is deleted the moment the
+      // child settles, and `forceSettle` is cleared in the same `finally` — but
+      // the warning belongs to the block that acts, not to the iteration.
+      if (forceSettle === undefined) continue;
+      forceSettle(
         // Report the stop the user asked for, not the one the watchdog did: a
         // skip that raced the watchdog is still a skip, and only the row's own
         // flag can say so once the child never reported one itself.
@@ -876,8 +887,13 @@ export async function runWorkflow(options: RunWorkflowOptions): Promise<Workflow
    * child is ever registered to watch. Set on every worker message, whatever
    * it is: a progress batch and a `call` are equally proof the worker is alive.
    */
-  let lastWorkerMessageAt = Date.now();
-  const runStallTimeoutMs = options.runStallTimeoutMs ?? DEFAULT_STALL_TIMEOUT_MS * 2;
+  let lastWorkerMessageAt = 0;
+  // A non-finite window is not a window: NaN would fail every run on the first
+  // tick and Infinity would never fail one, so both mean "unset". `0` and
+  // negatives keep their meaning — the run-level timer is disabled at `<= 0`.
+  const runStallTimeoutMs = Number.isFinite(options.runStallTimeoutMs)
+    ? (options.runStallTimeoutMs as number)
+    : DEFAULT_STALL_TIMEOUT_MS * 2;
   /**
    * Set once `finish` exists, for the same reason as {@link warnForceSettle}:
    * the timer is armed inside the run's promise, and the check has to reach
@@ -1010,6 +1026,9 @@ export async function runWorkflow(options: RunWorkflowOptions): Promise<Workflow
       nestedCap: options.nestedCap ?? WORKFLOW_NESTED_CAP,
     },
   });
+  // Seeded here, not at the top of the run: a clock started before the worker
+  // existed counts the host-side cost of constructing it as silence.
+  lastWorkerMessageAt = Date.now();
 
   return await new Promise<WorkflowRunResult>(resolve => {
     const emit = (entries: WorkflowEntry[]) => {
@@ -1068,7 +1087,7 @@ export async function runWorkflow(options: RunWorkflowOptions): Promise<Workflow
     finishRunStall = () => {
       finish({
         status: "failed",
-        error: `Workflow stalled: no progress for ${Math.round(runStallTimeoutMs / 1000)}s.`,
+        error: `Workflow stalled: no progress for ${formatRunDuration(runStallTimeoutMs)}.`,
       });
     };
     armRunStallTimer();
@@ -1438,11 +1457,29 @@ export async function runWorkflow(options: RunWorkflowOptions): Promise<Workflow
             // too. Without this, a retry of a timed-out call would be killed on
             // the next tick by the verdict on the attempt before it.
             live.timedOut = false;
-            noteActivity(agentId);
+            // No `noteActivity` here: the settle path already deleted this
+            // child's entry, so there is nothing to refresh — the loop's own
+            // `lastActivity.set` on the next iteration is what starts the new
+            // attempt's clock.
             attempt++;
             emit([{ ...base, queuedAt, attempt, lastAttemptReason: "user-retry" }]);
             continue;
           }
+
+          // One builder for both terminal emits, so a field added to one cannot
+          // go missing from the other: the rows differ only in the timestamp
+          // they settled at and the verdict the caller adds on top. Closes over
+          // `result`, so it is defined once the try/finally has left it final.
+          const terminalRow = (at: number) => ({
+            ...base,
+            queuedAt,
+            startedAt,
+            ...attemptMark,
+            lastProgressAt: at,
+            durationMs: at - startedAt,
+            ...(result.tokens !== undefined ? { tokens: result.tokens } : {}),
+            ...(result.toolCalls !== undefined ? { toolCalls: result.toolCalls } : {}),
+          });
 
           // The watchdog stopped this child, so the call is a timeout rather
           // than a failure or a skip — whatever the abort made the host report.
@@ -1450,30 +1487,27 @@ export async function runWorkflow(options: RunWorkflowOptions): Promise<Workflow
           // `intent()` and not `result.skipped`: a host reports a stopped child
           // as skipped whether a user asked for it or the watchdog did, so the
           // result alone cannot tell the two apart. The user's intent can, and
-          // theirs wins the race — one row either way.
-          if (live.timedOut === true && intent() !== "skip") {
+          // theirs wins the race — and it wins it whatever the child's own
+          // result turned out to be: the gate below was skipped with the abort,
+          // so a child that resolved `ok` in the same instant must not hand the
+          // script text nothing verified.
+          if (live.timedOut === true) {
             // Counted here too: the child ran and burned output tokens before
-            // the watchdog stopped it, and the timed-out branch returns before
-            // the shared accumulation below.
+            // the watchdog stopped it, and this branch returns before the
+            // shared accumulation below.
             spentOutputTokens += result.outputTokens ?? 0;
             const timedOutAt = Date.now();
-            emit([
-              {
-                ...base,
-                queuedAt,
-                startedAt,
-                ...attemptMark,
-                lastProgressAt: timedOutAt,
-                durationMs: timedOutAt - startedAt,
-                state: "error",
-                timedOut: true,
-                error: stallMessage(agentStallMs),
-              },
-            ]);
+            const stopCommon = terminalRow(timedOutAt);
             // `ok: false`, like any other failure: resuming this run re-runs
             // this child live, which is the honest thing to do with a call that
             // never produced an answer.
             recordJournal?.({ index, key, ok: false, ...resumeMark });
+            if (intent() === "skip") {
+              // The stop the user asked for, not the one the watchdog did.
+              emit([{ ...stopCommon, state: "error", skipped: true, error: "Stopped." }]);
+            } else {
+              emit([{ ...stopCommon, state: "error", timedOut: true, error: stallMessage(agentStallMs) }]);
+            }
             // `null` to the script, the shape a skip already gives — the SDD
             // scripts degrade on a missing verdict rather than throw.
             respond(callId, true, null);
@@ -1486,16 +1520,7 @@ export async function runWorkflow(options: RunWorkflowOptions): Promise<Workflow
           spentOutputTokens += result.outputTokens ?? 0;
 
           const finishedAt = Date.now();
-          const common = {
-            ...base,
-            queuedAt,
-            startedAt,
-            ...attemptMark,
-            lastProgressAt: finishedAt,
-            durationMs: finishedAt - startedAt,
-            ...(result.tokens !== undefined ? { tokens: result.tokens } : {}),
-            ...(result.toolCalls !== undefined ? { toolCalls: result.toolCalls } : {}),
-          };
+          const common = terminalRow(finishedAt);
 
           if (result.ok) {
             const text = result.text ?? "";

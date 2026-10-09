@@ -34,7 +34,7 @@ import { getMaxSubagentDepth, setMaxSubagentDepth } from "./nested-tools.js";
 import { createOutputFilePath, ensureOutputFile, getOutputTranscriptDefault, sessionTaskDir, setOutputTranscriptDefault, streamToOutputFile, writeInitialEntry } from "./output-file.js";
 import { SubagentScheduler } from "./schedule.js";
 import { resolveStorePath, ScheduleStore } from "./schedule-store.js";
-import { applyAndEmitLoaded, getWorkflowStallTimeoutSecs, loadSettings, type SubagentsSettings, saveAndEmitChanged, setWorkflowStallTimeout, type ToolDescriptionMode } from "./settings.js";
+import { applyAndEmitLoaded, getWorkflowStallTimeoutSecs, loadSettings, parseStallTimeoutSecs, STALL_TIMEOUT_SECS_CEILING, type SubagentsSettings, saveAndEmitChanged, setWorkflowStallTimeout, type ToolDescriptionMode } from "./settings.js";
 import { getForegroundOutcomeNote, getStatusNote, partialOutputSuffix } from "./status-note.js";
 import { type AgentConfig, type AgentInvocation, type AgentMentionMode, type AgentRecord, type JoinMode, type NotificationDetails, type SubagentType, type ViewerMarkdownMode, type WidgetMode } from "./types.js";
 import { createMentionProvider, mentionRoster, type TypeInfo } from "./ui/agent-mention.js";
@@ -79,7 +79,7 @@ import {
 } from "./workflow/progress.js";
 import { assertWorkflowArgs, runWorkflow } from "./workflow/runtime.js";
 import { resolveWorkflowScript } from "./workflow/saved.js";
-import { completeWorkflowTask, createWorkflowTask, failWorkflowTask, formatWorkflowNotification, resolveResumeTarget, updateWorkflowProgressBatch, type WorkflowTask, workflowResultText, workflowRunId } from "./workflow/task.js";
+import { completeWorkflowTask, createWorkflowTask, failWorkflowTask, formatWorkflowNotification, resolveResumeTarget, truncateWorkflowResult, updateWorkflowProgressBatch, type WorkflowTask, workflowResultText, workflowRunId } from "./workflow/task.js";
 import { fullWorkflowToolDescription } from "./workflow/tool-description.js";
 import { isWorktreeIsolationEnabled, setWorktreeIsolationEnabled } from "./worktree.js";
 import { escapeXml } from "./xml.js";
@@ -2424,7 +2424,9 @@ Terse command-style prompts produce shallow, generic work.
         progress: task.workflowProgress,
         agentCount: task.agentCount,
         elapsedMs: elapsedMs(task, Date.now()),
-        result: workflowResultText(task),
+        // Capped with the same helper the snapshot uses: the tool answer and
+        // the reloaded answer have to be the same answer.
+        result: truncateWorkflowResult(workflowResultText(task)),
       };
     }
     const recovered = recoveredWorkflowRuns.get(id);
@@ -2434,8 +2436,13 @@ Terse command-style prompts produce shallow, generic work.
       progress: recovered.progress,
       agentCount: recovered.agentCount,
       // The snapshot froze the clock at settle, so this is the run's real
-      // duration rather than the time since the reload.
-      elapsedMs: elapsedMs({ startTime: recovered.startTime, endTime: recovered.endTime }, Date.now()),
+      // duration rather than the time since the reload. Paused time is
+      // subtracted the same way the live branch does; a snapshot written
+      // before the field existed reads it as 0 and keeps its frozen window.
+      elapsedMs: elapsedMs(
+        { startTime: recovered.startTime, endTime: recovered.endTime, totalPausedMs: recovered.totalPausedMs },
+        Date.now(),
+      ),
       // A snapshot written before the outcome was persisted has nothing to
       // report; "No output." is what a live run with no value says.
       result: recovered.result ?? "No output.",
@@ -2535,12 +2542,12 @@ Terse command-style prompts produce shallow, generic work.
   function appendWorkflowEntry(task: WorkflowTask): void {
     try {
       pi.appendEntry<WorkflowEntryData>(WORKFLOW_ENTRY_TYPE, workflowEntryData(task));
-    } catch {
-      // A detached run can settle after its session was replaced or is
-      // shutting down, and pi refuses an entry from a stale ctx. There is
-      // nowhere left to record it, and losing the entry is better than an
-      // unhandled rejection from a promise nobody awaits. Same rule the
-      // completion nudge follows (`scheduleNudge`'s send).
+    } catch (error) {
+      // A detached run can settle after its session was replaced or is shutting
+      // down, and pi refuses an entry from a stale ctx. There is nowhere left to
+      // record it — but a silently dropped entry is indistinguishable from one
+      // that was never written, so say so.
+      console.warn("[pi-subagents] could not append the workflow entry:", error);
     }
   }
 
@@ -2943,11 +2950,11 @@ Terse command-style prompts produce shallow, generic work.
     }),
     parameters: Type.Object({
       agent_id: Type.String({
-        description: "The agent ID to check, or a workflow run ID (`wf_…`) returned by SubagentWorkflow. The agent's handle also works — its `name` if you gave it one, otherwise its type (`explore`, `explore-2`).",
+        description: "The agent ID to check, or a workflow run ID (`wf_…`) returned by SubagentWorkflow. The agent's handle also works — its `name` if you gave it one, otherwise its type (`explore`, `explore-2`). A `wf_…` id answers with a status summary and, once the run has settled, its result — but ignores `wait` and `verbose`, which apply to agents.",
       }),
       wait: Type.Optional(
         Type.Boolean({
-          description: "If true, wait for the agent to complete before returning. Default: false.",
+          description: "If true, wait for the agent to complete before returning. Default: false. Ignored for a workflow run id.",
         }),
       ),
       verbose: Type.Optional(
@@ -2991,7 +2998,7 @@ Terse command-style prompts produce shallow, generic work.
           }
           return {
             ...textResult(`No workflow run "${params.agent_id}" in this session.`),
-            structuredContent: { error: "workflow not found" },
+            structuredContent: { error: `No workflow run "${params.agent_id}" in this session.` },
           };
         }
         const totals = stats(view.progress, view.agentCount);
@@ -4025,8 +4032,18 @@ Write the file using the write tool. Only write the file, nothing else.`;
       } else if (id === "workflowStallTimeoutSecs") {
         // 0 is meaningful here — it disables the watchdog — so this is the
         // `n >= 0` shape of maxSubagentDepth, not the `n >= 1` of graceTurns.
-        const n = parseInt(value, 10);
-        if (n >= 0) {
+        // The ceiling comes from the same constant `sanitize()` uses: an entry
+        // it would drop on the next load must be refused here, not applied and
+        // silently reverted.
+        const n = parseStallTimeoutSecs(value);
+        if (n === undefined) {
+          // Deliberately not `notifyApplied`: that saves the settings snapshot
+          // and emits a changed event, and nothing changed.
+          ctx.ui.notify(
+            `Workflow stall timeout must be a whole number of seconds from 0 to ${STALL_TIMEOUT_SECS_CEILING}.`,
+            "warning",
+          );
+        } else {
           setWorkflowStallTimeout(n);
           notifyApplied(
             ctx,

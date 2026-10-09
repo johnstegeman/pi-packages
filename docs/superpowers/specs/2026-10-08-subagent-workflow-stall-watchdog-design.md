@@ -102,7 +102,7 @@ file, and notifies **Done** — instead of sitting wedged and notifying **Stoppe
     `runtime.ts:951`), **not** a fatal error. `null` is what `final-review.js`
     already degrades on (`dimStatus.ok=false` → `degraded`;
     `verdictShape → "unverified (refuter skipped)"`);
-  - emit a terminal progress row `{ state: "error", timedOut: true, error: "Timed out after <N>m of inactivity." }`;
+  - emit a terminal progress row `{ state: "error", timedOut: true, error: "Timed out after 10m00s of inactivity." }` (`200ms` for a sub-second window);
   - do **not** register the child in `completedByLabel` (so `agent({ resume })`
     cannot continue it — consistent with existing failure semantics);
   - do **not** run the child's `gate`.
@@ -154,9 +154,14 @@ Everything is in one thread (the runtime owns the run and calls the host).
   thrown-`Error` style as `effort`/`isolation`; add it to the
   `callHost("agent", { … })` payload.
 - **Runtime:** add `stallTimeout?: number` (seconds) to `AgentCallPayload`
-  (`runtime.ts:458`); resolve
+  (`runtime.ts:533`; the field lands at `runtime.ts:556`); resolve
   `stallMs = payload.stallTimeout === undefined ? options.stallTimeoutMs : payload.stallTimeout * 1000`.
-  Per-call, so different children can have different patience.
+  Per-call, so different children can have different patience. The per-call
+  `stallTimeout` the script asked for (seconds) is echoed on
+  `WorkflowSpawnRequest.stallTimeout` when it was set, as a self-describing
+  echo — the host does not read it, and must not read it as the effective
+  window; the runtime resolves that window and owns the decision (it is the
+  only place that can see the per-call override).
 - **No `resume` exclusion:** this is about liveness, not spawn config, so it
   applies to a resumed child too (unlike `effort`/`isolation`/`schema`/`gate`).
 - **Docs:** `workflow/tool-description.ts`, `docs/workflows.md`, and the SDD
@@ -213,7 +218,7 @@ for the current process lifetime.
 **5e — run-level liveness.** The per-agent watchdog only fires if a *child* goes
 quiet. Reuse the same interval: if the runtime hears no
 `progress`/`call`/response from the worker for a run-level window (default ~2×
-the stall window), `finish({ status: "failed", error: "Workflow stalled: no progress for Xm." })`,
+the stall window), `finish({ status: "failed", error: "Workflow stalled: no progress for 20m00s." })`,
 terminating the worker and notifying. This closes the "worker itself wedged"
 gap. **Suspend this check while the run is `paused`** (a paused run makes no
 progress by design).

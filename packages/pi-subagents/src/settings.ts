@@ -373,7 +373,26 @@ const SUBAGENT_DEPTH_CEILING = 16;
 // since this setting is that knob spelled globally and the two must not
 // disagree. Longer than any window a user could want, short enough that a
 // hand-edited `1e9` is rejected rather than silently meaning "never fire".
-const STALL_TIMEOUT_SECS_CEILING = 86_400;
+export const STALL_TIMEOUT_SECS_CEILING = 86_400;
+
+/**
+ * Parse the settings menu's stall-window entry.
+ *
+ * `Number` rather than `parseInt`: `parseInt("1.5")` is `1`, so a fractional
+ * entry would be applied as a second value and then dropped by `sanitize()` on
+ * the next load — the silent revert this exists to prevent. Empty input is
+ * rejected rather than read as `0` (`Number("")` is `0`, which means "off").
+ * The accepted grammar is `Number`'s, not decimal-digits-only: `"0x10"`, `"1e3"`
+ * and `"+5"` all parse to in-range integers and are kept, because whatever this
+ * accepts must be something `sanitize()` keeps — `Number` keeps the two in step.
+ */
+export function parseStallTimeoutSecs(value: string): number | undefined {
+  const trimmed = value.trim();
+  if (trimmed === "") return undefined;
+  const n = Number(trimmed);
+  if (!Number.isInteger(n) || n < 0 || n > STALL_TIMEOUT_SECS_CEILING) return undefined;
+  return n;
+}
 
 // The workflow watchdog's inactivity window, in seconds. Module state rather
 // than an index.ts local so the default has one home and a test can read it
@@ -435,6 +454,8 @@ function sanitize(raw: unknown): SubagentsSettings {
   // dropped rather than rounded — a hand-edited 0.5 would otherwise mean either
   // "off" or "1 second" depending on the direction, and both are worse than
   // falling back to the default window.
+  // The integer requirement is deliberate: it is the same shape every other
+  // numeric field in this function uses, so this is not a special case.
   if (
     Number.isInteger(r.workflowStallTimeoutSecs) &&
     (r.workflowStallTimeoutSecs as number) >= 0 &&

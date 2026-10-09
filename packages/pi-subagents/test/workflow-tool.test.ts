@@ -27,6 +27,7 @@ import { isScopeModelsEnabled, setScopeModelsEnabled } from "../src/model-scope.
 import type { AgentRecord } from "../src/types.js";
 import { createWorkflowHost } from "../src/workflow/host.js";
 import { compileJsonSchema } from "../src/workflow/json-schema.js";
+import type { WorkflowEntry } from "../src/workflow/progress.js";
 import type { WorkflowSpawnRequest } from "../src/workflow/runtime.js";
 import { ctx, flush, type Hermetic, hermeticDir, makePi, textOf } from "./helpers/boot-extension.js";
 
@@ -38,7 +39,7 @@ import { ctx, flush, type Hermetic, hermeticDir, makePi, textOf } from "./helper
  * `createWorkflowTask` still builds the record, so the timed-out test below
  * exercises the tool's own summary path, not a copy of it.
  */
-const capturedTasks = vi.hoisted(() => [] as { id: string; workflowProgress: any[] }[]);
+const capturedTasks = vi.hoisted(() => [] as { id: string; workflowProgress: WorkflowEntry[] }[]);
 
 vi.mock("../src/workflow/task.js", async (importOriginal) => {
   const actual = await importOriginal<typeof import("../src/workflow/task.js")>();
@@ -321,6 +322,76 @@ describe("createWorkflowHost — spawn mapping", () => {
     expect(failed).toMatchObject({ ok: false, error: "boom" });
     expect(failed.skipped).toBeUndefined();
     expect(skipped).toMatchObject({ ok: false, skipped: true });
+  });
+
+  it("forwards the child's liveness signals into request.onActivity", async () => {
+    // The watchdog's whole activity signal is this mapping. Only the e2e
+    // exercised it, so a callback dropped here would leave a child watched but
+    // unable to prove it was alive — a false positive 10 minutes later.
+    const stub = stubManager();
+    const host = createWorkflowHost({ pi: {} as any, ctx: ctx(), manager: stub.manager });
+    const onActivity = vi.fn();
+
+    await host.spawnAgent(request({ onActivity }));
+
+    const options = stub.spawnAndWait.mock.calls[0][4];
+    // Per callback, not summed: a 2/0 split across these three would total 3
+    // while one signal silently forwarded nothing, and a fourth callback would
+    // slip through a total-only assertion entirely.
+    for (const name of ["onToolActivity", "onTurnEnd", "onAssistantUsage"] as const) {
+      expect(typeof options[name]).toBe("function");
+      options[name]();
+      expect(onActivity).toHaveBeenCalledTimes(1);
+      onActivity.mockClear();
+    }
+    // And nothing else: the manager legitimately receives `onSessionCreated`
+    // (and `onBeforeWorktreeCleanup` for a gated step), so every other `on*`
+    // key here is a forwarding this mapping did not intend.
+    expect(
+      Object.keys(options)
+        .filter(k => k.startsWith("on") && k !== "onSessionCreated" && k !== "onBeforeWorktreeCleanup")
+        .sort(),
+    ).toEqual(["onAssistantUsage", "onToolActivity", "onTurnEnd"]);
+  });
+
+  it("forwards the same liveness signals on the resume path", async () => {
+    // The design is explicit that a resumed child is watched by the same
+    // watchdog, so it needs the same plumbing — otherwise a long continuation
+    // is watched but unable to report, and is aborted for silence.
+    const stub = stubManager();
+    const host = createWorkflowHost({ pi: {} as any, ctx: ctx(), manager: stub.manager });
+    const onActivity = vi.fn();
+
+    // A resume is only accepted for a record that exists, so spawn first.
+    await host.spawnAgent(request());
+    await host.resumeAgent("wf-agent-0", "again", undefined, onActivity);
+
+    // The manager receives the three signals as one options object (the 4th
+    // argument of manager.resume) — the same mapping the spawn path makes.
+    const options = stub.resume.mock.calls[0][3];
+    for (const name of ["onToolActivity", "onTurnEnd", "onAssistantUsage"] as const) {
+      expect(typeof options[name]).toBe("function");
+      options[name]();
+      expect(onActivity).toHaveBeenCalledTimes(1);
+      onActivity.mockClear();
+    }
+    // Exactly these three: a dropped callback here is the same silent false
+    // positive the spawn half guards against.
+    expect(Object.keys(options).sort()).toEqual(["onAssistantUsage", "onToolActivity", "onTurnEnd"]);
+  });
+
+  it("does not require a request to carry onActivity", async () => {
+    const stub = stubManager();
+    const host = createWorkflowHost({ pi: {} as any, ctx: ctx(), manager: stub.manager });
+
+    await host.spawnAgent(request());
+
+    const options = stub.spawnAndWait.mock.calls[0][4];
+    expect(() => {
+      options.onToolActivity();
+      options.onTurnEnd();
+      options.onAssistantUsage();
+    }).not.toThrow();
   });
 });
 
@@ -1696,7 +1767,7 @@ describe("get_subagent_result — workflow ids", () => {
       .execute("tc-read", { agent_id: "wf_deadbeef1234" }, undefined, undefined, workflowCtx());
 
     expect(textOf(result)).toContain('No workflow run "wf_deadbeef1234" in this session');
-    expect((result as any).structuredContent).toEqual({ error: "workflow not found" });
+    expect((result as any).structuredContent).toEqual({ error: 'No workflow run "wf_deadbeef1234" in this session.' });
   });
 
   it("leaves a non-workflow id on the agent path", async () => {
@@ -1788,6 +1859,38 @@ describe("durable workflow state", () => {
     expect(data).toMatchObject({ id: runId, status: "completed", result: "all clear" });
   });
 
+  it("caps a live wf_ result exactly as the persisted snapshot is capped", async () => {
+    // The snapshot has always been capped (`truncateWorkflowResult`) and the
+    // live answer was not, so the same run read differently before and after a
+    // reload — and a long result landed in the model's context uncut.
+    const booted = makePi();
+    subagentsExtension(booted.pi);
+    await booted.lifecycle.get("session_start")?.({}, workflowCtx());
+
+    const started = await booted.tools.get("SubagentWorkflow").execute(
+      "tc-cap",
+      { script: `${inlineScript}return "x".repeat(5000);\n` },
+      undefined,
+      undefined,
+      workflowCtx(),
+    );
+    const runId = (started.details as { taskId: string }).taskId;
+    await vi.waitFor(
+      () => expect(booted.pi.appendEntry).toHaveBeenCalledWith(WORKFLOW_ENTRY_TYPE, expect.anything()),
+      { timeout: 10_000 },
+    );
+    const [, data] = booted.pi.appendEntry.mock.calls.find((c: any[]) => c[0] === WORKFLOW_ENTRY_TYPE)!;
+    expect(data).toMatchObject({ id: runId });
+
+    const live = await booted.tools
+      .get("get_subagent_result")
+      .execute("tc-read", { agent_id: runId }, undefined, undefined, workflowCtx());
+
+    const liveResult = (live as { structuredContent?: { result?: string } }).structuredContent;
+    expect(liveResult?.result).toContain("...(truncated)");
+    expect(liveResult?.result).toBe(data.result);
+  });
+
   it("rehydrates a settled run from the transcript so its id stays queryable", async () => {
     // The run happened in a process that is gone. Without rehydration the
     // model gets "No workflow run" for an id it was handed (§5d).
@@ -1854,5 +1957,144 @@ describe("durable workflow state", () => {
     expect((result as any).structuredContent.status).toBe("unknown");
     expect(text).toContain("interrupted");
     expect(text).not.toContain("status: running");
+  });
+
+  it("subtracts a recovered run's paused time, exactly as the live run does", async () => {
+    // The snapshot froze startTime/endTime but not the pause, so a run that sat
+    // paused overnight came back reading as a ten-hour run.
+    const booted = makePi();
+    subagentsExtension(booted.pi);
+    await booted.lifecycle.get("session_start")?.({}, transcriptCtx([
+      {
+        type: "custom",
+        customType: WORKFLOW_ENTRY_TYPE,
+        data: {
+          id: "wf_paused1", name: "paused-run", status: "completed",
+          startTime: 1_000, endTime: 601_000, totalPausedMs: 600_000,
+          agentCount: 0, totalTokens: 0, result: "done", progress: [],
+        },
+      },
+    ]));
+
+    const result = await booted.tools
+      .get("get_subagent_result")
+      .execute("tc-read", { agent_id: "wf_paused1" }, undefined, undefined, workflowCtx());
+
+    // 600 s of wall clock, all of it paused.
+    expect(textOf(result)).toContain("| elapsed: 0ms");
+  });
+
+  it("keeps a legacy snapshot's frozen duration when it has no paused field", async () => {
+    const booted = makePi();
+    subagentsExtension(booted.pi);
+    await booted.lifecycle.get("session_start")?.({}, transcriptCtx([
+      {
+        type: "custom",
+        customType: WORKFLOW_ENTRY_TYPE,
+        data: {
+          id: "wf_legacy2", name: "legacy-run", status: "completed",
+          startTime: 1_000, endTime: 601_000,
+          agentCount: 0, totalTokens: 0, result: "done", progress: [],
+        },
+      },
+    ]));
+
+    const result = await booted.tools
+      .get("get_subagent_result")
+      .execute("tc-read", { agent_id: "wf_legacy2" }, undefined, undefined, workflowCtx());
+
+    expect(textOf(result)).toContain("| elapsed: 10m00s");
+  });
+
+  it("skips a legacy entry that has no run id", async () => {
+    // An entry written before ids were persisted cannot be resolved to a run;
+    // skipping it is the only honest thing to do with it.
+    const booted = makePi();
+    subagentsExtension(booted.pi);
+    await booted.lifecycle.get("session_start")?.({}, transcriptCtx([
+      {
+        type: "custom",
+        customType: WORKFLOW_ENTRY_TYPE,
+        data: {
+          name: "id-less", status: "completed", startTime: 1_000, endTime: 2_000,
+          agentCount: 0, totalTokens: 0, result: "gone", progress: [],
+        },
+      },
+    ]));
+
+    const result = await booted.tools
+      .get("get_subagent_result")
+      .execute("tc-read", { agent_id: "wf_noid123456" }, undefined, undefined, workflowCtx());
+
+    expect(textOf(result)).toContain("No workflow run");
+  });
+
+  it("prefers a recovered terminal entry over an interrupted start of the same id", async () => {
+    // Both traces exist for the same run: it started, and it settled. The
+    // settled snapshot is the answer; the interrupted guess is only for a run
+    // with nothing else on record.
+    const booted = makePi();
+    subagentsExtension(booted.pi);
+    await booted.lifecycle.get("session_start")?.({}, transcriptCtx([
+      {
+        type: "message",
+        message: {
+          role: "toolResult", toolCallId: "tc-both", toolName: SUBAGENT_TOOL_NAMES.WORKFLOW,
+          content: [], isError: false, timestamp: 0, details: { taskId: "wf_both123456" },
+        },
+      },
+      {
+        type: "custom",
+        customType: WORKFLOW_ENTRY_TYPE,
+        data: {
+          id: "wf_both123456", name: "both", status: "completed",
+          startTime: 1_000, endTime: 2_000, agentCount: 0, totalTokens: 0,
+          result: "settled", progress: [],
+        },
+      },
+    ]));
+
+    const result = await booted.tools
+      .get("get_subagent_result")
+      .execute("tc-read", { agent_id: "wf_both123456" }, undefined, undefined, workflowCtx());
+
+    expect((result as any).structuredContent.status).toBe("completed");
+    expect(textOf(result)).toContain("settled");
+  });
+
+  it("warns instead of silently dropping an entry it cannot write, and still settles", async () => {
+    const booted = makePi();
+    subagentsExtension(booted.pi);
+    await booted.lifecycle.get("session_start")?.({}, workflowCtx());
+    booted.pi.appendEntry.mockImplementation(() => { throw new Error("stale ctx"); });
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+
+    try {
+      const started = await booted.tools.get("SubagentWorkflow").execute(
+        "tc-warn", { script: `${inlineScript}return "ok";\n` }, undefined, undefined, workflowCtx(),
+      );
+      const runId = (started.details as { taskId: string }).taskId;
+
+      // The dropped entry names itself with our prefix and forwards the
+      // throwing error, so the log is actionable rather than anonymous.
+      await vi.waitFor(() =>
+        expect(warn).toHaveBeenCalledWith(
+          expect.stringContaining("[pi-subagents] could not append the workflow entry:"),
+          expect.any(Error),
+        ),
+      );
+
+      // The append failed, but the run itself is done: a lost record is not
+      // a lost run.
+      const settled = await booted.tools
+        .get("get_subagent_result")
+        .execute("tc-read", { agent_id: runId }, undefined, undefined, workflowCtx());
+      expect((settled as any).structuredContent.status).toBe("completed");
+      expect(textOf(settled)).toContain("status: completed");
+    } finally {
+      // Restore in a finally so the spy cannot outlive the test however the
+      // body ends; the describe's afterEach restoreAllMocks is the backstop.
+      warn.mockRestore();
+    }
   });
 });

@@ -215,7 +215,7 @@ This fork adds a watchdog at two levels, plus the settings to tune it:
   ever came, and the orchestrator has to be able to tell a degraded review from one the user
   dismissed.
 - **Per-run:** a run that hears nothing from the worker for `runStallTimeoutMs` settles `failed`
-  with *"Workflow stalled: no progress for Ns."* and the worker is terminated. The check is gated
+  with *"Workflow stalled: no progress for 20m00s."* and the worker is terminated. The check is gated
   on **nothing being in flight** (`inflight.size === 0`): a worker awaiting a child is silent by
   design — it posts one `call` and then hears nothing until the answer — so judging silence while a
   child runs would cap every `agent()` at the run window and throw away the per-child (or per-call
@@ -252,10 +252,12 @@ in-memory map used to leave behind.
 Files: `src/index.ts` (the `wf_` branch in `get_subagent_result`, the durability entry +
 `session_start` rehydration, the setting applier, the stall-option wiring, the timed-out
 surfacing) plus `src/workflow/{runtime,progress,task,entry,worker-source,tool-description}.ts`.
-The new `get_subagent_result` branch carries the in-code marker. The watchdog hunks do not — like
-the purely additive fields and settings rows, the feature is the state of our copy rather than a
-small surgical edit a reader could mistake for upstream, so marking every changed line would be
-noise (see the marker convention below). Covered by `test/workflow-tool.test.ts`
+The new `get_subagent_result` branch carries the in-code marker. The watchdog hunks do not, and
+neither do the durability helpers — `appendWorkflowEntry`, `rehydrateWorkflowRuns` and
+`workflowRunStatusView` — nor the purely additive fields and settings rows: each is an additive
+block that is the state of our copy rather than a small surgical edit a reader could mistake for
+upstream, so marking every changed line would be noise (see the marker convention below).
+Covered by `test/workflow-tool.test.ts`
 (the `wf_` resolution, the unknown-id error, the unchanged agent path, the settled-run entry, the
 `session_start` rehydration, the interrupted run),
 `test/workflow-runtime.test.ts` (the per-child watchdog and run-level liveness),

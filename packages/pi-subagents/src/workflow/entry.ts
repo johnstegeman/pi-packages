@@ -47,6 +47,15 @@ export interface WorkflowEntryData {
    * nothing else to report for a settled run.
    */
   result?: string;
+  /**
+   * Wall-clock time the run spent paused, excluded from the elapsed figure.
+   *
+   * Persisted because the snapshot freezes the clock: without it a recovered
+   * run reports a duration that includes every hour it sat paused, while the
+   * live one does not. Absent in snapshots written before the field existed —
+   * read it as 0.
+   */
+  totalPausedMs?: number;
   meta?: WorkflowMeta;
 }
 
@@ -65,6 +74,7 @@ export function workflowEntryData(task: WorkflowTask): WorkflowEntryData {
     // unbounded run result, and a snapshot that outgrows it is one nothing can
     // render.
     result: truncateWorkflowResult(workflowResultText(task)),
+    ...(task.totalPausedMs > 0 ? { totalPausedMs: task.totalPausedMs } : {}),
     ...(task.meta !== undefined ? { meta: task.meta } : {}),
   };
 }
