@@ -180,6 +180,29 @@ assert.equal(
   "finishing",
 );
 
+// `implement` done is not the end of the cycle any more: `wrap-up` dispositions the parked
+// findings after the final review, and the branch is still changing while it runs.
+const withWrapUp = (status) => ({
+  ...parsed,
+  steps: [
+    ...parsed.steps.map((s) => (s.title === "Implement" ? { ...s, step_status: "done" } : s)),
+    { id: "s-wrap", title: "Wrap up: disposition all parked findings", step_status: status },
+  ],
+});
+assert.equal(phaseFor(withWrapUp("current")), "implementing", "wrap-up outstanding -> still implementing");
+assert.equal(phaseFor(withWrapUp("ready")), "implementing", "wrap-up ready -> still implementing");
+// The instant after `implement` closes, before `wrap-up` is ready: the `!== "done"` guard covers it.
+assert.equal(phaseFor(withWrapUp("pending")), "implementing", "wrap-up pending -> still implementing");
+assert.equal(phaseFor(withWrapUp("done")), "finishing", "wrap-up done -> finishing");
+assert.equal(
+  phaseFor({
+    ...parsed,
+    steps: parsed.steps.map((s) => (s.title === "Implement" ? { ...s, step_status: "done" } : s)),
+  }),
+  "finishing",
+  "no wrap-up step (pre-change molecule) -> finishing, as before",
+);
+
 // ---------- render: nothing to draw ----------
 assert.deepEqual(moleculeWidgetLines(null, 80), []);
 assert.deepEqual(moleculeWidgetLines(parsed, 0), []);
@@ -655,6 +678,69 @@ assert.ok(iLines[iC1].includes("├──"), "first child connector ├──");
 assert.ok(iLines[iC2].includes("└──"), "last child connector └──");
 assert.ok(iLines[iTask2].includes("◐"), "current child keeps ◐ marker");
 assert.ok(iLines[iTask1].includes("✓"), "closed child keeps ✓ marker");
+
+// ---------- implementing, implement done + wrap-up outstanding: the wrap-up row leads ----------
+// `wrap-up` is a SIBLING of the implement head, not one of its task beads, so it renders as a
+// top-level row — and it is the only active (◐) row, because every task bead is already closed.
+const wrapState = {
+  ...implState,
+  current_step: null,
+  steps: [
+    ...implState.steps.map((s) => ({ ...s, status: "closed", step_status: "done", is_current: false })),
+    {
+      id: "mol-9.w",
+      title: "Wrap up: disposition all parked findings",
+      status: "open",
+      issue_type: "task",
+      created_at: "t8",
+      step_status: "pending",
+      is_current: false,
+    },
+  ],
+};
+const wLines = moleculeWidgetLines(wrapState, 120);
+const wRow = wLines.findIndex((l) => l.includes("Wrap up: disposition all parked findings"));
+assert.ok(wRow !== -1, `wrap-up row rendered: ${wLines.join(" | ")}`);
+assert.ok(wLines[wRow].includes("◐"), `wrap-up row carries the ◐ marker: ${wLines[wRow]}`);
+assert.ok(
+  !wLines[wRow].includes("├──") && !wLines[wRow].includes("└──"),
+  `wrap-up reads as a top-level row, not a task-bead child: ${wLines[wRow]}`,
+);
+const activeRows = wLines.filter((l) => l.includes("◐"));
+assert.equal(activeRows.length, 1, `exactly one active row: ${wLines.join(" | ")}`);
+assert.ok(activeRows[0].includes("Wrap up"), `the active row is the wrap-up step: ${activeRows[0]}`);
+
+// Negative: no `wrap-up` step at all (a pre-change molecule) — nothing to render, even with
+// `implement` done.
+const noWrapState = {
+  ...wrapState,
+  steps: wrapState.steps.filter((s) => !s.title.startsWith("Wrap up")),
+};
+assert.ok(
+  !moleculeWidgetLines(noWrapState, 120).some((l) => l.includes("Wrap up")),
+  "no wrap-up step -> no wrap-up row",
+);
+
+// Negative: `wrap-up` exists but `implement` is not done yet — the row is premature.
+const implNotDoneState = {
+  ...implState,
+  steps: [
+    ...implState.steps,
+    {
+      id: "mol-9.w",
+      title: "Wrap up: disposition all parked findings",
+      status: "open",
+      issue_type: "task",
+      created_at: "t8",
+      step_status: "pending",
+      is_current: false,
+    },
+  ],
+};
+assert.ok(
+  !moleculeWidgetLines(implNotDoneState, 120).some((l) => l.includes("Wrap up")),
+  "implement not done -> no wrap-up row",
+);
 
 // ---------- finishing: verify/smoke/finish rows only ----------
 const finState = {

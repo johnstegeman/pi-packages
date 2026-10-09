@@ -8,8 +8,28 @@ Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ---
 
 ## [Unreleased]
+_Nothing yet beyond 0.10.0 — all prior work is released._
+
+---
+
+## [0.10.0] — 2026-10-09
 
 ### Added
+
+- **A cycle now wraps up its own findings instead of filing them.** The workflow molecule gains a
+  `wrap-up` step between `implement` and `verify`, so the whole-branch review's non-blocking
+  findings are dispositioned before `verify` runs — fixed in-session, dropped as a non-issue with a
+  recorded reason, or deferred to the human as one batched question and filed only on approval.
+  Previously the only exit for such a finding was a new bead, because the SDD ledger is deleted
+  when `implement` closes; the ledger now outlives the step that reads it. The policy lives in
+  `skills/subagent-driven-development/reference/disposition.md` and covers all five channels that
+  park work: task-review minors, fix-loop cap residuals, `DONE_WITH_CONCERNS` observations,
+  reviewer `Recommendations`, and plan-level observations. Molecule-driven runs only — a standalone
+  `/requesting-code-review` keeps "note Minor issues for later". Molecules poured before this
+  release have no `wrap-up` step and are skipped. The task-reviewer and code-reviewer templates now
+  require each minor to be reported with `file:line` and the concrete fix. Requires re-copying
+  `agent-templates/task-reviewer.md` and `agent-templates/code-reviewer.md` — templates are copy-in
+  and are never overwritten by an update.
 
 - **Per-agent-type subagent model config (M28)** — an optional `subagent-models.json` (`{ "models": { "<type>": "<model>" } }`) sets the model for an `Agent` dispatch by subagent type. Read from global `~/.pi/agent/subagent-models.json` then project `.pi/subagent-models.json`, merged per key with the project winning. Only the supported types (`implementer`, `task-reviewer`, `code-reviewer`, `verifier`, `worker`, `explore`) are honored; malformed JSON is ignored, and a caller-supplied `model` always wins over the config.
 - **Explore override template** — `agent-templates/explore.md` overrides the built-in `Explore` (`name: Explore`) with the same read-only toolset and fast-recon prompt but no `model:` pin, so it inherits the session model instead of the built-in `anthropic/claude-haiku-4-5` default. Copy-in like the other five templates.
@@ -41,6 +61,9 @@ Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   totals. Pinned by pi-subagents' `test/e2e/workflow.e2e.test.ts`. Requires re-copying `agent-templates/code-reviewer.md`.
 
 ### Fixed
+
+- **The widget no longer reports "finishing" while the branch is still changing.** `phaseFor` stays
+  on `implementing` until `wrap-up` is done, so the phase label matches the work.
 
 - **Workflow children no longer close beads they do not own** — `scripts/fix-loop.js`, `scripts/wave-parallel.js` and `scripts/final-review.js` build their own prompts and never carried the "do not create, update, or close any beads" guardrail `implementer-prompt.md` has always had, so a gated fix round could close its own task bead (observed 2026-10-05, `pi-packages-2ik53`). Every prompt those scripts emit, both prose-path prompt templates, and all five non-explore agent templates now carry one canonical guardrail (a byte-identical core plus an audience tail), pinned by `test/skills-contract.test.mjs` — which also fails when a new prompt source is added without it. The guardrail is advisory: `reference/fix-loop.md` and `reference/subagent-workflows.md` now require the controller to re-read a task bead before closing it and ledger a `DEVIATION` if a child closed it first. Requires re-copying the five changed `agent-templates/*.md` into `~/.pi/agent/agents/` (or `.pi/agents/`) — templates are copy-in and are never overwritten by an update.
 

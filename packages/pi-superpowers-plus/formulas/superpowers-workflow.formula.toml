@@ -1,5 +1,5 @@
 formula = "superpowers-workflow"
-description = "Brainstorm -> design -> plan -> implement -> verify -> finish"
+description = "Brainstorm -> design -> plan -> implement -> wrap-up -> verify -> finish"
 version = 1
 type = "workflow"
 
@@ -67,10 +67,16 @@ type = "task"
 needs = ["spec-approved"]
 
 [[steps]]
+id = "wrap-up"
+title = "Wrap up: disposition all parked findings"
+type = "task"
+needs = ["implement"]
+
+[[steps]]
 id = "verify"
 title = "Verify"
 type = "task"
-needs = ["implement"]
+needs = ["wrap-up"]
 
 [[steps]]
 id = "smoke-test-approved"

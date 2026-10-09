@@ -52,6 +52,8 @@ Begin directly with the spec-compliance verdict. Every line is a verdict, a find
 #### Critical (Must Fix)
 #### Important (Should Fix)
 #### Minor (Nice to Have)
+Report each minor with `file:line` and the concrete fix, so the controller can act on it without
+re-deriving it. Minors are dispositioned by the controller — never file a bead for one.
 
 ### Assessment
 **Task quality:** [Approved | Needs fixes]

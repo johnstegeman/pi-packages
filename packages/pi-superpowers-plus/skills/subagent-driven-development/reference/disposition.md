@@ -1,0 +1,89 @@
+# Disposition: what happens to a finding the cycle would otherwise park
+
+> **Reaching beads tools:** every `beads_*` tool has `codemode`/`deferred` exposure, so
+> none is in your tool list. Call them from a `codemode` script —
+> `await tools.beads_update({ ... })` — and find the deferred ones with
+> `await searchTools("beads")`. The call shapes below are that script's arguments.
+
+Every finding the cycle would otherwise park gets exactly one disposition, decided **when it is
+recorded** — never left as "parked". That covers everything the fix loop does not fix, including
+residuals parked at its cap. Parked is not a resting state; a roll-up nobody resolves is a silent
+discard.
+
+## The three outcomes
+
+**1. Fix now — the default.**
+The cycle fixes it in-session: the controller **dispatches** the fix to an implementer — it never
+edits code itself (see [fix-loop.md](fix-loop.md) and [red-flags.md](red-flags.md)). Where a fix
+round is already running for that task, the fix rides that round — the implementer is still warm
+and the marginal cost is ~0. Where the review is otherwise clean, the finding goes on the
+`wrap-up` list (see "Where the list lives" below) and is fixed in that batch. No interrupt, no bead.
+
+**2. Drop — the controller's own authority, and it must be reported.**
+Allowed only for **non-issues**: a wrong nitpick, a duplicate of another finding, something already
+handled elsewhere, a point already refuted. Record a one-line reason and report every drop in the
+final report. This is the only outcome nobody else has to approve.
+
+**3. Defer — the human's ruling, and the bar is narrow.**
+Allowed only when:
+
+- **the session cannot do it** — it needs a restart or an upgrade, an external actor, or a runtime
+  this session does not have; or
+- **it needs a genuine design pass** — a brainstorm and a spec of its own.
+
+A question is not a design pass. The test:
+
+> If the only thing between you and the fix is a decision you could make in one sentence, it is not
+> a defer — make the decision and have it fixed.
+
+Collect defers and ask **once**, as a batched list, when you work the `wrap-up` step. The human's
+yes is what creates the bead. Filing one on your own authority is the failure this policy exists to
+prevent.
+
+## Every channel feeds this rule
+
+All five of these are findings for the purposes of this policy — none is exempt:
+
+1. a task reviewer's `#### Minor (Nice to Have)` items;
+2. a residual parked at the fix-loop cap — either breaker bullet that parks rather than fixes;
+3. an implementer's `DONE_WITH_CONCERNS` observations;
+4. the reviewer's `Recommendations` section;
+5. a plan-level observation, such as "the plan mandates a test that asserts nothing".
+
+If a finding reaches the end of the cycle without one of the three dispositions, the cycle is not
+finished.
+
+## Where the list lives
+
+The `wrap-up` list is the ledger — not your context. The ledger is the `wrap-up` step's input, and
+an item held only in memory is an item the sweep will miss. One line per finding:
+
+- `Task <N>: minor (wrap-up): <file:line> <one-liner>` — a fix-now finding waiting for the batch
+- `Task <N>: parked — <finding> — ruling: <why the code stands>` — a breaker adjudication
+- `Task <N>: defer (candidate): <file:line> <one-liner>` — put it to the human as one batched
+  question at `wrap-up`, and record their ruling on the same line
+
+Record each finding the moment it is raised: a task-review minor or a `Recommendations` item when
+the review returns, a `DONE_WITH_CONCERNS` observation when you read the implementer's report, a
+plan-level observation when you notice it.
+
+## Reporting
+
+The final report names every finding's outcome:
+
+- **fixed** — one line each, with the commit;
+- **dropped** — one line each, with the reason (this is the only record a drop leaves);
+- **deferred** — one line each, with the bead id the human approved.
+
+## When the pile is large
+
+If the accumulated fix work is large relative to the task — more than a handful of items, fixes
+reaching well outside the task's file set, or a fix that is itself a design decision — stop and ask
+the human before dispatching that batch. This is the same batched question as the defer ruling, so
+in practice it is one ask, not two.
+
+## The step this policy belongs to
+
+`wrap-up` (in the workflow molecule, between `implement` and `verify`) is where the list is worked
+and cleared. It closes when every finding is fixed or dropped and no defer is unruled. `verify`
+cannot start until it closes.
