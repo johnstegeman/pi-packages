@@ -278,7 +278,7 @@ needed.
   never `HEAD~1`, which silently truncates multi-commit tasks. Never
   dispatch a task reviewer without a diff file.
 > **Read now:** [reference/task-review.md](reference/task-review.md) — reviewer inputs, the Global Constraints lens, anti-pre-judging directives, and the cannot-verify rule. Read before dispatching a task reviewer.
-> **Read now:** [reference/disposition.md](reference/disposition.md) — what happens to a finding that is not Critical/Important: fix now, drop, or defer. Read before acting on any review finding.
+> **Read now:** [reference/disposition.md](reference/disposition.md) — what happens to a finding the cycle would otherwise park: fix now, drop, or defer. Read before acting on any review finding.
 
 Template: [task-reviewer-prompt.md](task-reviewer-prompt.md)
 
