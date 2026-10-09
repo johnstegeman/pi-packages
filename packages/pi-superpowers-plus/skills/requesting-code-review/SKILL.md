@@ -56,8 +56,8 @@ Dispatch a `code-reviewer` subagent, filling the template at [code-reviewer.md](
 - Fix Important issues before proceeding
 - Minor issues: inside a molecule-driven cycle, disposition them in-session — fix now, drop a
   non-issue, or defer with the human's ruling (see the SDD
-  [`../subagent-driven-development/reference/disposition.md`](../subagent-driven-development/reference/disposition.md)); never file a bead for one on
-  your own. Standalone (no workflow molecule), note them for later.
+  [`../subagent-driven-development/reference/disposition.md`](../subagent-driven-development/reference/disposition.md));
+  never file a bead for one on your own. Standalone (no workflow molecule), note them for later.
 - Push back if reviewer is wrong (with reasoning)
 
 ## Example

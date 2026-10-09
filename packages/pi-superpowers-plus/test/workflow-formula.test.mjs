@@ -8,7 +8,7 @@ import { isWrapUpStep } from "../extensions/beads-molecule-widget.mjs";
 
 const src = readFileSync(new URL("../formulas/superpowers-workflow.formula.toml", import.meta.url), "utf8");
 
-/** Parse `[[steps]]` blocks into `{ id, needs }`. `[steps.gate]` blocks are not steps. */
+/** Parse `[[steps]]` blocks into `{ id, title, needs }`. `[steps.gate]` blocks are not steps. */
 function parseSteps(text) {
   const steps = [];
   let cur = null;
