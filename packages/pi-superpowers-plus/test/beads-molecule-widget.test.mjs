@@ -180,6 +180,27 @@ assert.equal(
   "finishing",
 );
 
+// `implement` done is not the end of the cycle any more: `wrap-up` dispositions the parked
+// findings after the final review, and the branch is still changing while it runs.
+const withWrapUp = (status) => ({
+  ...parsed,
+  steps: [
+    ...parsed.steps.map((s) => (s.title === "Implement" ? { ...s, step_status: "done" } : s)),
+    { id: "s-wrap", title: "Wrap up: disposition all parked findings", step_status: status },
+  ],
+});
+assert.equal(phaseFor(withWrapUp("current")), "implementing", "wrap-up outstanding -> still implementing");
+assert.equal(phaseFor(withWrapUp("ready")), "implementing", "wrap-up pending -> still implementing");
+assert.equal(phaseFor(withWrapUp("done")), "finishing", "wrap-up done -> finishing");
+assert.equal(
+  phaseFor({
+    ...parsed,
+    steps: parsed.steps.map((s) => (s.title === "Implement" ? { ...s, step_status: "done" } : s)),
+  }),
+  "finishing",
+  "no wrap-up step (pre-change molecule) -> finishing, as before",
+);
+
 // ---------- render: nothing to draw ----------
 assert.deepEqual(moleculeWidgetLines(null, 80), []);
 assert.deepEqual(moleculeWidgetLines(parsed, 0), []);

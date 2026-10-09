@@ -269,7 +269,14 @@ export function phaseFor(state) {
   if (!state || !Array.isArray(state.steps)) return "brainstorming";
   const impl = state.steps.find((s) => /^Implement( |$)/.test(s.title ?? ""));
   if (!impl) return "brainstorming";
-  if (impl.step_status === "done") return "finishing";
+  if (impl.step_status === "done") {
+    // Implement is done, but the cycle is not: `wrap-up` dispositions the findings parked by
+    // the final review, and the branch is still changing while it runs. Molecules poured
+    // before that step existed have none, and keep the old behaviour.
+    const wrapUp = state.steps.find((s) => /^Wrap up( |:)/.test(s.title ?? ""));
+    if (wrapUp && wrapUp.step_status !== "done") return "implementing";
+    return "finishing";
+  }
   if (impl.step_status === "ready" || impl.step_status === "current") return "implementing";
   return "brainstorming";
 }
