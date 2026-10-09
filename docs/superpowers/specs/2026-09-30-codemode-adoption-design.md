@@ -1013,7 +1013,7 @@ dispatch) — `Agent` also stays reachable by literal name and through
 `searchTools()`/`ALL_TOOLS`, but those are active discovery routes that assume the model already
 knows the name (risk (a)) — and it is not ours to rely on: pi could stop leaking it in any
 release. Risk (a)'s mitigation was attempted and rejected on measurement (see risk (a), above),
-so it stands unmitigated rather than becoming silent.
+so risk (a) stands unmitigated rather than becoming silent.
 Tracking: **`pi-packages-peefw`**.
 
 **Why not `go`.** All four gates pass, the core tools (`read`/`edit`/`bash`/`write`) all survive
@@ -1021,8 +1021,9 @@ at 3000, and the trial's ergonomic cost is bounded (two authored scripts instead
 calls, no retries, the anchor survived). But a gate pass licenses the *mechanism*, not the
 surface: risk (a) is a silent loss of the primary dispatch tool whose passive cue was the
 accidental leak in (b) (the active discovery route is deliberate but assumes the model already
-knows the name), and it has a cheap real fix. Naming that fix and doing it before
-adoption is exactly the difference between `go` and `go-with-mitigations`.
+knows the name), and it has a cheap real fix (an assumption the measurement later falsified —
+see risk (a)'s "Measured and rejected" note: the in-repo fix costs `edit`). Naming that fix and
+doing it before adoption is exactly the difference between `go` and `go-with-mitigations`.
 
 **Why not `no-go`.** Nothing disqualifying fired. §2's own disqualifier — a core tool demoted to
 `searchTools()` discovery — does not apply: all four core tools are listed at 3000. No gate
