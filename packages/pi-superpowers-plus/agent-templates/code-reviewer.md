@@ -79,6 +79,8 @@ say so.
 [Architecture problems, missing features, poor error handling, test gaps]
 
 #### Minor (Nice to Have)
+Report each minor with `file:line` and the concrete fix, so the controller can act on it without
+re-deriving it. Minors are dispositioned by the controller — never file a bead for one.
 [Code style, optimization opportunities, documentation polish]
 
 For each issue:
