@@ -13,10 +13,11 @@ discard.
 ## The three outcomes
 
 **1. Fix now — the default.**
-The controller fixes it in-session. Where a fix round is already running for that task, the fix
-rides that round — the implementer is still warm and the marginal cost is ~0. Where the review is
-otherwise clean, the finding goes on the `wrap-up` list and is fixed in that batch. No interrupt,
-no bead.
+The cycle fixes it in-session: the controller **dispatches** the fix to an implementer — it never
+edits code itself (see [fix-loop.md](fix-loop.md) and [red-flags.md](red-flags.md)). Where a fix
+round is already running for that task, the fix rides that round — the implementer is still warm
+and the marginal cost is ~0. Where the review is otherwise clean, the finding goes on the
+`wrap-up` list (see "Where the list lives" below) and is fixed in that batch. No interrupt, no bead.
 
 **2. Drop — the controller's own authority, and it must be reported.**
 Allowed only for **non-issues**: a wrong nitpick, a duplicate of another finding, something already
@@ -52,6 +53,20 @@ All five of these are findings for the purposes of this policy — none is exemp
 If a finding reaches the end of the cycle without one of the three dispositions, the cycle is not
 finished.
 
+## Where the list lives
+
+The `wrap-up` list is the ledger — not your context. The ledger is the `wrap-up` step's input, and
+an item held only in memory is an item the sweep will miss. One line per finding:
+
+- `Task <N>: minor (wrap-up): <file:line> <one-liner>` — a fix-now finding waiting for the batch
+- `Task <N>: parked — <finding> — ruling: <why the code stands>` — a breaker adjudication
+- `Task <N>: defer (candidate): <file:line> <one-liner>` — put it to the human as one batched
+  question at `wrap-up`, and record their ruling on the same line
+
+Record each finding the moment it is raised: a task-review minor or a `Recommendations` item when
+the review returns, a `DONE_WITH_CONCERNS` observation when you read the implementer's report, a
+plan-level observation when you notice it.
+
 ## Reporting
 
 The final report names every finding's outcome:
@@ -64,8 +79,8 @@ The final report names every finding's outcome:
 
 If the accumulated fix work is large relative to the task — more than a handful of items, fixes
 reaching well outside the task's file set, or a fix that is itself a design decision — stop and ask
-the human before working through it. This is the same batched question as the defer ruling, so in
-practice it is one ask, not two.
+the human before dispatching that batch. This is the same batched question as the defer ruling, so
+in practice it is one ask, not two.
 
 ## The step this policy belongs to
 

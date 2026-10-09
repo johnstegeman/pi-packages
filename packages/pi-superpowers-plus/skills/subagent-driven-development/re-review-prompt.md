@@ -101,7 +101,8 @@ Dispatch a subagent with this prompt:
     ### Out-of-Scope Observations
 
     Issues you noticed entirely outside the fix diff. Non-blocking; the
-    controller ledgers these for the final review. "None" if none.
+    controller records these on the ledger's `wrap-up` list and dispositions
+    them at `wrap-up` (see `reference/disposition.md`). "None" if none.
 
     ### Verdict
 

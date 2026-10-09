@@ -242,7 +242,7 @@ Implementer subagents report one of four statuses. Handle each appropriately:
 
 **DONE:** Generate the review package (`scripts/review-package <implement-step-id> BASE HEAD`, from this skill's directory — it prints the unique file path it wrote; BASE is the commit you recorded before dispatching the implementer — never `HEAD~1`, which silently drops all but the last commit of a multi-commit task), then dispatch the task reviewer with the printed path.
 
-**DONE_WITH_CONCERNS:** The implementer completed the work but flagged doubts. Read the concerns before proceeding. If the concerns are about correctness or scope, address them before review. If they're observations (e.g., "this file is getting large"), note them and proceed to review.
+**DONE_WITH_CONCERNS:** The implementer completed the work but flagged doubts. Read the concerns before proceeding. If the concerns are about correctness or scope, address them before review. If they're observations (e.g., "this file is getting large"), record them on the ledger's `wrap-up` list ([reference/disposition.md](reference/disposition.md) § "Where the list lives") and proceed to review.
 
 **NEEDS_CONTEXT:** The implementer needs information that wasn't provided. Provide the missing context and re-dispatch.
 
@@ -266,7 +266,9 @@ Per-task reviews are task-scoped gates. The broad review happens once, at the
 final whole-branch review. Never skip the task review, and never accept a
 report missing either verdict — spec compliance AND task quality are both
 required. Implementer self-review never replaces the task review; both are
-needed.
+needed. Any `Recommendations` the reviewer returns are findings for the
+disposition policy, recorded on the ledger's `wrap-up` list the same way
+([reference/disposition.md](reference/disposition.md) § "Where the list lives").
 
 - Hand the reviewer its diff as a file: run this skill's
   `scripts/review-package <implement-step-id> BASE HEAD` and pass the reviewer the file path

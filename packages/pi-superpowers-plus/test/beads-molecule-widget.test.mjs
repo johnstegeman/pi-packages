@@ -710,6 +710,38 @@ const activeRows = wLines.filter((l) => l.includes("◐"));
 assert.equal(activeRows.length, 1, `exactly one active row: ${wLines.join(" | ")}`);
 assert.ok(activeRows[0].includes("Wrap up"), `the active row is the wrap-up step: ${activeRows[0]}`);
 
+// Negative: no `wrap-up` step at all (a pre-change molecule) — nothing to render, even with
+// `implement` done.
+const noWrapState = {
+  ...wrapState,
+  steps: wrapState.steps.filter((s) => !s.title.startsWith("Wrap up")),
+};
+assert.ok(
+  !moleculeWidgetLines(noWrapState, 120).some((l) => l.includes("Wrap up")),
+  "no wrap-up step -> no wrap-up row",
+);
+
+// Negative: `wrap-up` exists but `implement` is not done yet — the row is premature.
+const implNotDoneState = {
+  ...implState,
+  steps: [
+    ...implState.steps,
+    {
+      id: "mol-9.w",
+      title: "Wrap up: disposition all parked findings",
+      status: "open",
+      issue_type: "task",
+      created_at: "t8",
+      step_status: "pending",
+      is_current: false,
+    },
+  ],
+};
+assert.ok(
+  !moleculeWidgetLines(implNotDoneState, 120).some((l) => l.includes("Wrap up")),
+  "implement not done -> no wrap-up row",
+);
+
 // ---------- finishing: verify/smoke/finish rows only ----------
 const finState = {
   molecule_id: "mol-9",

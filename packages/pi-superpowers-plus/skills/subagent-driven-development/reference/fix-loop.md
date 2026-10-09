@@ -9,7 +9,8 @@ Before the loop starts, two routes leave it immediately:
   fix now, drop, or defer, per [disposition.md](disposition.md). A fix-now finding rides this
   task's fix round when one is already running, and otherwise goes on the `wrap-up` list; only
   genuine defers stay there unresolved. "Parked" is not a resting state, and a roll-up nobody
-  resolves is a silent discard.
+  resolves is a silent discard. The list's format is defined in [disposition.md](disposition.md)
+  § "Where the list lives".
 - A finding labeled plan-mandated — or any finding that conflicts with
   what the task text requires — is the human's decision, like any plan
   contradiction: present the finding and the task text, ask which governs.
@@ -82,13 +83,13 @@ the cross-task context the reviewer lacks:
 
 - **The reviewer is wrong, or the point is contestable:** park it —
   `Task <N>: parked — <finding> — ruling: <why the code stands>`. The final
-  review sees both sides. The ruling is recorded in the ledger, and the item is
-  dispositioned at `wrap-up` — dropped there if the ruling holds, or put to the
+  review sees both sides. The ruling *is* the record-time decision; the item goes on the ledger's
+  `wrap-up` list, where the outcome is applied — dropped there if the ruling holds, or put to the
   human as a defer. Parking is not filing: do not create a bead for it here.
 - **Real, but nothing downstream builds on it:** park it the same way, with a ruling that says it
-  is real. The ruling is recorded in the ledger, and the item is dispositioned at `wrap-up` —
-  fixed there, dropped, or put to the human as a defer. Parking is not filing: do not create a
-  bead for it here.
+  is real. The ruling *is* the record-time decision; the item goes on the ledger's `wrap-up` list,
+  where the outcome is applied — fixed there, dropped, or put to the human as a defer. Parking is
+  not filing: do not create a bead for it here.
 - **Real and load-bearing** — a later task builds on it, or it reveals a
   plan defect: STOP. Append `Task <N>: BLOCKED — <reason>` and report to
   your human partner with the finding, the task text it collides with, and
