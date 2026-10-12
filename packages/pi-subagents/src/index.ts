@@ -79,7 +79,7 @@ import {
 } from "./workflow/progress.js";
 import { assertWorkflowArgs, runWorkflow } from "./workflow/runtime.js";
 import { resolveWorkflowScript } from "./workflow/saved.js";
-import { completeWorkflowTask, createWorkflowTask, failWorkflowTask, formatWorkflowNotification, resolveResumeTarget, truncateWorkflowResult, updateWorkflowProgressBatch, type WorkflowTask, workflowResultText, workflowRunId } from "./workflow/task.js";
+import { completeWorkflowTask, createWorkflowTask, failWorkflowTask, formatWorkflowNotification, resolveResumeTarget as resolveWorkflowResumeTarget, truncateWorkflowResult, updateWorkflowProgressBatch, type WorkflowTask, workflowResultText, workflowRunId } from "./workflow/task.js";
 import { fullWorkflowToolDescription } from "./workflow/tool-description.js";
 import { isWorktreeIsolationEnabled, setWorktreeIsolationEnabled } from "./worktree.js";
 import { escapeXml } from "./xml.js";
@@ -752,6 +752,32 @@ export default function (pi: ExtensionAPI) {
     if (byId) return byId;
     const resolved = manager.resolveMention(ref);
     return resolved?.kind === "live" ? resolved.record : undefined;
+  };
+
+  type ResumeTarget = { ok: true; record: AgentRecord } | { ok: false; message: string };
+
+  /**
+   * Resolve the Agent tool's `resume` ref. An exact id first — the existing
+   * behaviour, kept exact — then a handle or alias for a top-level record.
+   *
+   * The handle is what the SDD fix loop names: it is re-derivable from the task
+   * bead id after controller compaction, while the id is not, and the dispatch
+   * result reports the handle the spawn actually assigned.
+   */
+  const resolveResumeTarget = (ref: string): ResumeTarget => {
+    const byId = manager.getRecord(ref);
+    if (byId) {
+      if (!isTopLevelAgent(byId)) return { ok: false, message: `Agent not found: "${ref}". It may have been cleaned up.` };
+      return { ok: true, record: byId };
+    }
+    const resolved = manager.resolveMention(ref);
+    if (resolved?.kind === "live") return { ok: true, record: resolved.record };
+    return {
+      ok: false,
+      message:
+        `Agent not found: "${ref}" — no live record by that id or handle in this session. ` +
+        `If it was dispatched in an earlier session, re-dispatch with the report file.`,
+    };
   };
 
   const registryEntry = {
@@ -1531,7 +1557,7 @@ If the target is already known, use a direct tool — \`read\` for a known path,
 - Agents run in the background by default. When an agent runs in the background, you will be automatically notified when it completes — do NOT sleep, poll, or proactively check on its progress. Continue with other work or respond to the user instead.
 - **Foreground vs background**: Pass \`run_in_background: false\` only when your very next action depends on the agent's result and nothing else could usefully happen while it runs — e.g., a research agent whose finding gates the edit you're about to make. Otherwise let it run in the background (the default) — this includes fire-and-forget work, independent investigations, and anything where the user might hand you something else in the meantime. Wanting the result "next" is not enough on its own.
 - **Don't race**: after launching a background agent, you know nothing about its results. Never fabricate or predict them in any format — not as prose, summary, or structured output. The completion notification arrives in a later turn; it is never something you write yourself. If the user asks before it lands, say the agent is still running — give status, not a guess.
-- Use resume with an agent ID to continue a previous agent's work. A new (non-resume) Agent call starts a fresh agent with no memory of prior runs, so the prompt must be self-contained.
+- Use resume with an agent ID or handle to continue a previous agent's work. A new (non-resume) Agent call starts a fresh agent with no memory of prior runs, so the prompt must be self-contained.
 - Use steer_subagent to send mid-run messages to a running background agent.
 - Clearly tell the agent whether you expect it to write code or just to do research (search, file reads, etc.), since it is not aware of the user's intent.
 - If an agent's description says it should be used proactively, try to use it without the user having to ask for it first.
@@ -1654,7 +1680,7 @@ Terse command-style prompts produce shallow, generic work.
       ),
       resume: Type.Optional(
         Type.String({
-          description: "Optional agent ID to resume from. Continues from previous context. Resumes detached like any other spawn; pass run_in_background: false to block and get the result inline. An agent can only be resumed once its current run has finished — use steer_subagent to reach one mid-run.",
+          description: "Optional agent ID or handle to resume from. Continues from previous context. Resumes detached like any other spawn; pass run_in_background: false to block and get the result inline. An agent can only be resumed once its current run has finished — use steer_subagent to reach one mid-run.",
         }),
       ),
       isolated: Type.Optional(
@@ -2013,10 +2039,9 @@ Terse command-style prompts produce shallow, generic work.
 
       // Resume existing agent
       if (params.resume) {
-        const existing = manager.getRecord(params.resume);
-        if (!existing || !isTopLevelAgent(existing)) {
-          return textResult(`Agent not found: "${params.resume}". It may have been cleaned up.`);
-        }
+        const target = resolveResumeTarget(params.resume);
+        if (!target.ok) return textResult(target.message);
+        const existing = target.record;
         if (!existing.session) {
           return textResult(`Agent "${params.resume}" has no active session to resume.`);
         }
@@ -2061,7 +2086,7 @@ Terse command-style prompts produce shallow, generic work.
           );
         }
 
-        const record = await manager.resume(params.resume, params.prompt, signal);
+        const record = await manager.resume(existing.id, params.prompt, signal);
         if (!record) {
           return textResult(`Failed to resume agent "${params.resume}".`);
         }
@@ -2698,7 +2723,7 @@ Terse command-style prompts produce shallow, generic work.
     },
 
     execute: async (toolCallId, params, _signal, _onUpdate, ctx) => {
-      const resumeFrom = resolveResumeTarget(params.resumeFromRunId, workflowTasks);
+      const resumeFrom = resolveWorkflowResumeTarget(params.resumeFromRunId, workflowTasks);
       if (resumeFrom !== undefined && !resumeFrom.ok) return textResult(resumeFrom.message);
 
       // LOCAL PATCH (pi-packages) — see docs/pi-subagents-local-patch.md

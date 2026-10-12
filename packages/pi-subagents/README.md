@@ -193,7 +193,7 @@ Either way the started agent honours its own frontmatter — `model:`, `thinking
 
 Two things to weigh against `direct`: the clone re-sends the whole conversation, and the agent does not start until that turn finishes.
 
-**Named agents.** The `Agent` tool takes an optional `name`, so the orchestrator can call one `auth-audit` instead of leaving you to tell `@explore-2` from `@explore-3`. A name is *additive*: the type-derived handle is still assigned, so `@explore` keeps reaching that agent rather than starting a second one beside it. Both names share one namespace — an alias can never shadow a live handle or the reverse — and the popup shows one row per agent, under its alias, with the type moved into the description. `steer_subagent` and `get_subagent_result` accept a handle too, so you and the model address agents the same way.
+**Named agents.** The `Agent` tool takes an optional `name`, so the orchestrator can call one `auth-audit` instead of leaving you to tell `@explore-2` from `@explore-3`. A name is *additive*: the type-derived handle is still assigned, so `@explore` keeps reaching that agent rather than starting a second one beside it. Both names share one namespace — an alias can never shadow a live handle or the reverse — and the popup shows one row per agent, under its alias, with the type moved into the description. `steer_subagent`, `get_subagent_result` and `resume` accept a handle too, so you and the model address agents the same way.
 
 **Resuming much later.** Because subagent sessions are persisted by default ([`rememberAgents`](#persistent-settings)), a handle keeps working after the agent's in-memory record is evicted: `@explore anything else?` reopens the conversation from disk. Only the *definition* is re-resolved, so a continuation runs under the agent type's current frontmatter, not the one the first run used. If the type has since been deleted or disabled, the resume is refused rather than falling back to another agent — re-enable it and the handle works again. Names from an evicted agent stay reserved, so a later Explore becomes `explore-2` rather than shadowing something you can still reach; the 100 most recent are kept, and all of them are forgotten on `/new` and session switch. A resumed agent takes those names back, so `@explore` keeps meaning the same conversation. An agent whose session was only ever in memory leaves nothing to reopen, and the mention starts a fresh one instead; if the session file has since been deleted, the mention says so and frees the handle rather than silently sending your message to a new agent.
 
@@ -413,7 +413,7 @@ Launch a sub-agent.
 | `thinking` | string | no | Thinking level: off, minimal, low, medium, high, xhigh, max (availability depends on pi version and model) |
 | `max_turns` | number | no | Max agentic turns. Omit for unlimited (default) |
 | `run_in_background` | boolean | no | Defaults to `true`; `false` blocks and returns the result inline |
-| `resume` | string | no | Agent ID to resume a previous session |
+| `resume` | string | no | Agent ID or handle to resume a previous session |
 | `isolated` | boolean | no | No extension/MCP tools |
 | `isolation` | `"off"` \| `"worktree"` | no | `worktree` runs in an isolated git worktree; `off` (the default) does not. Absent from the schema entirely when `worktreeIsolation: false` |
 | `inherit_context` | boolean | no | Fork parent conversation into agent |
