@@ -408,8 +408,9 @@ describe("child-safe nested Agent tools", () => {
     });
 
     expect(result.isError).toBe(false);
-    // Foreground: the whole output is inline and no id came back, so the note
-    // must not invite a get_subagent_result call the parent cannot make (#174).
+    // Foreground: the whole output is inline, so the note must not invite a
+    // get_subagent_result call — there is nothing left to fetch, even though the
+    // result now names the child (#174).
     expect(result.content[0].text).toContain("everything the agent produced is above");
     expect(result.content[0].text).not.toContain("output is partial");
     // The warning leads, so it can't read as part of the child's own answer.
@@ -534,6 +535,107 @@ describe("child-safe nested Agent tools", () => {
     } as any, undefined, undefined, executionCtx);
 
     expect(spawnAndWait.mock.calls[0][1]).toBe(executionCtx);
+  });
+
+  it("names the child on a clean inline result", async () => {
+    const [agent] = tools();
+    const result = await execute(agent, {
+      subagent_type: "scout",
+      description: "find files",
+      prompt: "Find them",
+    });
+
+    expect(result.isError).toBe(false);
+    // The whole output is inline; the id is what lets the parent name the child
+    // again for a resume, a fetch or a steer while the record is live.
+    expect(result.content[0].text).toBe("Agent ID: child-1\n\ndone");
+  });
+
+  it("names the child after the outcome note on a truncated inline result", async () => {
+    spawnAndWait.mockImplementation(async () => ({
+      id: "child-1",
+      record: { id: "child-1", status: "steered", result: "half an answer", parentAgentId: "parent-1" },
+    }));
+    const [agent] = tools();
+    const result = await execute(agent, {
+      subagent_type: "scout",
+      description: "truncated",
+      prompt: "Do work",
+    });
+
+    // The note still leads, so it cannot read as part of the child's own answer.
+    expect(result.content[0].text).toBe(
+      "Nested agent (wrapped up at the turn limit — everything the agent produced is above; the task may be unfinished).\n" +
+        "Agent ID: child-1\n\nhalf an answer",
+    );
+  });
+
+  it("names the child on a failed inline result", async () => {
+    spawnAndWait.mockImplementation(async () => ({
+      id: "child-1",
+      record: { id: "child-1", status: "error", error: "boom", parentAgentId: "parent-1" },
+    }));
+    const [agent] = tools();
+    const result = await execute(agent, {
+      subagent_type: "scout",
+      description: "fails",
+      prompt: "Do work",
+    });
+
+    expect(result.isError).toBe(true);
+    // Identity last, matching the top-level error result (index.ts:2399; the
+    // resume arm is at index.ts:2170).
+    expect(result.content[0].text).toBe("Agent failed: boom\nAgent ID: child-1");
+  });
+
+  it("names the child a nested resume returns", async () => {
+    records.set("child-1", { id: "child-1", status: "running", parentAgentId: "parent-1" });
+    vi.mocked(manager.resume).mockResolvedValue({
+      id: "child-1",
+      status: "completed",
+      result: "second pass",
+      parentAgentId: "parent-1",
+    } as any);
+    const [agent] = tools();
+    const result = await execute(agent, {
+      resume: "child-1",
+      subagent_type: "scout",
+      description: "resume",
+      prompt: "Continue",
+    });
+
+    expect(result.content[0].text).toBe("Agent ID: child-1\n\nsecond pass");
+  });
+
+  it("does not name the child on a fetched result the parent asked for by id", async () => {
+    records.set("child-1", {
+      id: "child-1", status: "completed", result: "stored output", parentAgentId: "parent-1",
+    });
+    const [, getResult] = tools();
+    const result = await execute(getResult, { agent_id: "child-1" });
+
+    // The parent supplied this id as an argument, so echoing it is noise.
+    expect(result.content[0].text).toBe("stored output");
+    expect(result.content[0].text).not.toContain("Agent ID:");
+  });
+
+  it("omits the Handle line for a nested child, which carries no handle", async () => {
+    const [agent] = tools();
+    const result = await execute(agent, {
+      subagent_type: "scout",
+      description: "find files",
+      prompt: "Find them",
+    });
+
+    // Names the invariant: a nested child's inline result carries no `Handle:`
+    // line. It does not prove *why* it is absent — this record has no handle or
+    // alias either (agent-manager.ts:508-520), so the omission could be by
+    // construction or by record shape. The by-construction rule is established
+    // at unit level by test/identity.test.ts; the exact-equality assertion in
+    // "names the child on a clean inline result" above already pins the same
+    // absence.
+    expect(result.content[0].text).toContain("Agent ID: child-1");
+    expect(result.content[0].text).not.toContain("Handle:");
   });
 });
 
