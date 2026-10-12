@@ -35,13 +35,24 @@ The script gates the fix agent on `gate` — a non-zero exit fails the agent and
 **No covering-test command — the prose path below is unchanged.**
 
 **Rounds 1-3 — resume the original implementer.** Dispatch it with
-`Agent({ subagent_type: "implementer", resume: <agent_id>, prompt:
-"<open findings verbatim>" })`, where `<agent_id>` is the identity you
-recorded when you first dispatched this task's implementer. Its context is
-intact: it knows the task, the code, and its own choices. The `resume:`
-parameter is real tool support from `@tintinweb/pi-subagents` — the old
-"resume this agent" instruction had no tool behind it; now it does.
-Keep the resumed agent's `handle:` (recorded at dispatch) in the ledger, and append it to each fix-round line: after compaction, `get_subagent_result` by the handle retrieves the finished implementer's outcome without re-dispatch. This query is safe because each fix round runs and resumes inside the live window; after eviction the ledger (commits + handle) is the cross-session record.
+`Agent({ subagent_type: "implementer", resume: "<handle>", prompt:
+"<open findings verbatim>" })`, where `<handle>` is the `handle:` you recorded on the
+dispatch line (`task-<sanitized-task-id>-impl`). Its context is intact: it knows the task,
+the code, and its own choices. Prefer the handle over the `agent:` id — the handle is
+re-derivable from the task bead id after compaction and the id is not; both work, because
+the tool resolves an exact id, then a live handle, then an evicted conversation.
+
+The resume survives the ~10-minute record sweep: when the record is gone but the
+conversation is still on disk, the tool reopens it and the result says `resumed from disk`
+with a new agent id. Append `— implementer resumed from disk` to that round's ledger line,
+so a later reader knows the context was reconstructed rather than continuous.
+
+When the implementer is genuinely gone — the session boundary has passed, or its session
+file was deleted — the resume fails with a message naming the cause. Do not stop the loop
+for it: dispatch a fresh implementer with the report-file path, the open findings, and the
+rounds-4-5 framing ("a prior implementer attempted this task; you own it now — read the
+report file"), then append
+`Task <N>: fix round <R>/5 — resume failed (<cause>); re-dispatched fresh implementer with the report file`.
 
 **Rounds 4-5 — dispatch a fresh implementer** (drop `resume:`), with the
 task bead id, the report-file path, the open findings, and this framing: "A
