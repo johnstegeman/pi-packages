@@ -45,7 +45,9 @@ the tool resolves an exact id, then a live handle, then an evicted conversation.
 The resume survives the ~10-minute record sweep: when the record is gone but the
 conversation is still on disk, the tool reopens it and the result says `resumed from disk`
 with a new agent id. Append `— implementer resumed from disk` to that round's ledger line,
-so a later reader knows the context was reconstructed rather than continuous.
+so a later reader knows the context was reconstructed rather than continuous — and update
+that line's `agent:`/`handle:` pair to the **reopened** record's values, because the
+pre-reopen id is gone and the ledger is the recovery map.
 
 When the implementer is genuinely gone — the session boundary has passed, or its session
 file was deleted — the resume fails with a message naming the cause. Do not stop the loop
