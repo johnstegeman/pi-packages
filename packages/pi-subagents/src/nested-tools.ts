@@ -128,7 +128,7 @@ function ownsRecord(record: AgentRecord | undefined, parentAgentId: string): rec
 type ResultPosition = "inline" | "fetched";
 
 function formatRecord(record: AgentRecord, position: ResultPosition): string {
-  // LOCAL PATCH (pi-packages) — see docs/pi-subagents-local-patch.md (Divergence 9)
+  // LOCAL PATCH (pi-packages) — see docs/pi-subagents-local-patch.md (Divergence 9).
   // Inline only: a fetched result was asked for BY id, so the caller already
   // holds it and echoing it is noise. A nested record carries no handle, so
   // identityLines emits the id line alone.

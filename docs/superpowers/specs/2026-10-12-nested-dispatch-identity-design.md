@@ -7,8 +7,8 @@ Date: 2026-10-12 · Status: approved design (`review.verdict=done` on `pi-packag
 ## Problem
 
 `pi-packages-jnr7.5` gave every **top-level** `Agent` dispatch result an `Agent ID:` / `Handle:`
-block (`identityLines`, `src/index.ts:2023`). The **nested** paths did not.
-`src/nested-tools.ts:191` (nested resume) and `:358` (nested foreground spawn) both render through
+block (`identityLines`, now `src/identity.ts:16`). The **nested** paths did not.
+`src/nested-tools.ts:202` (nested resume) and `:369` (nested foreground spawn) both render through
 `formatRecord(record, "inline")`, which emits the outcome note and the child's output and nothing
 that names the child.
 
@@ -23,7 +23,7 @@ This was left open deliberately, not overlooked. The jnr7.5 spec recorded two re
 - §1: "The `Handle:` line is omitted when the record carries no handle (nested children)."
 - Out of scope: "Nested and workflow-owned agents (resume remains top-level only)."
 
-`src/agent-manager.ts:509-511` states the boundary: nested and workflow-owned children are "filtered
+`src/agent-manager.ts:508-510` states the boundary: nested and workflow-owned children are "filtered
 out of every top-level surface, so no handle: nothing can address them and they must not consume a
 name a top-level sibling could otherwise take". `tombstone()` returns early for them
 (`:1459-1460`), so they leave no tombstone and cannot be reopened after eviction.
@@ -62,11 +62,11 @@ decision is preserved rather than widened.
 | Decision | Choice | Rationale |
 |---|---|---|
 | Surface the id at all | **Yes** | No real-world occurrence, but the gap is real and the fix is two lines; the alternative (a README note that nested children are unaddressable by design) leaves a parent unable to name work it owns |
-| Handle | **Id only** — no handle, no alias, no tombstone for nested children | Handles are the `@handle` mention namespace and share `takenHandles()`; giving nested children one changes the boundary at `agent-manager.ts:509-511` for no evidenced need |
-| Placement | **Mirror the top-level order**: note/headline → `Agent ID:` → blank line → output | Same shape as `index.ts:2424-2430`; keeps the rule at `nested-tools.ts:136-137` that the note must precede the output; one `Agent ID: (\S+)` regex serves a controller at either level |
+| Handle | **Id only** — no handle, no alias, no tombstone for nested children | Handles are the `@handle` mention namespace and share `takenHandles()`; giving nested children one changes the boundary at `agent-manager.ts:508-520` for no evidenced need |
+| Placement | **Mirror the top-level order**: note/headline → `Agent ID:` → blank line → output | Same shape as `index.ts:2411-2417`; keeps the rule at `nested-tools.ts:143-146` that the note must precede the output; one `Agent ID: (\S+)` regex serves a controller at either level |
 | `queued` / `running` branch | **Unchanged** | It already prints `Agent <record.id> is <status>.` |
 | Fetched (`get_subagent_result`) position | **Unchanged** | The parent supplied that id as an argument; echoing it is noise |
-| Background nested ack (`Nested agent started in background. Agent ID: …`, `:347`) | **Unchanged** | A dispatch acknowledgement, not a result; already names the id |
+| Background nested ack (`Nested agent started in background. Agent ID: …`, `:358`) | **Unchanged** | A dispatch acknowledgement, not a result; already names the id |
 | Where the helper lives | **`src/identity.ts`**, imported by both entry points | One definition instead of two that can drift; `status-note.ts` is the tested precedent for a helper both entry points need |
 | Skill prose (`pi-superpowers-plus`) | **No change** | The review agents' nested `Explore` is a one-shot lookup with no ledger |
 
@@ -76,7 +76,7 @@ New module, the same shape as the package's other small shared modules (`xml.ts`
 `child-context.ts` 15):
 
 ```ts
-// LOCAL PATCH (pi-packages) — see docs/pi-subagents-local-patch.md (Divergence 9)
+// LOCAL PATCH (pi-packages) — see docs/pi-subagents-local-patch.md (Divergence 9).
 /**
  * The two identity lines a dispatch result carries: the durable record id, and
  * the handle the spawn actually assigned when the record has one.
@@ -87,11 +87,11 @@ export function identityLines(record: { id: string; alias?: string; handle?: str
 }
 ```
 
-`src/index.ts` deletes its module-private copy (`:2014-2026`, marker included — the marker moves
-with the helper) and imports the function alongside its existing `./status-note.js` import. All
-eight call sites (`:2103`, `:2124`, `:2165`, `:2183`, `:2188`, `:2272`, `:2412`, `:2426`) are
-unchanged: Divergence 8 already established that the helper carries the marker and its call sites do
-not.
+`src/index.ts` deletes its module-private copy (`:2014-2026` in the pre-move revision `a29e542^`,
+marker included — the marker moves with the helper) and imports the function alongside its existing
+`./status-note.js` import. All eight call sites (`:2090`, `:2111`, `:2152`, `:2170`, `:2175`,
+`:2259`, `:2399`, `:2413`) are unchanged: Divergence 8 already established that the helper carries
+the marker and its call sites do not.
 
 The helper is pure — it captures nothing from `index.ts`'s closure — so this is a move, not a
 refactor.
@@ -103,11 +103,11 @@ where the note is empty). `status-note.ts`'s own header rationale — "both entr
 
 ## §2 — `formatRecord` emits the id on the inline position only
 
-`src/nested-tools.ts:128-143`, after the change:
+`src/nested-tools.ts:130-154`, after the change:
 
 ```ts
 function formatRecord(record: AgentRecord, position: ResultPosition): string {
-  // LOCAL PATCH (pi-packages) — see docs/pi-subagents-local-patch.md (Divergence 9)
+  // LOCAL PATCH (pi-packages) — see docs/pi-subagents-local-patch.md (Divergence 9).
   // Inline only: a fetched result was asked for BY id, so the caller already
   // holds it and echoing it is noise. A nested record carries no handle, so
   // identityLines emits the id line alone.
@@ -140,8 +140,8 @@ Resulting shapes:
 | any fetched (`get_subagent_result`) | — | unchanged |
 
 The note still leads the output in every case where it appears, which is the property the comment at
-`:136-137` protects. No trailing newline is introduced anywhere, so nested results keep their current
-"no trailing whitespace" property. Both inline call sites (`:191` nested resume, `:358` nested
+`:143-146` protects. No trailing newline is introduced anywhere, so nested results keep their current
+"no trailing whitespace" property. Both inline call sites (`:202` nested resume, `:369` nested
 spawn) pick this up with no change of their own.
 
 Because nested records carry neither `handle` nor `alias`, the `Handle:` line is omitted **by
@@ -182,11 +182,11 @@ reachable from them.
    follows.
 2. `steered` inline → the exact string `Nested agent (wrapped up at the turn limit — everything the
    agent produced is above; the task may be unfinished).\nAgent ID: child-1\n\nhalf an answer`
-   (extends the existing truncation test at `:399`).
+   (extends the existing truncation test at `:398`).
 3. error inline → the result ends `\nAgent ID: child-1`.
 4. **the fetched position carries no id** → `get_subagent_result` on the same record has no
    `Agent ID:` line.
-5. the nested `resume` path (`:191`) carries the id too.
+5. the nested `resume` path (`:202`) carries the id too.
 6. a nested record with neither `handle` nor `alias` emits no `Handle:` line — pinning id-only as
    behaviour rather than as an accident of the record shape.
 

@@ -72,7 +72,7 @@ Agent({
 })
 ```
 
-Agents run in the background by default: the call returns an ID immediately and notifies you on completion, carrying a preview of the result (use `get_subagent_result` for the full text). Pass `run_in_background: false` to block until the agent finishes and get its full output inline. Every dispatch result reports the agent's `Agent ID` and the `Handle` it was assigned — the handle is the name `@`, `steer_subagent`, `get_subagent_result` and `resume` all accept, and the id is the precise record key.
+Agents run in the background by default: the call returns an ID immediately and notifies you on completion, carrying a preview of the result (use `get_subagent_result` for the full text). Pass `run_in_background: false` to block until the agent finishes and get its full output inline. Every top-level dispatch result reports the agent's `Agent ID` and the `Handle` it was assigned — the handle is the name `@`, `steer_subagent`, `get_subagent_result` and `resume` all accept, and the id is the precise record key.
 
 ### Scheduling
 

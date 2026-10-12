@@ -1,4 +1,4 @@
-// LOCAL PATCH (pi-packages) — see docs/pi-subagents-local-patch.md (Divergence 9)
+// LOCAL PATCH (pi-packages) — see docs/pi-subagents-local-patch.md (Divergence 9).
 /**
  * The two identity lines a dispatch result carries.
  *

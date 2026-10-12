@@ -326,7 +326,8 @@ Unchanged by design: the ten-minute eviction cutoff, `MAX_TOMBSTONES`, the tombs
 lifetime, and `steer_subagent`'s live-only resolution.
 
 Files: `src/index.ts` — the four edit sites above and the reopen block (both arms) each carry the
-marker.
+marker. The `identityLines` helper site itself moved to `src/identity.ts` and is marked under
+Divergence 9.
 Covered by
 `test/get-result-evicted.test.ts` (the tombstone answer, no spawn, the resolved live identity, the
 unknown ref), `test/foreground-result-retrieval.test.ts` (the resolved-path `structuredContent`
@@ -350,8 +351,8 @@ Two edits:
 1. **`identityLines` moved out of `index.ts`'s closure into `src/identity.ts`** (Divergence 8,
    item 1, called it "one module-private helper"). It is now imported by both entry points,
    because `src/nested-tools.ts` cannot import from `index.ts`. The move is verbatim — same body,
-   same marker, same behaviour. `src/status-note.ts` is the precedent: a helper both entry points
-   need, in its own module.
+   same behaviour; the marker gains the `(Divergence 9)` suffix. `src/status-note.ts` is the
+   precedent: a helper both entry points need, in its own module.
 2. **`formatRecord` emits it on the inline position only** (`src/nested-tools.ts`). A clean
    inline result becomes `Agent ID: <id>`, a blank line, then the output; a non-clean one puts the
    id line directly after the outcome note, so the note still precedes the output. The error
@@ -379,9 +380,9 @@ handles and tombstones, and the ten-minute eviction cutoff.
 
 Divergences 3 — the code-mode exposure/namespace/outputSchema changes from Task 6 — 4 — Task 7's
 codemode activation delta — 6 — the workflow `args` shape guard, whose two `src/workflow/` files
-are fully marked (`:201`) — 7's `get_subagent_result` branch, whose `wf_` lookup sits inside a
-tool upstream knows only as an agent lookup — 8's identity/resume sites (the `identityLines`
-helper, which now lives in `src/identity.ts`, `resolveResumeTarget`, `planReopen`, the `resume`
+are fully marked (`docs/pi-subagents-local-patch.md:201`, Divergence 6's Files line) — 7's
+`get_subagent_result` branch, whose `wf_` lookup sits inside a tool upstream knows only as an
+agent lookup — 8's identity/resume sites (`resolveResumeTarget`, `planReopen`, the `resume`
 schema entry, and the reopen block (both arms)) — and 9's nested formatter change, whose two
 markers sit outside `index.ts`, `agent-runner.ts` and Divergence 6's `src/workflow/` pair —
 **are** marked, because each is a small, surgical edit a future reader could otherwise mistake for
@@ -395,6 +396,9 @@ blocks that are plainly this copy's own state (see its section above). The marke
 ```ts
 // LOCAL PATCH (pi-packages) — see docs/pi-subagents-local-patch.md
 ```
+
+A site may append a `(Divergence N).` suffix naming the divergence that introduced it;
+`agent-runner.ts`'s Divergence 4 markers and Divergence 9's two sites do.
 
 Every changed line of such a divergence is bracketed by that comment, and the delta is
 recorded in this file under its own heading. Do not reformat, rename, or "tidy"

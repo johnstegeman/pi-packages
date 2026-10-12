@@ -3,7 +3,7 @@ import { identityLines } from "../src/identity.js";
 
 describe("identityLines", () => {
   it("prints the id alone for a record with no handle or alias", () => {
-    // A nested child carries neither, by design (agent-manager.ts:509-511).
+    // A nested child carries neither, by design (agent-manager.ts:508-520).
     expect(identityLines({ id: "child-1" })).toBe("Agent ID: child-1\n");
   });
 

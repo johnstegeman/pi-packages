@@ -583,7 +583,8 @@ describe("child-safe nested Agent tools", () => {
     });
 
     expect(result.isError).toBe(true);
-    // Identity last, matching the top-level error result (index.ts:2412).
+    // Identity last, matching the top-level error result (index.ts:2399; the
+    // resume arm is at index.ts:2170).
     expect(result.content[0].text).toBe("Agent failed: boom\nAgent ID: child-1");
   });
 
@@ -626,8 +627,13 @@ describe("child-safe nested Agent tools", () => {
       prompt: "Find them",
     });
 
-    // A real nested record has no handle or alias (agent-manager.ts:509-511),
-    // so identityLines emits the id line alone.
+    // Names the invariant: a nested child's inline result carries no `Handle:`
+    // line. It does not prove *why* it is absent — this record has no handle or
+    // alias either (agent-manager.ts:508-520), so the omission could be by
+    // construction or by record shape. The by-construction rule is established
+    // at unit level by test/identity.test.ts; the exact-equality assertion in
+    // "names the child on a clean inline result" above already pins the same
+    // absence.
     expect(result.content[0].text).toContain("Agent ID: child-1");
     expect(result.content[0].text).not.toContain("Handle:");
   });
