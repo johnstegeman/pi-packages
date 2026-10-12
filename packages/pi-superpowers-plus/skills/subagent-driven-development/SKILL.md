@@ -230,7 +230,7 @@ and fix-round diffs need it.
 - If an earlier task parked a finding in the area this task touches, carry
   a pointer to that ledger entry in the dispatch.
 - Record **both** the implementer's `agent:` id and its `handle:` from the `Agent(...)`
-  dispatch result — every dispatch result reports `Agent ID:` and `Handle:`. Fix-loop
+  dispatch result — every top-level dispatch result reports `Agent ID:` and `Handle:`. Fix-loop
   rounds 1-3 resume by the **handle**: `Agent({ subagent_type: "implementer", resume:
   "<handle>", ... })`. The handle is re-derivable from the task bead id after compaction
   and the id is not, and the result reports the handle the spawn actually assigned — a
