@@ -1245,7 +1245,10 @@ describe("resuming an evicted agent by name", () => {
     // long after the record was swept.
     const { tools } = boot();
     finishedRun(fakeSession());
-    await evict(await spawnBackground(tools));
+    // The id is bound rather than discarded: the whole point of the tombstone answer
+    // is that it hands back the durable id, and the query below asks by handle.
+    const evictedId = await spawnBackground(tools);
+    await evict(evictedId);
     await flush();
 
     const steered = await tools.get("steer_subagent").execute(
@@ -1258,6 +1261,9 @@ describe("resuming an evicted agent by name", () => {
     expect(textOf(steered)).toContain("Agent not found");
     expect(textOf(read)).not.toContain("Agent not found");
     expect(textOf(read)).toContain("Status: evicted");
+    // The durable id, resolved from the tombstone rather than echoed from the
+    // queried handle.
+    expect(textOf(read)).toContain(`Agent: ${evictedId}`);
   });
 
   it("reports a session that is gone, rather than starting something else", async () => {

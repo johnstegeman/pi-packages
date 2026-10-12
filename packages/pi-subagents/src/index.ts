@@ -1562,7 +1562,7 @@ Notes:
 - Parallel work: one message, multiple Agent calls — they run concurrently.
 - Subagents run in the background by default; you'll be notified when one completes. Pass run_in_background: false only when your very next action depends on the result and nothing else could usefully happen while it runs. Never fabricate or predict a pending agent's results — if the user asks before the notification arrives, say it's still running.
 - The result is not shown to the user — summarize it for them. Verify an agent's claimed code changes before reporting work done.
-- resume continues a previous agent by ID; steer_subagent messages a running one.${isolationCompactGuideline}`;
+- resume continues a previous agent by ID or handle; steer_subagent messages a running one.${isolationCompactGuideline}`;
 
   const fullAgentToolDescription = `Launch a new agent to handle complex, multi-step tasks autonomously. Each agent type has specific capabilities and tools available to it.
 
@@ -2080,7 +2080,7 @@ Terse command-style prompts produce shallow, generic work.
             return textResult(
               plan.reason === "session-gone"
                 ? `Agent "${label}" was evicted and its session file is gone; the conversation cannot be reopened — re-dispatch a fresh implementer with the report file.`
-                : `Agent "${label}" was evicted and the ${entry.type} agent is no longer available; its conversation cannot be reopened — re-dispatch a fresh implementer with the report file.`,
+                : `Agent "${label}" was evicted and the ${entry.type} agent is no longer available; its conversation cannot be reopened yet — the record is kept, so re-enabling the agent makes resume "${label}" work again. Or re-dispatch a fresh implementer with the report file.`,
             );
           }
           // LOCAL PATCH (pi-packages) — see docs/pi-subagents-local-patch.md

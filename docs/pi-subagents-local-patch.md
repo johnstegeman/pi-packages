@@ -339,7 +339,7 @@ byte-identical refusals). The README's `get_subagent_result` section documents t
 Divergences 3 — the code-mode exposure/namespace/outputSchema changes from Task 6 — 4 — Task 7's
 codemode activation delta — 7's `get_subagent_result` branch, whose `wf_` lookup sits inside a
 tool upstream knows only as an agent lookup — and 8's identity/resume sites (the `identityLines`
-helper, `resolveResumeTarget`, `planReopen`, the `resume` schema entry, and the two reopen arms) —
+helper, `resolveResumeTarget`, `planReopen`, the `resume` schema entry, and the reopen block (both arms)) —
 **are** marked, because each is a small, surgical edit a future reader could otherwise mistake for
 upstream behaviour. Divergence 8 has two deliberate exceptions, both recorded in its section above:
 the `identityLines` **call sites** carry no marker of their own (the helper's marker covers them —

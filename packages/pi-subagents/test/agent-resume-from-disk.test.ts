@@ -81,8 +81,12 @@ async function evict(id: string) {
   return manager;
 }
 
-/** Dispatch a finished background agent; return the identity its result reported. */
-async function dispatch(tools: Map<string, any>, name: string) {
+/**
+ * Dispatch a finished background agent; return the identity its result reported.
+ * `subagent_type` is a parameter because the type-unavailable case needs a custom
+ * agent it can then disable — the type recorded on the tombstone is what counts.
+ */
+async function dispatch(tools: Map<string, any>, name: string, subagent_type = "Explore") {
   vi.mocked(runAgent).mockResolvedValue({
     responseText: "first answer",
     session: fakeSession(),
@@ -92,7 +96,7 @@ async function dispatch(tools: Map<string, any>, name: string) {
   } as any);
   const r = await tools.get("Agent").execute(
     "tc-spawn",
-    { prompt: "go", description: "implement the task", subagent_type: "Explore", name, run_in_background: true },
+    { prompt: "go", description: "implement the task", subagent_type, name, run_in_background: true },
     undefined,
     undefined,
     ctx(),
@@ -149,13 +153,14 @@ describe("Agent({ resume }) reopens an evicted conversation", () => {
     expect(text).toContain(`Handle: ${handle}`);
 
     // The caller-facing name came back with the reopened record, so the next
-    // round names the same conversation rather than the corpse. The dispatch
-    // assigned `explore` as the record handle and the caller's `name` as the
-    // alias, and the reopened result's `Handle:` line reports the alias — so the
-    // reclaimed name lives there.
+    // round names the same conversation rather than the corpse: the reclaimed
+    // alias is the `name` the caller dispatched under, and the type-derived
+    // handle the dispatch originally assigned is reclaimed too — asserting the
+    // alias alone would not fail if `reclaim.handle` were dropped.
     const resumedId = (vi.mocked(runAgent).mock.calls[0][3] as any).agentId;
     const reopenedRecord = manager.getRecord(resumedId);
-    expect(reopenedRecord.alias ?? reopenedRecord.handle).toBe(handle);
+    expect(reopenedRecord.alias).toBe(handle);
+    expect(reopenedRecord.handle).toBe("explore");
   });
 
   it("resolves the live record when a stale id matches a tombstone a reopen kept", async () => {
@@ -310,6 +315,75 @@ describe("Agent({ resume }) reopens an evicted conversation", () => {
     );
     expect(again).toContain("Agent not found");
     expect(again).not.toContain("session file is gone");
+  });
+
+  it("keeps the tombstone, and names the way back, when the agent type is unavailable", async () => {
+    // `planReopen` refuses to reopen under a substitute agent: `resolveSpawnType`
+    // falls back to general-purpose for a type it cannot resolve (#183), and
+    // reopening this conversation under another agent's prompt and tools is not
+    // continuing it. The tombstone stays, though — re-enabling the type makes the
+    // same resume work — so the refusal must not read as terminal: a controller
+    // that trusts a dead-end wording discards a recoverable implementer.
+    hermetic = hermeticDir({
+      settings: { outputTranscript: false },
+      agentFiles: { scout: "---\ndescription: scouts\n---\nbody" },
+    });
+    const b = makePi();
+    subagentsExtension(b.pi);
+    booted = b.lifecycle;
+    const { id } = await dispatch(b.tools, "task-jnr7-5-impl", "scout");
+    await evict(id);
+    // Disabled after the run, the way `/agents → Disable` does it at any time.
+    writeFileSync(
+      join(process.cwd(), ".pi", "agents", "scout.md"),
+      "---\ndescription: scouts\nenabled: false\n---\nbody",
+    );
+    vi.mocked(runAgent).mockClear();
+
+    const r = await b.tools.get("Agent").execute(
+      "tc-resume",
+      { resume: id, prompt: "fix the open findings", run_in_background: true },
+      undefined,
+      undefined,
+      ctx(),
+    );
+
+    const text = textOf(r);
+    expect(text).toContain("the scout agent is no longer available");
+    expect(text).toContain("re-enabling the agent makes resume");
+    expect(text).toContain("re-dispatch a fresh implementer with the report file");
+    expect(vi.mocked(runAgent)).not.toHaveBeenCalled();
+
+    // The tombstone is retained: a second attempt refuses with the same reason
+    // rather than the rung-4 `Agent not found`, which is what a caller sees once
+    // the record is really gone.
+    const again = textOf(
+      await b.tools.get("Agent").execute(
+        "tc-resume-2",
+        { resume: id, prompt: "fix the open findings", run_in_background: true },
+        undefined,
+        undefined,
+        ctx(),
+      ),
+    );
+    expect(again).toContain("no longer available");
+    expect(again).not.toContain("Agent not found");
+
+    // And the way back the message names: re-enabling the type reopens the same
+    // conversation, which is the whole reason the tombstone is kept.
+    writeFileSync(join(process.cwd(), ".pi", "agents", "scout.md"), "---\ndescription: scouts\n---\nbody");
+    reopenedRun();
+    const reopened = textOf(
+      await b.tools.get("Agent").execute(
+        "tc-resume-3",
+        { resume: id, prompt: "fix the open findings", run_in_background: true },
+        undefined,
+        undefined,
+        ctx(),
+      ),
+    );
+    await flush();
+    expect(reopened).toContain("resumed from disk");
   });
 });
 

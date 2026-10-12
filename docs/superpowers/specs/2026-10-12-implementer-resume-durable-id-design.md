@@ -289,3 +289,23 @@ window (§2), the controller obtains the id from the dispatch result and from a 
    implementer. The surfaced handle removes the trap for a controller that records what it
    was given; the ledger line is the record.
 5. **The session boundary still loses identity.** Accepted and documented (§1, §4).
+
+## Errata (2026-10-12)
+
+**§2.3's quoted refusal strings are not what shipped.** The code is the authority; the table was
+drafted before the messages were final, and they diverge in punctuation, case and — at rung 4 —
+the noun. Shipped:
+
+- **tombstone present, session file gone** —
+  `Agent "<ref>" was evicted and its session file is gone; the conversation cannot be reopened — re-dispatch a fresh implementer with the report file.`
+  The design text's `. Re-dispatch` is two sentences with a capital; the shipped message keeps the
+  em dash and lowercase `re-dispatch`. The drop-the-tombstone half is unchanged.
+- **tombstone present, agent type unavailable** — a case the §2.3 table omits. Shipped:
+  `Agent "<ref>" was evicted and the <type> agent is no longer available; its conversation cannot be reopened yet — the record is kept, so re-enabling the agent makes resume "<ref>" work again. Or re-dispatch a fresh implementer with the report file.`
+  The refusal is **not** terminal: `planReopen` deliberately keeps the tombstone (`src/index.ts:813-814`),
+  so re-enabling the agent restores the resume. The message says so, matching the mention path's
+  keep-the-tombstone behaviour rather than reading as a dead end.
+- **no live record, no tombstone** —
+  `Agent not found: "<ref>" — no live record by that id or handle in this session. If it was dispatched in an earlier session, re-dispatch with the report file.`
+  The design text's `no live record and no evicted conversation by that name` is the draft; the
+  shipped message says `by that id or handle in this session`.
