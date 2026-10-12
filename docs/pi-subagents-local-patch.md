@@ -285,7 +285,8 @@ resume answered `Agent not found` on every task.
 This fork makes identity obtainable on every dispatch result and lets a resume reopen an evicted
 conversation from disk. Four edits, Tasks 1–4, plus the wording changes the spec's §1 also asks for:
 
-1. **`identityLines(record)`** — one module-private helper printing `Agent ID: <record.id>` and,
+1. **`identityLines(record)`** — one module-private helper (now exported from `src/identity.ts`;
+   see Divergence 9) printing `Agent ID: <record.id>` and,
    when the record has one, `Handle: <alias ?? handle>`. Used at the foreground spawn and error
    returns, the two background result sites, and both reopen arms. The id is the precise record
    key; the handle is the re-derivable one (`task-<sanitized-task-id>-impl`), and a second dispatch
@@ -334,12 +335,54 @@ the reopen and its two failures, the stale-id guard against a forked conversatio
 reopen) and `test/agent-mention-wiring.test.ts` (the mention path's
 byte-identical refusals). The README's `get_subagent_result` section documents the evicted answer.
 
+## Divergence 9 — the nested dispatch result carries its child's id (`pi-packages-9ghce`)
+
+Upstream's nested result formatter prints the child's output and, for a non-clean run, an outcome
+note — never anything that names the child. So a parent that spawned a child through its scoped
+`Agent` tool could not fill a ledger's `agent:` field, could not `get_subagent_result` it, and
+could not resume or steer it, even though every one of those tools is ownership-scoped and
+id-based and the child was already the parent's to address. The background nested spawn was the
+only nested path that printed an id.
+
+Two edits:
+
+1. **`identityLines` moved out of `index.ts`'s closure into `src/identity.ts`** (Divergence 8,
+   item 1, called it "one module-private helper"). It is now imported by both entry points,
+   because `src/nested-tools.ts` cannot import from `index.ts`. The move is verbatim — same body,
+   same marker, same behaviour. `src/status-note.ts` is the precedent: a helper both entry points
+   need, in its own module.
+2. **`formatRecord` emits it on the inline position only** (`src/nested-tools.ts`). A clean
+   inline result becomes `Agent ID: <id>`, a blank line, then the output; a non-clean one puts the
+   id line directly after the outcome note, so the note still precedes the output. The error
+   branch appends the id line, matching the top-level error result (`index.ts:2399`). Deliberately
+   unchanged: the `queued`/`running` branch (it already prints `Agent <record.id> is <status>.`),
+   the fetched (`get_subagent_result`) position (the parent supplied that id as an argument), and
+   the background nested acknowledgement (`Nested agent started in background. Agent ID: <id>`).
+
+Nested children still get no `Handle:` line — it is omitted by construction, because a nested
+record carries no `handle` or `alias` (`src/agent-manager.ts:509-511,520`) — and still leave no
+tombstone, so the `@handle` mention namespace and `takenHandles()` are untouched. Ownership
+scoping is unchanged: the id is emitted into a result only the owning parent receives.
+
+`src/nested-tools.ts` is the first upstream file of this fork outside `index.ts`,
+`agent-runner.ts` and Divergence 6's `src/workflow/` pair to carry a `LOCAL PATCH` marker; the new
+`src/identity.ts` is the only other marker site this divergence adds.
+
+Covered by `test/nested-tools.test.ts` (the inline shapes, the fetched position, and the absent
+`Handle:` line) and `test/identity.test.ts` (the helper's own contract). The top-level contract in
+`test/foreground-result-retrieval.test.ts` is unchanged and passes untouched.
+
+Unchanged by design: the `@handle` mention namespace, `takenHandles()`, nested records' absence of
+handles and tombstones, and the ten-minute eviction cutoff.
+
 ## In-code marker convention
 
 Divergences 3 — the code-mode exposure/namespace/outputSchema changes from Task 6 — 4 — Task 7's
 codemode activation delta — 7's `get_subagent_result` branch, whose `wf_` lookup sits inside a
-tool upstream knows only as an agent lookup — and 8's identity/resume sites (the `identityLines`
-helper, `resolveResumeTarget`, `planReopen`, the `resume` schema entry, and the reopen block (both arms)) —
+tool upstream knows only as an agent lookup — 8's identity/resume sites (the `identityLines`
+helper, which now lives in `src/identity.ts`, `resolveResumeTarget`, `planReopen`, the `resume`
+schema entry, and the reopen block (both arms)) — and 9's nested formatter change, the first marker
+in an upstream file outside `index.ts`, `agent-runner.ts` and Divergence 6's `src/workflow/` pair —
 **are** marked, because each is a small, surgical edit a future reader could otherwise mistake for
 upstream behaviour. Divergence 8 has two deliberate exceptions, both recorded in its section above:
 the `identityLines` **call sites** carry no marker of their own (the helper's marker covers them —
