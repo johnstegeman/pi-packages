@@ -36,7 +36,7 @@ import { SubagentScheduler } from "./schedule.js";
 import { resolveStorePath, ScheduleStore } from "./schedule-store.js";
 import { applyAndEmitLoaded, getWorkflowStallTimeoutSecs, loadSettings, parseStallTimeoutSecs, STALL_TIMEOUT_SECS_CEILING, type SubagentsSettings, saveAndEmitChanged, setWorkflowStallTimeout, type ToolDescriptionMode } from "./settings.js";
 import { getForegroundOutcomeNote, getStatusNote, partialOutputSuffix } from "./status-note.js";
-import { type AgentConfig, type AgentInvocation, type AgentMentionMode, type AgentRecord, type JoinMode, type NotificationDetails, type SubagentType, type ViewerMarkdownMode, type WidgetMode } from "./types.js";
+import { type AgentConfig, type AgentInvocation, type AgentMentionMode, type AgentRecord, type AgentTombstone, type JoinMode, type NotificationDetails, type SubagentType, type ViewerMarkdownMode, type WidgetMode } from "./types.js";
 import { createMentionProvider, mentionRoster, type TypeInfo } from "./ui/agent-mention.js";
 import {
   type AgentActivity,
@@ -754,7 +754,10 @@ export default function (pi: ExtensionAPI) {
     return resolved?.kind === "live" ? resolved.record : undefined;
   };
 
-  type ResumeTarget = { ok: true; record: AgentRecord } | { ok: false; message: string };
+  type ResumeTarget =
+    | { kind: "record"; record: AgentRecord }
+    | { kind: "tombstone"; entry: AgentTombstone }
+    | { kind: "missing"; message: string };
 
   /**
    * Resolve the Agent tool's `resume` ref. An exact id first — the existing
@@ -767,17 +770,47 @@ export default function (pi: ExtensionAPI) {
   const resolveResumeTarget = (ref: string): ResumeTarget => {
     const byId = manager.getRecord(ref);
     if (byId) {
-      if (!isTopLevelAgent(byId)) return { ok: false, message: `Agent not found: "${ref}". It may have been cleaned up.` };
-      return { ok: true, record: byId };
+      if (!isTopLevelAgent(byId)) return { kind: "missing", message: `Agent not found: "${ref}". It may have been cleaned up.` };
+      return { kind: "record", record: byId };
     }
     const resolved = manager.resolveMention(ref);
-    if (resolved?.kind === "live") return { ok: true, record: resolved.record };
+    if (resolved?.kind === "live") return { kind: "record", record: resolved.record };
+    if (resolved?.kind === "tombstone") return { kind: "tombstone", entry: resolved.entry };
     return {
-      ok: false,
+      kind: "missing",
       message:
         `Agent not found: "${ref}" — no live record by that id or handle in this session. ` +
         `If it was dispatched in an earlier session, re-dispatch with the report file.`,
     };
+  };
+
+  type ReopenPlan = { ok: true; type: SubagentType } | { ok: false; reason: "session-gone" | "type-unavailable" };
+
+  /**
+   * The guards every reopen shares, minus the spawn itself: the foreground and
+   * background paths take different manager entry points. Identical to what the
+   * `@handle` mention path has always done — factored out so the two callers
+   * cannot drift. Returns a reason code, not a message, so each caller keeps its
+   * own wording.
+   */
+  const planReopen = (entry: AgentTombstone): ReopenPlan => {
+    // Checked here rather than left to SessionManager.open: that runs inside
+    // runAgent, whose rejection lands on the record as an agent error, not in the
+    // caller's result. A `/new` in another pi window or a manual delete makes the
+    // conversation unrecoverable, so drop the entry — a row that can only ever
+    // fail is worse than none.
+    if (!existsSync(entry.sessionFile)) {
+      manager.dropTombstone(entry.handle);
+      return { ok: false, reason: "session-gone" };
+    }
+    // The Agent tool deliberately falls back to general-purpose for a type it
+    // cannot resolve (#183). A resume must not inherit that: reopening this
+    // conversation under a different agent's prompt and tools is not continuing
+    // it. The tombstone stays — re-enabling the agent makes it work again.
+    reloadCustomAgents();
+    const dispatch = resolveSpawnType(entry.type);
+    if (!dispatch.ok || dispatch.fellBackFrom !== undefined) return { ok: false, reason: "type-unavailable" };
+    return { ok: true, type: dispatch.type };
   };
 
   const registryEntry = {
@@ -1003,30 +1036,14 @@ export default function (pi: ExtensionAPI) {
       const entry = resolved.entry;
       const target = `@${entry.alias ?? entry.handle}`;
 
-      // Checked here rather than left to SessionManager.open: that runs inside
-      // runAgent, whose rejection lands on the record as an agent error, not in
-      // the catch below. A `/new` in another pi window or a manual delete makes
-      // the conversation unrecoverable (Claude Code's `not_reachable`), so drop
-      // the entry — a row that can only ever fail is worse than none — and say
-      // so rather than quietly sending this message to an unrelated agent.
-      if (!existsSync(entry.sessionFile)) {
-        manager.dropTombstone(entry.handle);
-        ctx.ui.notify(`Could not resume ${target} — its session is gone.`, "warning");
-        return { action: "handled" };
-      }
-
-      // The Agent tool deliberately falls back to general-purpose for a type it
-      // cannot resolve (#183), which covers a deleted file AND a merely
-      // disabled one. A resume must not inherit that: reopening this
-      // conversation under a different agent's prompt and tools is not
-      // continuing it, and the new record would re-tombstone under the
-      // substitute, so the handle would never find its way back.
-      reloadCustomAgents();
-      const dispatch = resolveSpawnType(entry.type);
-      if (!dispatch.ok || dispatch.fellBackFrom !== undefined) {
-        // The tombstone stays: re-enabling the agent makes the handle work
-        // again, which a drop would foreclose.
-        ctx.ui.notify(`Could not resume ${target} — the ${entry.type} agent is no longer available.`, "warning");
+      const plan = planReopen(entry);
+      if (!plan.ok) {
+        ctx.ui.notify(
+          plan.reason === "session-gone"
+            ? `Could not resume ${target} — its session is gone.`
+            : `Could not resume ${target} — the ${entry.type} agent is no longer available.`,
+          "warning",
+        );
         return { action: "handled" };
       }
 
@@ -1034,7 +1051,7 @@ export default function (pi: ExtensionAPI) {
         // spawnResolved, not spawnTopLevel: the latter strips
         // `resumeSessionFile` and `reclaim` as untrusted. This path is the
         // exception — both come from a tombstone this extension wrote.
-        const id = spawnResolved(pi, ctx, dispatch.type, mention.message, {
+        const id = spawnResolved(pi, ctx, plan.type, mention.message, {
           description: entry.description,
           reclaim: { handle: entry.handle, alias: entry.alias },
           resumeSessionFile: entry.sessionFile,
@@ -2040,7 +2057,42 @@ Terse command-style prompts produce shallow, generic work.
       // Resume existing agent
       if (params.resume) {
         const target = resolveResumeTarget(params.resume);
-        if (!target.ok) return textResult(target.message);
+        if (target.kind === "missing") return textResult(target.message);
+        if (target.kind === "tombstone") {
+          const entry = target.entry;
+          const label = entry.alias ?? entry.handle;
+          const plan = planReopen(entry);
+          if (!plan.ok) {
+            return textResult(
+              plan.reason === "session-gone"
+                ? `Agent "${label}" was evicted and its session file is gone; the conversation cannot be reopened — re-dispatch a fresh implementer with the report file.`
+                : `Agent "${label}" was evicted and the ${entry.type} agent is no longer available; its conversation cannot be reopened — re-dispatch a fresh implementer with the report file.`,
+            );
+          }
+          const reopenOptions = {
+            description: entry.description,
+            reclaim: { handle: entry.handle, alias: entry.alias },
+            resumeSessionFile: entry.sessionFile,
+          };
+          if (runInBackground) {
+            const reopenedId = spawnResolved(pi, ctx, plan.type, params.prompt, { ...reopenOptions, isBackground: true });
+            await manager.awaitStartup(reopenedId);
+            const reopened = manager.getRecord(reopenedId)!;
+            return textResult(
+              `Agent resumed from disk (record evicted; new Agent ID: ${reopenedId}; handle: ${reopened.alias ?? reopened.handle ?? entry.handle}).\n` +
+                `Type: ${reopened.type}\n` +
+                `\nYou will be notified when this agent completes.\n` +
+                `Use get_subagent_result to retrieve full results, or steer_subagent to send it messages.`,
+              { ...detailBaseFor(reopened), toolUses: 0, tokens: "", durationMs: 0, status: "background" as const, agentId: reopenedId },
+            );
+          }
+          const { record: reopened } = await manager.spawnAndWait(pi, ctx, plan.type, params.prompt, reopenOptions);
+          const note = `Agent resumed from disk (record evicted; new Agent ID: ${reopened.id}; handle: ${reopened.alias ?? reopened.handle ?? entry.handle}).`;
+          if (reopened.status === "error") {
+            return textResult(`${note}\n\nAgent failed: ${reopened.error}${partialOutputSuffix(reopened)}`, buildDetails(detailBaseFor(reopened), reopened));
+          }
+          return textResult(`${note}\n\n` + (reopened.result?.trim() || "No output."), buildDetails(detailBaseFor(reopened), reopened));
+        }
         const existing = target.record;
         if (!existing.session) {
           return textResult(`Agent "${params.resume}" has no active session to resume.`);
