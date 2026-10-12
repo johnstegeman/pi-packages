@@ -36,7 +36,7 @@ import { SubagentScheduler } from "./schedule.js";
 import { resolveStorePath, ScheduleStore } from "./schedule-store.js";
 import { applyAndEmitLoaded, getWorkflowStallTimeoutSecs, loadSettings, parseStallTimeoutSecs, STALL_TIMEOUT_SECS_CEILING, type SubagentsSettings, saveAndEmitChanged, setWorkflowStallTimeout, type ToolDescriptionMode } from "./settings.js";
 import { getForegroundOutcomeNote, getStatusNote, partialOutputSuffix } from "./status-note.js";
-import { type AgentConfig, type AgentInvocation, type AgentMentionMode, type AgentRecord, type JoinMode, type NotificationDetails, type SubagentType, type ViewerMarkdownMode, type WidgetMode } from "./types.js";
+import { type AgentConfig, type AgentInvocation, type AgentMentionMode, type AgentRecord, type AgentTombstone, type JoinMode, type NotificationDetails, type SubagentType, type ViewerMarkdownMode, type WidgetMode } from "./types.js";
 import { createMentionProvider, mentionRoster, type TypeInfo } from "./ui/agent-mention.js";
 import {
   type AgentActivity,
@@ -79,7 +79,7 @@ import {
 } from "./workflow/progress.js";
 import { assertWorkflowArgs, runWorkflow } from "./workflow/runtime.js";
 import { resolveWorkflowScript } from "./workflow/saved.js";
-import { completeWorkflowTask, createWorkflowTask, failWorkflowTask, formatWorkflowNotification, resolveResumeTarget, truncateWorkflowResult, updateWorkflowProgressBatch, type WorkflowTask, workflowResultText, workflowRunId } from "./workflow/task.js";
+import { completeWorkflowTask, createWorkflowTask, failWorkflowTask, formatWorkflowNotification, resolveResumeTarget as resolveWorkflowResumeTarget, truncateWorkflowResult, updateWorkflowProgressBatch, type WorkflowTask, workflowResultText, workflowRunId } from "./workflow/task.js";
 import { fullWorkflowToolDescription } from "./workflow/tool-description.js";
 import { isWorktreeIsolationEnabled, setWorktreeIsolationEnabled } from "./worktree.js";
 import { escapeXml } from "./xml.js";
@@ -754,6 +754,77 @@ export default function (pi: ExtensionAPI) {
     return resolved?.kind === "live" ? resolved.record : undefined;
   };
 
+  // LOCAL PATCH (pi-packages) — see docs/pi-subagents-local-patch.md
+  type ResumeTarget =
+    | { kind: "record"; record: AgentRecord }
+    | { kind: "tombstone"; entry: AgentTombstone }
+    | { kind: "missing"; message: string };
+
+  /**
+   * Resolve the Agent tool's `resume` ref. An exact id first — the existing
+   * behaviour, kept exact — then a handle or alias for a top-level record.
+   *
+   * The handle is what the SDD fix loop names: it is re-derivable from the task
+   * bead id after controller compaction, while the id is not, and the dispatch
+   * result reports the handle the spawn actually assigned.
+   */
+  const resolveResumeTarget = (ref: string): ResumeTarget => {
+    const byId = manager.getRecord(ref);
+    if (byId) {
+      if (!isTopLevelAgent(byId)) return { kind: "missing", message: `Agent not found: "${ref}". It may have been cleaned up.` };
+      return { kind: "record", record: byId };
+    }
+    const resolved = manager.resolveMention(ref);
+    if (resolved?.kind === "live") return { kind: "record", record: resolved.record };
+    if (resolved?.kind === "tombstone") {
+      // The tombstone outlives a successful reopen (it is deliberately kept —
+      // see the mention path's note), and the reopened record carries a NEW id
+      // while the tombstone keeps the OLD one — so a resume by the pre-reopen id
+      // matches this stale entry and would fork the conversation, taking the
+      // handle back from the run it already belongs to. A live holder wins.
+      const live = resolved.entry.alias ?? resolved.entry.handle;
+      const holder = live ? manager.resolveMention(live) : undefined;
+      if (holder?.kind === "live") return { kind: "record", record: holder.record };
+      return { kind: "tombstone", entry: resolved.entry };
+    }
+    return {
+      kind: "missing",
+      message:
+        `Agent not found: "${ref}" — no live record by that id or handle in this session. ` +
+        `If it was dispatched in an earlier session, re-dispatch with the report file.`,
+    };
+  };
+
+  // LOCAL PATCH (pi-packages) — see docs/pi-subagents-local-patch.md
+  type ReopenPlan = { ok: true; type: SubagentType } | { ok: false; reason: "session-gone" | "type-unavailable" };
+
+  /**
+   * The guards every reopen shares, minus the spawn itself: the foreground and
+   * background paths take different manager entry points. Identical to what the
+   * `@handle` mention path has always done — factored out so the two callers
+   * cannot drift. Returns a reason code, not a message, so each caller keeps its
+   * own wording.
+   */
+  const planReopen = (entry: AgentTombstone): ReopenPlan => {
+    // Checked here rather than left to SessionManager.open: that runs inside
+    // runAgent, whose rejection lands on the record as an agent error, not in the
+    // caller's result. A `/new` in another pi window or a manual delete makes the
+    // conversation unrecoverable, so drop the entry — a row that can only ever
+    // fail is worse than none.
+    if (!existsSync(entry.sessionFile)) {
+      manager.dropTombstone(entry.handle);
+      return { ok: false, reason: "session-gone" };
+    }
+    // The Agent tool deliberately falls back to general-purpose for a type it
+    // cannot resolve (#183). A resume must not inherit that: reopening this
+    // conversation under a different agent's prompt and tools is not continuing
+    // it. The tombstone stays — re-enabling the agent makes it work again.
+    reloadCustomAgents();
+    const dispatch = resolveSpawnType(entry.type);
+    if (!dispatch.ok || dispatch.fellBackFrom !== undefined) return { ok: false, reason: "type-unavailable" };
+    return { ok: true, type: dispatch.type };
+  };
+
   const registryEntry = {
     waitForAll: () => manager.waitForAll(),
     hasRunning: () => manager.hasRunning(),
@@ -977,30 +1048,14 @@ export default function (pi: ExtensionAPI) {
       const entry = resolved.entry;
       const target = `@${entry.alias ?? entry.handle}`;
 
-      // Checked here rather than left to SessionManager.open: that runs inside
-      // runAgent, whose rejection lands on the record as an agent error, not in
-      // the catch below. A `/new` in another pi window or a manual delete makes
-      // the conversation unrecoverable (Claude Code's `not_reachable`), so drop
-      // the entry — a row that can only ever fail is worse than none — and say
-      // so rather than quietly sending this message to an unrelated agent.
-      if (!existsSync(entry.sessionFile)) {
-        manager.dropTombstone(entry.handle);
-        ctx.ui.notify(`Could not resume ${target} — its session is gone.`, "warning");
-        return { action: "handled" };
-      }
-
-      // The Agent tool deliberately falls back to general-purpose for a type it
-      // cannot resolve (#183), which covers a deleted file AND a merely
-      // disabled one. A resume must not inherit that: reopening this
-      // conversation under a different agent's prompt and tools is not
-      // continuing it, and the new record would re-tombstone under the
-      // substitute, so the handle would never find its way back.
-      reloadCustomAgents();
-      const dispatch = resolveSpawnType(entry.type);
-      if (!dispatch.ok || dispatch.fellBackFrom !== undefined) {
-        // The tombstone stays: re-enabling the agent makes the handle work
-        // again, which a drop would foreclose.
-        ctx.ui.notify(`Could not resume ${target} — the ${entry.type} agent is no longer available.`, "warning");
+      const plan = planReopen(entry);
+      if (!plan.ok) {
+        ctx.ui.notify(
+          plan.reason === "session-gone"
+            ? `Could not resume ${target} — its session is gone.`
+            : `Could not resume ${target} — the ${entry.type} agent is no longer available.`,
+          "warning",
+        );
         return { action: "handled" };
       }
 
@@ -1008,7 +1063,7 @@ export default function (pi: ExtensionAPI) {
         // spawnResolved, not spawnTopLevel: the latter strips
         // `resumeSessionFile` and `reclaim` as untrusted. This path is the
         // exception — both come from a tombstone this extension wrote.
-        const id = spawnResolved(pi, ctx, dispatch.type, mention.message, {
+        const id = spawnResolved(pi, ctx, plan.type, mention.message, {
           description: entry.description,
           reclaim: { handle: entry.handle, alias: entry.alias },
           resumeSessionFile: entry.sessionFile,
@@ -1507,7 +1562,7 @@ Notes:
 - Parallel work: one message, multiple Agent calls — they run concurrently.
 - Subagents run in the background by default; you'll be notified when one completes. Pass run_in_background: false only when your very next action depends on the result and nothing else could usefully happen while it runs. Never fabricate or predict a pending agent's results — if the user asks before the notification arrives, say it's still running.
 - The result is not shown to the user — summarize it for them. Verify an agent's claimed code changes before reporting work done.
-- resume continues a previous agent by ID; steer_subagent messages a running one.${isolationCompactGuideline}`;
+- resume continues a previous agent by ID or handle; steer_subagent messages a running one.${isolationCompactGuideline}`;
 
   const fullAgentToolDescription = `Launch a new agent to handle complex, multi-step tasks autonomously. Each agent type has specific capabilities and tools available to it.
 
@@ -1531,7 +1586,7 @@ If the target is already known, use a direct tool — \`read\` for a known path,
 - Agents run in the background by default. When an agent runs in the background, you will be automatically notified when it completes — do NOT sleep, poll, or proactively check on its progress. Continue with other work or respond to the user instead.
 - **Foreground vs background**: Pass \`run_in_background: false\` only when your very next action depends on the agent's result and nothing else could usefully happen while it runs — e.g., a research agent whose finding gates the edit you're about to make. Otherwise let it run in the background (the default) — this includes fire-and-forget work, independent investigations, and anything where the user might hand you something else in the meantime. Wanting the result "next" is not enough on its own.
 - **Don't race**: after launching a background agent, you know nothing about its results. Never fabricate or predict them in any format — not as prose, summary, or structured output. The completion notification arrives in a later turn; it is never something you write yourself. If the user asks before it lands, say the agent is still running — give status, not a guess.
-- Use resume with an agent ID to continue a previous agent's work. A new (non-resume) Agent call starts a fresh agent with no memory of prior runs, so the prompt must be self-contained.
+- Use resume with an agent ID or handle to continue a previous agent's work. An agent whose in-memory record has been evicted is reopened from disk automatically, and the result says \`resumed from disk\` with the new record's id and handle. A new (non-resume) Agent call starts a fresh agent with no memory of prior runs, so the prompt must be self-contained.
 - Use steer_subagent to send mid-run messages to a running background agent.
 - Clearly tell the agent whether you expect it to write code or just to do research (search, file reads, etc.), since it is not aware of the user's intent.
 - If an agent's description says it should be used proactively, try to use it without the user having to ask for it first.
@@ -1652,9 +1707,10 @@ Terse command-style prompts produce shallow, generic work.
           description: "Defaults to true — the agent runs detached, returning its ID immediately, and you are notified on completion. Set false only when your very next action depends on the result; the call then blocks and returns the agent's full output inline.",
         }),
       ),
+      // LOCAL PATCH (pi-packages) — see docs/pi-subagents-local-patch.md
       resume: Type.Optional(
         Type.String({
-          description: "Optional agent ID to resume from. Continues from previous context. Resumes detached like any other spawn; pass run_in_background: false to block and get the result inline. An agent can only be resumed once its current run has finished — use steer_subagent to reach one mid-run.",
+          description: "Optional agent ID or handle to resume from. Continues from previous context. Resumes detached like any other spawn; pass run_in_background: false to block and get the result inline. An agent whose in-memory record has been evicted is reopened from disk automatically, and the result says \"resumed from disk\" with the new record's id and handle. An agent can only be resumed once its current run has finished — use steer_subagent to reach one mid-run.",
         }),
       ),
       isolated: Type.Optional(
@@ -1955,6 +2011,20 @@ Terse command-style prompts produce shallow, generic work.
         };
       };
 
+      // LOCAL PATCH (pi-packages) — see docs/pi-subagents-local-patch.md
+      /**
+       * The two identity lines every Agent dispatch result carries.
+       *
+       * The id is the durable resume key. The handle is what the spawn actually
+       * assigned — a second dispatch under the same `name` is silently suffixed
+       * (`task-…-impl-2`), so the canonical name the caller asked for is only a
+       * derivation and this is the authority.
+       */
+      function identityLines(record: { id: string; alias?: string; handle?: string }): string {
+        const handle = record.alias ?? record.handle;
+        return `Agent ID: ${record.id}\n` + (handle ? `Handle: ${handle}\n` : "");
+      }
+
       // ---- Schedule: register a job, don't spawn now ----
       if (params.schedule) {
         if (!isSchedulingEnabled()) {
@@ -2000,10 +2070,64 @@ Terse command-style prompts produce shallow, generic work.
 
       // Resume existing agent
       if (params.resume) {
-        const existing = manager.getRecord(params.resume);
-        if (!existing || !isTopLevelAgent(existing)) {
-          return textResult(`Agent not found: "${params.resume}". It may have been cleaned up.`);
+        const target = resolveResumeTarget(params.resume);
+        if (target.kind === "missing") return textResult(target.message);
+        if (target.kind === "tombstone") {
+          const entry = target.entry;
+          const label = entry.alias ?? entry.handle;
+          const plan = planReopen(entry);
+          if (!plan.ok) {
+            return textResult(
+              plan.reason === "session-gone"
+                ? `Agent "${label}" was evicted and its session file is gone; the conversation cannot be reopened — re-dispatch a fresh implementer with the report file.`
+                : `Agent "${label}" was evicted and the ${entry.type} agent is no longer available; its conversation cannot be reopened yet — the record is kept, so re-enabling the agent makes resume "${label}" work again. Or re-dispatch a fresh implementer with the report file.`,
+            );
+          }
+          // LOCAL PATCH (pi-packages) — see docs/pi-subagents-local-patch.md
+          const reopenOptions = {
+            description: entry.description,
+            reclaim: { handle: entry.handle, alias: entry.alias },
+            resumeSessionFile: entry.sessionFile,
+          };
+          if (runInBackground) {
+            const reopenedId = spawnResolved(pi, ctx, plan.type, params.prompt, { ...reopenOptions, isBackground: true });
+            await manager.awaitStartup(reopenedId);
+            const reopened = manager.getRecord(reopenedId)!;
+            // `spawnResolved` installs its own activity tracker rather than
+            // honouring a caller's callbacks, so the transcript is attached
+            // here — an `onSpawned` passed through it would be dropped.
+            attachTranscript(reopened, reopenedId);
+            const isQueued = reopened.status === "queued";
+            return textResult(
+              `Agent resumed from disk (record evicted).\n` +
+                identityLines(reopened) +
+                `Type: ${reopened.type}\n` +
+                (reopened.outputFile ? `Output file: ${reopened.outputFile}\n` : "") +
+                (isQueued ? `Position: queued (max ${manager.getMaxConcurrent()} concurrent)\n` : "") +
+                `\nYou will be notified when this agent completes.\n` +
+                `Use get_subagent_result to retrieve full results, or steer_subagent to send it messages.`,
+              { ...detailBaseFor(reopened), toolUses: 0, tokens: "", durationMs: 0, status: "background" as const, agentId: reopenedId },
+            );
+          }
+          // `signal` rides along exactly as it does on the foreground spawn and
+          // the live foreground resume: without it Esc abandons this tool result
+          // while the run keeps going, holding a foreground pool slot.
+          const { record: reopened } = await manager.spawnAndWait(
+            pi,
+            ctx,
+            plan.type,
+            params.prompt,
+            { ...reopenOptions, signal },
+            (reopenedId) => attachTranscript(manager.getRecord(reopenedId), reopenedId),
+          );
+          const note =
+            `Agent resumed from disk (record evicted)${getForegroundOutcomeNote(reopened.status)}.\n` + identityLines(reopened);
+          if (reopened.status === "error") {
+            return textResult(`${note}\nAgent failed: ${reopened.error}${partialOutputSuffix(reopened)}`, buildDetails(detailBaseFor(reopened), reopened));
+          }
+          return textResult(`${note}\n` + (reopened.result?.trim() || "No output."), buildDetails(detailBaseFor(reopened), reopened));
         }
+        const existing = target.record;
         if (!existing.session) {
           return textResult(`Agent "${params.resume}" has no active session to resume.`);
         }
@@ -2038,7 +2162,7 @@ Terse command-style prompts produce shallow, generic work.
           const isQueued = record.status === "queued";
           return textResult(
             `Agent ${isQueued ? "queued" : "resumed"} in background.\n` +
-            `Agent ID: ${id}\n` +
+            identityLines(existing) +
             `Type: ${existing.type}\n` +
             (record.outputFile ? `Output file: ${record.outputFile}\n` : "") +
             (isQueued ? `Position: queued (max ${manager.getMaxConcurrent()} concurrent)\n` : "") +
@@ -2048,17 +2172,20 @@ Terse command-style prompts produce shallow, generic work.
           );
         }
 
-        const record = await manager.resume(params.resume, params.prompt, signal);
+        const record = await manager.resume(existing.id, params.prompt, signal);
         if (!record) {
           return textResult(`Failed to resume agent "${params.resume}".`);
         }
         // A failed resume surfaces the error, plus any partial output THIS
         // resume produced (never the previous turn's answer, #144).
         if (record.status === "error") {
-          return textResult(`Agent failed: ${record.error}${partialOutputSuffix(record)}`, buildDetails(detailBaseFor(record), record));
+          return textResult(
+            `Agent failed: ${record.error}${partialOutputSuffix(record)}\n` + identityLines(record),
+            buildDetails(detailBaseFor(record), record),
+          );
         }
         return textResult(
-          record.result?.trim() || "No output.",
+          identityLines(record) + "\n" + (record.result?.trim() || "No output."),
           buildDetails(detailBaseFor(record), record),
         );
       }
@@ -2142,7 +2269,7 @@ Terse command-style prompts produce shallow, generic work.
         const isQueued = record?.status === "queued";
         return textResult(
           `${fallbackNote}Agent ${isQueued ? "queued" : "started"} in background.\n` +
-          `Agent ID: ${id}\n` +
+          identityLines(record ?? { id }) +
           `Type: ${displayName}\n` +
           `Description: ${params.description}\n` +
           (record?.outputFile ? `Output file: ${record.outputFile}\n` : "") +
@@ -2281,7 +2408,10 @@ Terse command-style prompts produce shallow, generic work.
 
       if (record.status === "error") {
         // Error headline + any partial output the run produced before failing.
-        return textResult(`${fallbackNote}Agent failed: ${record.error}${partialOutputSuffix(record)}`, details);
+        return textResult(
+          `${fallbackNote}Agent failed: ${record.error}${partialOutputSuffix(record)}\n` + identityLines(record),
+          details,
+        );
       }
 
       const durationMs = (record.completedAt ?? Date.now()) - record.startedAt;
@@ -2292,8 +2422,10 @@ Terse command-style prompts produce shallow, generic work.
         if (costText) statsParts.push(costText);
       }
       return textResult(
-        `${fallbackNote}Agent completed in ${formatMs(durationMs)} (${statsParts.join(", ")})${getForegroundOutcomeNote(record.status)}.\n\n` +
-        (record.result?.trim() || "No output."),
+        `${fallbackNote}Agent completed in ${formatMs(durationMs)} (${statsParts.join(", ")})${getForegroundOutcomeNote(record.status)}.\n` +
+          identityLines(record) +
+          "\n" +
+          (record.result?.trim() || "No output."),
         details,
       );
     },
@@ -2677,7 +2809,7 @@ Terse command-style prompts produce shallow, generic work.
     },
 
     execute: async (toolCallId, params, _signal, _onUpdate, ctx) => {
-      const resumeFrom = resolveResumeTarget(params.resumeFromRunId, workflowTasks);
+      const resumeFrom = resolveWorkflowResumeTarget(params.resumeFromRunId, workflowTasks);
       if (resumeFrom !== undefined && !resumeFrom.ok) return textResult(resumeFrom.message);
 
       // LOCAL PATCH (pi-packages) — see docs/pi-subagents-local-patch.md
@@ -2947,6 +3079,8 @@ Terse command-style prompts produce shallow, generic work.
     outputSchema: Type.Object({
       error: Type.Optional(Type.String()),
       agentId: Type.Optional(Type.String()),
+      // LOCAL PATCH (pi-packages) — see docs/pi-subagents-local-patch.md
+      handle: Type.Optional(Type.String()),
       status: Type.Optional(Type.String()),
       result: Type.Optional(Type.String()),
     }),
@@ -2971,6 +3105,28 @@ Terse command-style prompts produce shallow, generic work.
       // begins with `wf_` — so the agent lookup runs FIRST. Only a string that
       // names no live agent is read as a workflow run id.
       const record = resolveAgentRef(params.agent_id);
+      //
+      // LOCAL PATCH (pi-packages) — see docs/pi-subagents-local-patch.md
+      // A tombstoned handle: the record is gone but the conversation is still on
+      // disk. Answer with identity only — the durable id the caller needs for the
+      // ledger — and never spawn. `resolveAgentRef` stays live-only on purpose:
+      // `steer_subagent` shares it and a tombstone has nothing to steer.
+      if (record === undefined) {
+        const evicted = manager.resolveMention(params.agent_id);
+        if (evicted?.kind === "tombstone") {
+          const entry = evicted.entry;
+          return {
+            ...textResult(
+              `Agent: ${entry.id}\n` +
+                `Type: ${entry.type} | Status: evicted\n` +
+                `Description: ${entry.description}\n\n` +
+                `This agent's record was evicted; its conversation is still on disk and can be reopened with ` +
+                `Agent({ resume: "${entry.alias ?? entry.handle}" }). The stored result is not kept — see the report file.`,
+            ),
+            structuredContent: { agentId: entry.id, status: "evicted" },
+          };
+        }
+      }
       //
       // A `wf_…` id names a workflow RUN, not an agent: its children are
       // deliberately absent from the agent lookup (they are owned by the run),
@@ -3094,7 +3250,8 @@ Terse command-style prompts produce shallow, generic work.
       return {
         ...textResult(output),
         structuredContent: {
-          agentId: String(params.agent_id),
+          agentId: String(record.id),
+          ...(record.alias || record.handle ? { handle: String(record.alias ?? record.handle) } : {}),
           status: String(record.status),
           ...(record.result ? { result: String(record.result) } : {}),
           ...(record.error ? { error: String(record.error) } : {}),

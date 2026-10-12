@@ -229,9 +229,12 @@ and fix-round diffs need it.
   touches, and the global constraints. Nothing else.
 - If an earlier task parked a finding in the area this task touches, carry
   a pointer to that ledger entry in the dispatch.
-- Record the implementer's agent ID from the `Agent(...)` dispatch result —
-  fix-loop rounds 1-3 resume this agent via `Agent({ subagent_type:
-  "implementer", resume: <agent_id>, ... })`.
+- Record **both** the implementer's `agent:` id and its `handle:` from the `Agent(...)`
+  dispatch result — every top-level dispatch result reports `Agent ID:` and `Handle:`. Fix-loop
+  rounds 1-3 resume by the **handle**: `Agent({ subagent_type: "implementer", resume:
+  "<handle>", ... })`. The handle is re-derivable from the task bead id after compaction
+  and the id is not, and the result reports the handle the spawn actually assigned — a
+  second dispatch under one name is silently suffixed `-impl-2`.
 - Never dispatch multiple implementation subagents in parallel (conflicts).
 
 Template: [implementer-prompt.md](implementer-prompt.md)

@@ -92,8 +92,8 @@ describe("status note reaches the parent through the real handlers", () => {
     expect(out).not.toContain("STOPPED BY THE USER"); // not mislabelled as a user stop
 
     // The two answers a foreground parent needs: is this all of it, and is the
-    // task done. The first is what #174 turned on — the parent has no agent id,
-    // so it must not read "partial" as "go fetch the rest".
+    // task done. The first is what #174 turned on — the full output is already
+    // inline, so it must not read "partial" as "go fetch the rest".
     expect(out).toContain("everything the agent produced is above");
     expect(out).toContain("the task is unfinished");
     // State only, never an instruction to act (see getForegroundOutcomeNote):

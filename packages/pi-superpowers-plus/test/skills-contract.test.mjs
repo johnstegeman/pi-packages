@@ -173,6 +173,34 @@ test("no set_phase call lives in reference material", () => {
   assert.deepEqual(offenders, []);
 });
 
+// ----- resume contract (docs/superpowers/specs/2026-10-12-implementer-resume-durable-id-design.md §4) -----
+// The fix loop resumes the implementer by its handle, and says what happens when that resume
+// degrades. The pin fails against prose that tells the controller to record and resume by an id
+// the dispatch result never surfaced.
+test("the fix loop resumes by the handle and records the degradation", () => {
+  const sdd = join(root, "skills", "subagent-driven-development");
+  const read = (p) => readFileSync(join(sdd, p), "utf8");
+
+  // SKILL.md §1: both fields recorded, the handle named as the resume key.
+  const skill = read("SKILL.md");
+  assert.match(skill, /Record \*\*both\*\* the implementer's `agent:` id and its `handle:`/);
+  assert.doesNotMatch(skill, /Record the implementer's agent ID from the `Agent\(\.\.\.\)` dispatch result/);
+
+  // fix-loop.md: the resume call, and both new ledger forms.
+  const fixLoop = read("reference/fix-loop.md");
+  assert.match(fixLoop, /resume: "<handle>"/);
+  assert.match(fixLoop, /implementer resumed from disk/);
+  assert.match(fixLoop, /resume failed \(<cause>\); re-dispatched fresh implementer with the report file/);
+
+  // dispatch-implementer.md: the spawn response now reports the handle it assigned.
+  assert.match(read("reference/dispatch-implementer.md"), /echoes the resolved handle/);
+
+  // recovery.md: the two claims the tool change falsified.
+  const recovery = read("reference/recovery.md");
+  assert.doesNotMatch(recovery, /resolve live records only/);
+  assert.doesNotMatch(recovery, /a tool-bound controller cannot type mentions/);
+});
+
 // ----- beads guardrail (docs/superpowers/specs/2026-10-05-workflow-child-bead-guardrail-design.md) -----
 // Every prompt a child receives must forbid beads writes; the controller alone owns bead state.
 // CORE is byte-identical everywhere, followed by an audience tail. Each copy must sit on ONE
