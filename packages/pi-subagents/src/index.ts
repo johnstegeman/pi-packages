@@ -1955,6 +1955,19 @@ Terse command-style prompts produce shallow, generic work.
         };
       };
 
+      /**
+       * The two identity lines every Agent dispatch result carries.
+       *
+       * The id is the durable resume key. The handle is what the spawn actually
+       * assigned — a second dispatch under the same `name` is silently suffixed
+       * (`task-…-impl-2`), so the canonical name the caller asked for is only a
+       * derivation and this is the authority.
+       */
+      function identityLines(record: { id: string; alias?: string; handle?: string }): string {
+        const handle = record.alias ?? record.handle;
+        return `Agent ID: ${record.id}\n` + (handle ? `Handle: ${handle}\n` : "");
+      }
+
       // ---- Schedule: register a job, don't spawn now ----
       if (params.schedule) {
         if (!isSchedulingEnabled()) {
@@ -2038,7 +2051,7 @@ Terse command-style prompts produce shallow, generic work.
           const isQueued = record.status === "queued";
           return textResult(
             `Agent ${isQueued ? "queued" : "resumed"} in background.\n` +
-            `Agent ID: ${id}\n` +
+            identityLines(existing) +
             `Type: ${existing.type}\n` +
             (record.outputFile ? `Output file: ${record.outputFile}\n` : "") +
             (isQueued ? `Position: queued (max ${manager.getMaxConcurrent()} concurrent)\n` : "") +
@@ -2142,7 +2155,7 @@ Terse command-style prompts produce shallow, generic work.
         const isQueued = record?.status === "queued";
         return textResult(
           `${fallbackNote}Agent ${isQueued ? "queued" : "started"} in background.\n` +
-          `Agent ID: ${id}\n` +
+          identityLines(record ?? { id }) +
           `Type: ${displayName}\n` +
           `Description: ${params.description}\n` +
           (record?.outputFile ? `Output file: ${record.outputFile}\n` : "") +
@@ -2281,7 +2294,10 @@ Terse command-style prompts produce shallow, generic work.
 
       if (record.status === "error") {
         // Error headline + any partial output the run produced before failing.
-        return textResult(`${fallbackNote}Agent failed: ${record.error}${partialOutputSuffix(record)}`, details);
+        return textResult(
+          `${fallbackNote}Agent failed: ${record.error}${partialOutputSuffix(record)}\n` + identityLines(record),
+          details,
+        );
       }
 
       const durationMs = (record.completedAt ?? Date.now()) - record.startedAt;
@@ -2292,8 +2308,10 @@ Terse command-style prompts produce shallow, generic work.
         if (costText) statsParts.push(costText);
       }
       return textResult(
-        `${fallbackNote}Agent completed in ${formatMs(durationMs)} (${statsParts.join(", ")})${getForegroundOutcomeNote(record.status)}.\n\n` +
-        (record.result?.trim() || "No output."),
+        `${fallbackNote}Agent completed in ${formatMs(durationMs)} (${statsParts.join(", ")})${getForegroundOutcomeNote(record.status)}.\n` +
+          identityLines(record) +
+          "\n" +
+          (record.result?.trim() || "No output."),
         details,
       );
     },

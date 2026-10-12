@@ -12,13 +12,15 @@
  *   1. The record is NOT cleaned up. Foreground completion mutates the record
  *      in place (agent-manager.ts startAgent's .then) — nothing deletes it. So
  *      a lookup with the REAL id succeeds.
- *   2. The model never HAD the real id. Foreground returns the result text
- *      only; the id travels in `details`, which is renderer metadata and never
- *      reaches the API (only `content` is serialized). The background path is
- *      the one that puts `Agent ID: ...` in the text.
+ *   2. The reporter's id was invented, not ours. At the time, a foreground
+ *      result carried the output text only; the id travelled in `details`,
+ *      which is renderer metadata and never reached the API (only `content` is
+ *      serialized). The background path was the one that put `Agent ID: ...`
+ *      in the text. The foreground result now carries the id and the handle it
+ *      was assigned too, so the model can name the agent again.
  *
  * Together: whatever id the reporter's model passed, it wasn't one we issued,
- * and "not found" was the correct answer. Test 3 pins the eviction rule that
+ * and "not found" was the correct answer. The eviction test pins the rule that
  * DOES apply, so the two are not confused again.
  */
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
@@ -75,8 +77,9 @@ const textOf = (r: any): string => r.content[0].text;
  * which is what produces the reporter's "(wrapped up at the turn limit —
  * output may be partial)" note.
  *
- * Returns the tool result plus the id read out of `details` — the only place
- * a foreground id exists, which is the point of test 2.
+ * Returns the tool result plus the id read out of `details`. The result text
+ * carries it too now (see the identity tests), but the structured field is the
+ * stable way for a test to learn the id.
  */
 async function runForegroundSteeredAgent(tools: Map<string, any>) {
   vi.mocked(runAgent).mockResolvedValue({
@@ -164,18 +167,30 @@ describe("issue #174: foreground agent that hits max_turns", () => {
     await lifecycle.get("session_shutdown")?.({}, ctx());
   });
 
-  it("never hands the model an agent id — the id lives only in renderer details", async () => {
+  it("hands the model the durable id and the handle the spawn assigned", async () => {
     const { pi, tools, lifecycle } = makePi();
     subagentsExtension(pi);
     const { res, id } = await runForegroundSteeredAgent(tools);
 
-    // `content` is the only thing serialized to the API. If the id isn't here,
-    // the model cannot have obtained it — any id it passes is invented.
-    expect(textOf(res)).not.toContain(id);
-    expect(textOf(res)).not.toMatch(/Agent ID:/);
+    // `content` is the only thing serialized to the API, so these two lines are
+    // the whole reason the model can name this agent again after eviction.
+    const text = textOf(res);
+    expect(text).toContain(`Agent ID: ${id}`);
+    expect(text).toContain("Handle: explore");
 
-    // An invented id is correctly rejected — this is the reporter's error,
-    // reproduced WITHOUT any record having been cleaned up.
+    // The wrap-up note the reporter described is still there, and the identity
+    // block does not displace the payload.
+    expect(text).toContain("wrapped up at the turn limit");
+    expect(text).toContain("THE-RESULT-PAYLOAD");
+
+    await lifecycle.get("session_shutdown")?.({}, ctx());
+  });
+
+  it("still rejects an id it was never issued", async () => {
+    const { pi, tools, lifecycle } = makePi();
+    subagentsExtension(pi);
+    await runForegroundSteeredAgent(tools);
+
     const bogus = await tools.get("get_subagent_result").execute(
       "tc-bogus",
       { agent_id: "3f1320a7-74ec-422" },
@@ -185,6 +200,55 @@ describe("issue #174: foreground agent that hits max_turns", () => {
     );
     expect(textOf(bogus)).toContain("Agent not found");
 
+    await lifecycle.get("session_shutdown")?.({}, ctx());
+  });
+
+  it("reports the handle the spawn actually assigned, not the name that was asked for", async () => {
+    const { pi, tools, lifecycle } = makePi();
+    subagentsExtension(pi);
+    vi.mocked(runAgent).mockResolvedValue({
+      responseText: "x",
+      session: { dispose: vi.fn() } as any,
+      aborted: false,
+      steered: false,
+    });
+    const spawn = (name: string) =>
+      tools.get("Agent").execute(
+        "tc",
+        { prompt: "go", description: "work", subagent_type: "Explore", name, run_in_background: true },
+        undefined,
+        undefined,
+        ctx(),
+      );
+
+    expect(textOf(await spawn("task-jnr7-5-impl"))).toContain("Handle: task-jnr7-5-impl");
+    // The canonical name is held by the first claimant, so the second dispatch is
+    // silently renamed. The result has to say so, or a later resume by the
+    // canonical name reopens the OLDER agent — the trap this contract exists to
+    // close.
+    expect(textOf(await spawn("task-jnr7-5-impl"))).toContain("Handle: task-jnr7-5-impl-2");
+
+    await lifecycle.get("session_shutdown")?.({}, ctx());
+  });
+
+  it("names the handle on the background path too", async () => {
+    const { pi, tools, lifecycle } = makePi();
+    subagentsExtension(pi);
+    vi.mocked(runAgent).mockResolvedValue({
+      responseText: "bg",
+      session: { dispose: vi.fn() } as any,
+      aborted: false,
+      steered: false,
+    });
+    const r = await tools.get("Agent").execute(
+      "tc-bg",
+      { prompt: "go", description: "background work", subagent_type: "Explore", run_in_background: true },
+      undefined,
+      undefined,
+      ctx(),
+    );
+    expect(textOf(r)).toMatch(/Agent ID: \S+/);
+    expect(textOf(r)).toContain("Handle: explore");
     await lifecycle.get("session_shutdown")?.({}, ctx());
   });
 
