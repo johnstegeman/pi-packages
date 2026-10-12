@@ -25,6 +25,7 @@ import { inChildSessionContext } from "./child-context.js";
 import { type RpcHandle, registerRpcHandlers } from "./cross-extension-rpc.js";
 import { loadCustomAgents } from "./custom-agents.js";
 import { GroupJoinManager } from "./group-join.js";
+import { identityLines } from "./identity.js";
 import { isolationParam, resolveAgentInvocationConfig, resolveJoinMode } from "./invocation-config.js";
 import { describeMention, handleBase, isReservedHandle, parseMention, resolveHandleToType, stripAgentPrefix } from "./mention.js";
 import { runMentionClone } from "./mention-clone.js";
@@ -2010,20 +2011,6 @@ Terse command-style prompts produce shallow, generic work.
           tags: recTags.length > 0 ? recTags : undefined,
         };
       };
-
-      // LOCAL PATCH (pi-packages) — see docs/pi-subagents-local-patch.md
-      /**
-       * The two identity lines every Agent dispatch result carries.
-       *
-       * The id is the durable resume key. The handle is what the spawn actually
-       * assigned — a second dispatch under the same `name` is silently suffixed
-       * (`task-…-impl-2`), so the canonical name the caller asked for is only a
-       * derivation and this is the authority.
-       */
-      function identityLines(record: { id: string; alias?: string; handle?: string }): string {
-        const handle = record.alias ?? record.handle;
-        return `Agent ID: ${record.id}\n` + (handle ? `Handle: ${handle}\n` : "");
-      }
 
       // ---- Schedule: register a job, don't spawn now ----
       if (params.schedule) {
