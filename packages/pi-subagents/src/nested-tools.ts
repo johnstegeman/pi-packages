@@ -16,6 +16,7 @@ import {
   resolveTypeIn,
 } from "./agent-types.js";
 import { loadCustomAgents } from "./custom-agents.js";
+import { identityLines } from "./identity.js";
 import { isolationParam, resolveAgentInvocationConfig } from "./invocation-config.js";
 import { resolveModel } from "./model-resolver.js";
 import { checkModelScope } from "./model-scope.js";
@@ -116,30 +117,40 @@ function ownsRecord(record: AgentRecord | undefined, parentAgentId: string): rec
  * How the caller received this record, which decides the outcome wording.
  *
  *   - "inline": a foreground spawn or a resume. The full output is in this very
- *     result and no agent id was handed back, so the note must say there is
- *     nothing left to fetch — otherwise the parent invents an id, calls
- *     `get_subagent_result`, and hits "not owned by this parent" (#174, the same
- *     trap the top-level foreground path fell into).
+ *     result, so there is nothing left to fetch — the note must say so, or the
+ *     parent calls `get_subagent_result` for output it already holds and hits
+ *     "not owned by this parent" (#174, the same trap the top-level foreground
+ *     path fell into). The result also names the child, so the parent can
+ *     resume, fetch or steer it by id while the record is live.
  *   - "fetched": `get_subagent_result` on a background child. The parent holds a
  *     valid id and can poll again, so the background wording applies.
  */
 type ResultPosition = "inline" | "fetched";
 
 function formatRecord(record: AgentRecord, position: ResultPosition): string {
+  // LOCAL PATCH (pi-packages) — see docs/pi-subagents-local-patch.md (Divergence 9)
+  // Inline only: a fetched result was asked for BY id, so the caller already
+  // holds it and echoing it is noise. A nested record carries no handle, so
+  // identityLines emits the id line alone.
+  const identity = position === "inline" ? identityLines(record).trimEnd() : "";
   if (record.status === "error") {
-    return `Agent failed: ${record.error ?? "unknown error"}${partialOutputSuffix(record)}`;
+    return `Agent failed: ${record.error ?? "unknown error"}${partialOutputSuffix(record)}` +
+      (identity ? `\n${identity}` : "");
   }
   if (record.status === "queued" || record.status === "running") {
     return `Agent ${record.id} is ${record.status}.`;
   }
   // A truncated run must not read as a finished one. The top-level path carries
   // this in its result headline; a nested result has no headline, so the note
-  // leads — appended, it would look like part of the child's own output.
+  // leads the output, with the identity line after it — appended below the
+  // output, either would look like part of the child's own answer.
   const text = record.result?.trim() || record.error?.trim() || "No output.";
   const note = position === "inline"
     ? getForegroundOutcomeNote(record.status)
     : getStatusNote(record.status);
-  return note ? `Nested agent${note}.\n\n${text}` : text;
+  const head = [note ? `Nested agent${note}.` : undefined, identity || undefined]
+    .filter((line): line is string => line !== undefined);
+  return head.length > 0 ? `${head.join("\n")}\n\n${text}` : text;
 }
 
 /** Build child-safe orchestration tools scoped to one parent agent instance. */
