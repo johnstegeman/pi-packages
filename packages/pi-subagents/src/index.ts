@@ -2068,10 +2068,13 @@ Terse command-style prompts produce shallow, generic work.
         // A failed resume surfaces the error, plus any partial output THIS
         // resume produced (never the previous turn's answer, #144).
         if (record.status === "error") {
-          return textResult(`Agent failed: ${record.error}${partialOutputSuffix(record)}`, buildDetails(detailBaseFor(record), record));
+          return textResult(
+            `Agent failed: ${record.error}${partialOutputSuffix(record)}\n` + identityLines(record),
+            buildDetails(detailBaseFor(record), record),
+          );
         }
         return textResult(
-          record.result?.trim() || "No output.",
+          identityLines(record) + "\n" + (record.result?.trim() || "No output."),
           buildDetails(detailBaseFor(record), record),
         );
       }

@@ -30,10 +30,10 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 vi.mock("../src/agent-runner.js", async () => {
   const actual = await vi.importActual<typeof import("../src/agent-runner.js")>("../src/agent-runner.js");
-  return { ...actual, runAgent: vi.fn() };
+  return { ...actual, runAgent: vi.fn(), resumeAgent: vi.fn() };
 });
 
-import { runAgent } from "../src/agent-runner.js";
+import { resumeAgent, runAgent } from "../src/agent-runner.js";
 import subagentsExtension from "../src/index.js";
 
 function makePi() {
@@ -182,6 +182,63 @@ describe("issue #174: foreground agent that hits max_turns", () => {
     // block does not displace the payload.
     expect(text).toContain("wrapped up at the turn limit");
     expect(text).toContain("THE-RESULT-PAYLOAD");
+
+    await lifecycle.get("session_shutdown")?.({}, ctx());
+  });
+
+  it("carries the identity block on the failed foreground return too", async () => {
+    const { pi, tools, lifecycle } = makePi();
+    subagentsExtension(pi);
+    // A final turn whose provider error pi resolved instead of rejecting lands
+    // the record on "error" (agent-manager settleRun, #144), which is the branch
+    // that returns `Agent failed:` — the other half of the identity contract.
+    vi.mocked(runAgent).mockResolvedValue({
+      responseText: "PARTIAL-BEFORE-FAILURE",
+      session: { dispose: vi.fn() } as any,
+      aborted: false,
+      steered: false,
+      failure: "provider exploded",
+    });
+    const res = await tools.get("Agent").execute(
+      "tc-fail",
+      { prompt: "go", description: "work", subagent_type: "Explore", run_in_background: false },
+      undefined,
+      undefined,
+      ctx(),
+    );
+
+    const text = textOf(res);
+    expect(text).toContain("Agent failed: provider exploded");
+    expect(text).toContain(`Agent ID: ${(res as any).details?.agentId}`);
+    expect(text).toContain("Handle: explore");
+
+    await lifecycle.get("session_shutdown")?.({}, ctx());
+  });
+
+  it("carries the identity block on a synchronous resume, success and failure", async () => {
+    const { pi, tools, lifecycle } = makePi();
+    subagentsExtension(pi);
+    const { id } = await runForegroundSteeredAgent(tools);
+    const resume = () =>
+      tools.get("Agent").execute(
+        "tc-resume",
+        { prompt: "keep going", description: "work", subagent_type: "Explore", resume: id, run_in_background: false },
+        undefined,
+        undefined,
+        ctx(),
+      );
+
+    vi.mocked(resumeAgent).mockResolvedValue({ text: "RESUMED-PAYLOAD" } as any);
+    const ok = textOf(await resume());
+    expect(ok).toContain(`Agent ID: ${id}`);
+    expect(ok).toContain("Handle: explore");
+    expect(ok).toContain("RESUMED-PAYLOAD");
+
+    vi.mocked(resumeAgent).mockResolvedValue({ text: "", failure: "provider exploded" } as any);
+    const failed = textOf(await resume());
+    expect(failed).toContain("Agent failed: provider exploded");
+    expect(failed).toContain(`Agent ID: ${id}`);
+    expect(failed).toContain("Handle: explore");
 
     await lifecycle.get("session_shutdown")?.({}, ctx());
   });
