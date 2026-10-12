@@ -11,7 +11,7 @@
  * Lives here rather than inside index.ts because both entry points need it: the
  * top-level tools, and the nested delegation tools, which cannot import from
  * index.ts (that is the extension entry point). Same reason status-note.ts
- * exists. The Divergence 9 section its marker names is authored in Task 3.
+ * exists. The Divergence 9 section its marker names records this move.
  */
 export function identityLines(record: { id: string; alias?: string; handle?: string }): string {
   const handle = record.alias ?? record.handle;

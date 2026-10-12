@@ -364,9 +364,8 @@ record carries no `handle` or `alias` (`src/agent-manager.ts:509-511,520`) — a
 tombstone, so the `@handle` mention namespace and `takenHandles()` are untouched. Ownership
 scoping is unchanged: the id is emitted into a result only the owning parent receives.
 
-`src/nested-tools.ts` is the first upstream file of this fork outside `index.ts`,
-`agent-runner.ts` and Divergence 6's `src/workflow/` pair to carry a `LOCAL PATCH` marker; the new
-`src/identity.ts` is the only other marker site this divergence adds.
+The two markers this divergence adds — in `src/nested-tools.ts` and the new `src/identity.ts` —
+are the first outside `index.ts`, `agent-runner.ts` and Divergence 6's `src/workflow/` pair.
 
 Covered by `test/nested-tools.test.ts` (the inline shapes, the fetched position, and the absent
 `Handle:` line) and `test/identity.test.ts` (the helper's own contract). The top-level contract in
