@@ -160,6 +160,7 @@ describe("issue #174: foreground agent that hits max_turns", () => {
     // wrapper preserves it (it spreads the result).
     expect((read as any).structuredContent).toEqual({
       agentId: id,
+      handle: "explore",
       status: "steered",
       result: "THE-RESULT-PAYLOAD",
     });

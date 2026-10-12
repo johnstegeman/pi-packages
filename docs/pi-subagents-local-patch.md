@@ -270,14 +270,60 @@ Covered by `test/workflow-tool.test.ts`
 `id`/`result` snapshot), and
 `test/settings.test.ts` / `test/documented-defaults.test.ts` (the new default).
 
+## Divergence 8 — the durable id and the resume ladder (`pi-packages-jnr7.5`)
+
+Upstream surfaces a subagent's identity as prose, and only on some paths: the background result
+printed `Agent ID:` but the foreground result did not, `get_subagent_result`'s
+`structuredContent.agentId` echoed the *queried* string rather than the resolved record id, and no
+result named the handle the spawn actually assigned. Past the ten-minute record sweep the handle
+resolved to nothing at all — so a controller that had dispatched an implementer could not obtain
+its durable id a few minutes after it finished, which is exactly the SDD fix loop's observed
+failure (the ledger's `agent:` field was unfillable when it was needed). `Agent({ resume })` was
+live-only for the same reason: a task review routinely outlasts the sweep, so the fix loop's
+resume answered `Agent not found` on every task.
+
+This fork makes identity obtainable on every dispatch result and lets a resume reopen an evicted
+conversation from disk. Four edits, Tasks 1–4:
+
+1. **`identityLines(record)`** — one module-private helper printing `Agent ID: <record.id>` and,
+   when the record has one, `Handle: <alias ?? handle>`. Used at the foreground spawn and error
+   returns and the two background result sites. The id is the precise record key; the handle is the
+   re-derivable one (`task-<sanitized-task-id>-impl`), and a second dispatch under the same `name` is
+   silently suffixed (`-impl-2`) — so the handle reported is the authority, not the requested name.
+2. **`resolveResumeTarget(ref)`** — resolves `Agent({ resume })` by exact id first (unchanged
+   behaviour), then a live handle or alias, and returns a three-arm union (`record` / `tombstone` /
+   `missing`) so the tombstone arm is not swallowed by the missing-ref message.
+3. **`planReopen(entry)`** — the guards every reopen shares (the session file exists; the recorded
+   type still resolves without falling back to general-purpose), returning a reason code so the
+   mention path and the resume ladder each keep their own wording. Rung 3 of the ladder reopens an
+   evicted conversation with `spawnResolved` (background) or `manager.spawnAndWait` (foreground),
+   passing `resumeSessionFile` and `reclaim` so the new record takes the handle back; a missing
+   session file drops the tombstone, an unavailable type keeps it.
+4. **`get_subagent_result` gains a tombstone branch**, placed ahead of the `wf_…` run-id lookup so a
+   tombstoned handle wins exactly as a live record does. It answers identity only —
+   `structuredContent` `{ agentId: <entry.id>, status: "evicted" }` plus prose naming the reopen
+   route — and never spawns. `resolveAgentRef` stays live-only, because `steer_subagent` shares it and
+   a tombstone has nothing to steer. The resolved path now reports `record.id` rather than the queried
+   alias, and the resolved `handle`; `outputSchema` declares the optional `handle`.
+
+Unchanged by design: the ten-minute eviction cutoff, `MAX_TOMBSTONES`, the tombstone's session-scoped
+lifetime, and `steer_subagent`'s live-only resolution.
+
+Files: `src/index.ts` — the four edit sites above each carry the marker. Covered by
+`test/get-result-evicted.test.ts` (the tombstone answer, no spawn, the resolved live identity, the
+unknown ref), `test/foreground-result-retrieval.test.ts` (the resolved-path `structuredContent`
+shape), `test/agent-resume-handle.test.ts` (rung 2), `test/agent-resume-from-disk.test.ts` (rung 3,
+the reopen and its two failures) and `test/agent-mention-wiring.test.ts` (the mention path's
+byte-identical refusals). The README's `get_subagent_result` section documents the evicted answer.
+
 ## In-code marker convention
 
 Divergences 3 — the code-mode exposure/namespace/outputSchema changes from Task 6 — 4 — Task 7's
-codemode activation delta — and 7's `get_subagent_result` branch, whose `wf_` lookup sits inside a
-tool upstream knows only as an agent lookup — **are** marked, because each is a small, surgical
-edit a future reader could otherwise mistake for upstream behaviour. The rest of Divergence 7 is
-not: its watchdog hunks and durability helpers are additive blocks that are plainly this copy's
-own state (see its section above). The marker is:
+codemode activation delta — 7's `get_subagent_result` branch, whose `wf_` lookup sits inside a
+tool upstream knows only as an agent lookup — and 8's four identity/resume sites — **are** marked,
+because each is a small, surgical edit a future reader could otherwise mistake for upstream
+behaviour. The rest of Divergence 7 is not: its watchdog hunks and durability helpers are additive
+blocks that are plainly this copy's own state (see its section above). The marker is:
 
 ```ts
 // LOCAL PATCH (pi-packages) — see docs/pi-subagents-local-patch.md

@@ -754,6 +754,7 @@ export default function (pi: ExtensionAPI) {
     return resolved?.kind === "live" ? resolved.record : undefined;
   };
 
+  // LOCAL PATCH (pi-packages) — see docs/pi-subagents-local-patch.md
   type ResumeTarget =
     | { kind: "record"; record: AgentRecord }
     | { kind: "tombstone"; entry: AgentTombstone }
@@ -784,6 +785,7 @@ export default function (pi: ExtensionAPI) {
     };
   };
 
+  // LOCAL PATCH (pi-packages) — see docs/pi-subagents-local-patch.md
   type ReopenPlan = { ok: true; type: SubagentType } | { ok: false; reason: "session-gone" | "type-unavailable" };
 
   /**
@@ -1998,6 +2000,7 @@ Terse command-style prompts produce shallow, generic work.
         };
       };
 
+      // LOCAL PATCH (pi-packages) — see docs/pi-subagents-local-patch.md
       /**
        * The two identity lines every Agent dispatch result carries.
        *
@@ -3045,6 +3048,8 @@ Terse command-style prompts produce shallow, generic work.
     outputSchema: Type.Object({
       error: Type.Optional(Type.String()),
       agentId: Type.Optional(Type.String()),
+      // LOCAL PATCH (pi-packages) — see docs/pi-subagents-local-patch.md
+      handle: Type.Optional(Type.String()),
       status: Type.Optional(Type.String()),
       result: Type.Optional(Type.String()),
     }),
@@ -3069,6 +3074,28 @@ Terse command-style prompts produce shallow, generic work.
       // begins with `wf_` — so the agent lookup runs FIRST. Only a string that
       // names no live agent is read as a workflow run id.
       const record = resolveAgentRef(params.agent_id);
+      //
+      // LOCAL PATCH (pi-packages) — see docs/pi-subagents-local-patch.md
+      // A tombstoned handle: the record is gone but the conversation is still on
+      // disk. Answer with identity only — the durable id the caller needs for the
+      // ledger — and never spawn. `resolveAgentRef` stays live-only on purpose:
+      // `steer_subagent` shares it and a tombstone has nothing to steer.
+      if (record === undefined) {
+        const evicted = manager.resolveMention(params.agent_id);
+        if (evicted?.kind === "tombstone") {
+          const entry = evicted.entry;
+          return {
+            ...textResult(
+              `Agent: ${entry.id}\n` +
+                `Type: ${entry.type} | Status: evicted\n` +
+                `Description: ${entry.description}\n\n` +
+                `This agent's record was evicted; its conversation is still on disk and can be reopened with ` +
+                `Agent({ resume: "${entry.alias ?? entry.handle}" }). The stored result is not kept — see the report file.`,
+            ),
+            structuredContent: { agentId: entry.id, status: "evicted" },
+          };
+        }
+      }
       //
       // A `wf_…` id names a workflow RUN, not an agent: its children are
       // deliberately absent from the agent lookup (they are owned by the run),
@@ -3192,7 +3219,8 @@ Terse command-style prompts produce shallow, generic work.
       return {
         ...textResult(output),
         structuredContent: {
-          agentId: String(params.agent_id),
+          agentId: String(record.id),
+          ...(record.alias || record.handle ? { handle: String(record.alias ?? record.handle) } : {}),
           status: String(record.status),
           ...(record.result ? { result: String(record.result) } : {}),
           ...(record.error ? { error: String(record.error) } : {}),

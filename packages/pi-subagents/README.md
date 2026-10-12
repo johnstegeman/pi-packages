@@ -465,11 +465,13 @@ Check status and retrieve results from a background agent.
 
 | Parameter | Type | Required | Description |
 |-----------|------|----------|-------------|
-| `agent_id` | string | yes | Agent ID to check |
+| `agent_id` | string | yes | Agent ID or handle to check |
 | `wait` | boolean | no | Wait for completion |
 | `verbose` | boolean | no | Include full conversation log |
 
 Cancelling a `wait: true` call (for example, with `Esc`) stops only the wait. The background agent keeps running, and its completion notification still arrives normally.
+
+An agent whose record was evicted still answers with its `Agent ID`, so a caller can recover the durable id long after the run finished. The stored result is not kept — read the report file — but the conversation is still on disk and can be reopened with `Agent({ resume: "<handle>" })`.
 
 ### `steer_subagent`
 
