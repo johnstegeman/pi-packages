@@ -19,4 +19,8 @@ describe("identityLines", () => {
       "Agent ID: abc\nHandle: explore-2\n",
     );
   });
+
+  it("prints an alias with no handle set", () => {
+    expect(identityLines({ id: "abc", alias: "explore-2" })).toBe("Agent ID: abc\nHandle: explore-2\n");
+  });
 });

@@ -157,9 +157,12 @@ that PR's historical record, Divergence 9 states that the helper now lives in `s
 is shared with the nested formatter, and names `src/nested-tools.ts` as its first
 `LOCAL PATCH`-marked site. The "In-code marker convention" paragraph gains the same clause.
 
-**`packages/pi-subagents/README.md`**, two clarifications so the new behaviour does not read as a
+**`packages/pi-subagents/README.md`**, three clarifications so the new behaviour does not read as a
 contradiction:
 
+- `:75` — "Every **top-level** dispatch result reports…" gains the **top-level** qualifier, so the
+  nested position does not read as a counterexample. This third edit is review-mandated, not part of
+  the plan.
 - `:212` — "Nested subagents are not addressable" becomes "…are not addressable **by `@handle` from a
   top-level session**…". The rule that a handle naming one starts a fresh top-level agent is
   unchanged; what is added is that a parent names its own child by the id its dispatch result

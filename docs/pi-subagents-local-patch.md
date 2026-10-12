@@ -95,9 +95,9 @@ so the runner now injects the factory itself and makes sure it survives the agen
 `extensions:`/`tools:` filtering. Four edits, each bracketed by the marker:
 
 1. **Load it** — `extensionFactories: [createCodemodeExtension()]` on the subagent loader
-   (`agent-runner.ts:766`).
+   (`agent-runner.ts:849`).
 2. **Keep it loaded under an `extensions:` name allowlist** — the `extensionsOverride`
-   predicate (`agent-runner.ts:751`) exempts `<inline:*>` entries. Inline factories are
+   predicate (`agent-runner.ts:815`) exempts `<inline:*>` entries. Inline factories are
    injected by the runner, not discovered from disk, so the disk-extension allowlist does
    not govern them. Without this, a name allowlist filtered the codemode entry out of the
    loaded set — an unnamed inline factory canonicalizes to `<inline:N>`, which no name
@@ -146,7 +146,7 @@ loader; a loader we construct has no code behind the name, so the entry is silen
 by the plan's spike, recorded in the design spec's §2.
 
 A fifth, comment-only edit belongs to this divergence: the `getAllTools`/`setActiveTools`
-`catch` in `src/index.ts` (`:2660`) said the APIs are "unavailable in some hosts (print mode,
+`catch` in `src/index.ts` (`:2962`) said the APIs are "unavailable in some hosts (print mode,
 RPC)". That is over-conservative — a bound print-mode session exposes both — and the
 corrected design spec cites the comment, so it now names the real case: a host that loads
 extension definitions without ever binding a session (standalone `discoverAndLoadExtensions`),
@@ -362,7 +362,7 @@ Two edits:
    background nested acknowledgement (`Nested agent started in background. Agent ID: <id>`).
 
 Nested children still get no `Handle:` line — it is omitted by construction, because a nested
-record carries no `handle` or `alias` (`src/agent-manager.ts:509-511,520`) — and still leave no
+record carries no `handle` or `alias` (`src/agent-manager.ts:508-520`) — and still leave no
 tombstone, so the `@handle` mention namespace and `takenHandles()` are untouched. Ownership
 scoping is unchanged: the id is emitted into a result only the owning parent receives.
 
@@ -398,7 +398,7 @@ blocks that are plainly this copy's own state (see its section above). The marke
 ```
 
 A site may append a `(Divergence N).` suffix naming the divergence that introduced it;
-`agent-runner.ts`'s Divergence 4 markers and Divergence 9's two sites do.
+`agent-runner.ts`'s Divergence 4 veto markers (`:235`, `:837`) and Divergence 9's two sites do.
 
 Every changed line of such a divergence is bracketed by that comment, and the delta is
 recorded in this file under its own heading. Do not reformat, rename, or "tidy"
