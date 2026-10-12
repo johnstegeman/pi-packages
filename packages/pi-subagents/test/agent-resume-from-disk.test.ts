@@ -17,7 +17,7 @@ vi.mock("../src/agent-runner.js", async () => {
   return { ...actual, runAgent: vi.fn(), resumeAgent: vi.fn() };
 });
 
-import { runAgent } from "../src/agent-runner.js";
+import { resumeAgent, runAgent } from "../src/agent-runner.js";
 import subagentsExtension from "../src/index.js";
 import { ctx, flush, type Hermetic, hermeticDir, makePi, textOf } from "./helpers/boot-extension.js";
 
@@ -53,8 +53,9 @@ function fakeSession() {
   } as any;
 }
 
-function boot() {
-  hermetic = hermeticDir({ settings: { outputTranscript: false } });
+/** `settings` rides into `.pi/subagents.json`, which is read at boot. */
+function boot(settings: Record<string, unknown> = {}) {
+  hermetic = hermeticDir({ settings: { outputTranscript: false, ...settings } });
   const b = makePi();
   subagentsExtension(b.pi);
   booted = b.lifecycle;
@@ -145,16 +146,109 @@ describe("Agent({ resume }) reopens an evicted conversation", () => {
     expect(text).toContain("resumed from disk");
     expect(text).toContain("Agent ID: ");
     expect(text).not.toContain(`Agent ID: ${id}`);
-    expect(text).toContain(`handle: ${handle}`);
+    expect(text).toContain(`Handle: ${handle}`);
 
     // The caller-facing name came back with the reopened record, so the next
     // round names the same conversation rather than the corpse. The dispatch
     // assigned `explore` as the record handle and the caller's `name` as the
-    // alias, and the reopened result's `handle:` reports the alias — so the
+    // alias, and the reopened result's `Handle:` line reports the alias — so the
     // reclaimed name lives there.
     const resumedId = (vi.mocked(runAgent).mock.calls[0][3] as any).agentId;
     const reopenedRecord = manager.getRecord(resumedId);
     expect(reopenedRecord.alias ?? reopenedRecord.handle).toBe(handle);
+  });
+
+  it("resolves the live record when a stale id matches a tombstone a reopen kept", async () => {
+    const { tools } = boot();
+    const { id, handle } = await dispatch(tools, "task-jnr7-5-impl");
+    const manager = await evict(id);
+    vi.mocked(runAgent).mockClear();
+    reopenedRun();
+    vi.mocked(resumeAgent).mockResolvedValue({ text: "SECOND-TURN", failure: undefined } as any);
+
+    // The FIRST resume names the pre-reopen id, which only the tombstone holds.
+    const first = textOf(
+      await tools.get("Agent").execute(
+        "tc-resume-1",
+        { resume: id, prompt: "fix the open findings", run_in_background: true },
+        undefined,
+        undefined,
+        ctx(),
+      ),
+    );
+    await flush();
+    expect(first).toContain("resumed from disk");
+    expect(vi.mocked(runAgent)).toHaveBeenCalledTimes(1);
+    const reopenedId = (vi.mocked(runAgent).mock.calls[0][3] as any).agentId;
+    expect(reopenedId).not.toBe(id);
+
+    // A successful reopen KEEPS its tombstone, and the reopened record carries a
+    // new id while the tombstone keeps the old one — so this second call matches
+    // that stale entry by id again. It must find the live holder of the handle
+    // rather than reopening the same conversation a second time: a second reopen
+    // takes the handle back from the run that already owns it, so two live
+    // records share one name and one session file.
+    const second = textOf(
+      await tools.get("Agent").execute(
+        "tc-resume-2",
+        { resume: id, prompt: "fix the rest", run_in_background: true },
+        undefined,
+        undefined,
+        ctx(),
+      ),
+    );
+    await flush();
+    expect(second).not.toContain("resumed from disk");
+    expect(second).toContain(`Agent ID: ${reopenedId}`);
+    // The live-record arm ran, and no second reopen did: the registry exposes no
+    // way to list live records, so `runAgent` staying at one call is what shows
+    // no second record took the handle.
+    expect(vi.mocked(resumeAgent)).toHaveBeenCalledTimes(1);
+    expect(vi.mocked(runAgent)).toHaveBeenCalledTimes(1);
+    // The handle still resolves to the record the first reopen made, not a fork.
+    expect((manager.getRecord(reopenedId).alias ?? manager.getRecord(reopenedId).handle)).toBe(handle);
+  });
+
+  it("reports the queue position when the reopen has to wait for a background slot", async () => {
+    const { tools } = boot({ maxConcurrent: 1 });
+    const { id, handle } = await dispatch(tools, "task-jnr7-5-impl");
+    await evict(id);
+
+    // One background slot, held by an agent that stays running: the reopen must
+    // queue, and it reaches the pool through `spawnResolved` rather than the
+    // foreground `spawnAndWait`, so nothing else in this file covers it.
+    let finishHolder!: (value: any) => void;
+    vi.mocked(runAgent).mockImplementationOnce(
+      () => new Promise((resolve) => { finishHolder = resolve; }),
+    );
+    await tools.get("Agent").execute(
+      "tc-holder",
+      { prompt: "hold the slot", description: "hold the slot", subagent_type: "Explore", run_in_background: true },
+      undefined,
+      undefined,
+      ctx(),
+    );
+    await flush();
+
+    vi.mocked(runAgent).mockClear();
+    reopenedRun();
+    const text = textOf(
+      await tools.get("Agent").execute(
+        "tc-resume",
+        { resume: handle, prompt: "fix the open findings", run_in_background: true },
+        undefined,
+        undefined,
+        ctx(),
+      ),
+    );
+    await flush();
+    expect(text).toContain("resumed from disk");
+    expect(text).toContain("Position: queued (max 1 concurrent)");
+
+    // Let the holder finish so the queued reopen drains and teardown is not left
+    // waiting on a run that can never settle.
+    finishHolder({ responseText: "held", session: fakeSession(), aborted: false, steered: false, failure: undefined });
+    await flush();
   });
 
   it("blocks and returns the output inline when the caller asked to", async () => {
@@ -174,6 +268,11 @@ describe("Agent({ resume }) reopens an evicted conversation", () => {
 
     const text = textOf(r);
     expect(text).toContain("resumed from disk");
+    // The same identity lines every other dispatch result carries, so a
+    // controller that pattern-matches `Agent ID:` / `Handle:` records the
+    // reopened record rather than leaving a dead `agent:` in its ledger.
+    expect(text).toContain("Agent ID: ");
+    expect(text).toContain(`Handle: ${handle}`);
     expect(text).toContain("FIXED-THE-FINDINGS");
   });
 
@@ -213,3 +312,11 @@ describe("Agent({ resume }) reopens an evicted conversation", () => {
     expect(again).not.toContain("session file is gone");
   });
 });
+
+// Deliberately no case for a NESTED (non-top-level) ref. A nested child gets no
+// handle (`src/agent-manager.ts` — `handle: !isTopLevelAgent(options) ? undefined`),
+// and `tombstone()` returns early without one, so an evicted child leaves nothing
+// behind: `resolveResumeTarget` can only ever answer `Agent not found`, and there is
+// no second outcome to assert. The refusal is not silent, though — the missing-ref
+// message names the alternative — and `test/agent-resume-handle.test.ts` covers the
+// live-only resolution that shares this ladder.

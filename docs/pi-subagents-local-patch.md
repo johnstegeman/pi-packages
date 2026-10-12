@@ -283,16 +283,23 @@ live-only for the same reason: a task review routinely outlasts the sweep, so th
 resume answered `Agent not found` on every task.
 
 This fork makes identity obtainable on every dispatch result and lets a resume reopen an evicted
-conversation from disk. Four edits, Tasks 1–4:
+conversation from disk. Four edits, Tasks 1–4, plus the wording changes the spec's §1 also asks for:
 
 1. **`identityLines(record)`** — one module-private helper printing `Agent ID: <record.id>` and,
    when the record has one, `Handle: <alias ?? handle>`. Used at the foreground spawn and error
-   returns and the two background result sites. The id is the precise record key; the handle is the
-   re-derivable one (`task-<sanitized-task-id>-impl`), and a second dispatch under the same `name` is
-   silently suffixed (`-impl-2`) — so the handle reported is the authority, not the requested name.
+   returns, the two background result sites, and both reopen arms. The id is the precise record
+   key; the handle is the re-derivable one (`task-<sanitized-task-id>-impl`), and a second dispatch
+   under the same `name` is silently suffixed (`-impl-2`) — so the handle reported is the
+   authority, not the requested name. The helper carries the marker; its **call sites** do not,
+   because each is an insertion into an existing upstream result string (see the marker
+   convention below).
 2. **`resolveResumeTarget(ref)`** — resolves `Agent({ resume })` by exact id first (unchanged
    behaviour), then a live handle or alias, and returns a three-arm union (`record` / `tombstone` /
-   `missing`) so the tombstone arm is not swallowed by the missing-ref message.
+   `missing`) so the tombstone arm is not swallowed by the missing-ref message. A tombstone match is
+   skipped when a live record currently holds the name that entry points at: a successful reopen
+   *keeps* its tombstone while the reopened record carries a new id, so a resume by the pre-reopen
+   id would otherwise match the stale entry, reopen the same conversation a second time and take the
+   handle from the run that already owns it.
 3. **`planReopen(entry)`** — the guards every reopen shares (the session file exists; the recorded
    type still resolves without falling back to general-purpose), returning a reason code so the
    mention path and the resume ladder each keep their own wording. Rung 3 of the ladder reopens an
@@ -305,24 +312,40 @@ conversation from disk. Four edits, Tasks 1–4:
    route — and never spawns. `resolveAgentRef` stays live-only, because `steer_subagent` shares it and
    a tombstone has nothing to steer. The resolved path now reports `record.id` rather than the queried
    alias, and the resolved `handle`; `outputSchema` declares the optional `handle`.
+5. **The `resume` parameter's contract** — Spec §1's second half: the schema description (marked)
+   and the Agent-tool guideline that names the parameter both gained the reopen clause. The
+   parameter accepts an id **or** a handle, and an agent whose in-memory record has been evicted is
+   reopened from disk automatically — the result says `resumed from disk` and reports the new
+   record's id and handle. The guideline lives inside the `fullAgentToolDescription` template
+   literal, which cannot carry a `//` marker, and its mirror in `examples/agent-tool-description.md`
+   is pinned byte-identical to the rendered description by `test/tool-description-mode.test.ts` —
+   the two are edited together. The README's `resume` row carries the same contract.
 
 Unchanged by design: the ten-minute eviction cutoff, `MAX_TOMBSTONES`, the tombstone's session-scoped
 lifetime, and `steer_subagent`'s live-only resolution.
 
-Files: `src/index.ts` — the four edit sites above each carry the marker. Covered by
+Files: `src/index.ts` — the four edit sites above and the reopen block (both arms) each carry the
+marker.
+Covered by
 `test/get-result-evicted.test.ts` (the tombstone answer, no spawn, the resolved live identity, the
 unknown ref), `test/foreground-result-retrieval.test.ts` (the resolved-path `structuredContent`
 shape), `test/agent-resume-handle.test.ts` (rung 2), `test/agent-resume-from-disk.test.ts` (rung 3,
-the reopen and its two failures) and `test/agent-mention-wiring.test.ts` (the mention path's
+the reopen and its two failures, the stale-id guard against a forked conversation, and the queued
+reopen) and `test/agent-mention-wiring.test.ts` (the mention path's
 byte-identical refusals). The README's `get_subagent_result` section documents the evicted answer.
 
 ## In-code marker convention
 
 Divergences 3 — the code-mode exposure/namespace/outputSchema changes from Task 6 — 4 — Task 7's
 codemode activation delta — 7's `get_subagent_result` branch, whose `wf_` lookup sits inside a
-tool upstream knows only as an agent lookup — and 8's four identity/resume sites — **are** marked,
-because each is a small, surgical edit a future reader could otherwise mistake for upstream
-behaviour. The rest of Divergence 7 is not: its watchdog hunks and durability helpers are additive
+tool upstream knows only as an agent lookup — and 8's identity/resume sites (the `identityLines`
+helper, `resolveResumeTarget`, `planReopen`, the `resume` schema entry, and the two reopen arms) —
+**are** marked, because each is a small, surgical edit a future reader could otherwise mistake for
+upstream behaviour. Divergence 8 has two deliberate exceptions, both recorded in its section above:
+the `identityLines` **call sites** carry no marker of their own (the helper's marker covers them —
+each is an insertion into an existing upstream result string), and the Agent-tool guideline line
+lives inside a template literal, which cannot carry a `//` marker at all. The rest of Divergence 7
+is not: its watchdog hunks and durability helpers are additive
 blocks that are plainly this copy's own state (see its section above). The marker is:
 
 ```ts

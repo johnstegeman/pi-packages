@@ -776,7 +776,17 @@ export default function (pi: ExtensionAPI) {
     }
     const resolved = manager.resolveMention(ref);
     if (resolved?.kind === "live") return { kind: "record", record: resolved.record };
-    if (resolved?.kind === "tombstone") return { kind: "tombstone", entry: resolved.entry };
+    if (resolved?.kind === "tombstone") {
+      // The tombstone outlives a successful reopen (it is deliberately kept —
+      // see the mention path's note), and the reopened record carries a NEW id
+      // while the tombstone keeps the OLD one — so a resume by the pre-reopen id
+      // matches this stale entry and would fork the conversation, taking the
+      // handle back from the run it already belongs to. A live holder wins.
+      const live = resolved.entry.alias ?? resolved.entry.handle;
+      const holder = live ? manager.resolveMention(live) : undefined;
+      if (holder?.kind === "live") return { kind: "record", record: holder.record };
+      return { kind: "tombstone", entry: resolved.entry };
+    }
     return {
       kind: "missing",
       message:
@@ -1576,7 +1586,7 @@ If the target is already known, use a direct tool — \`read\` for a known path,
 - Agents run in the background by default. When an agent runs in the background, you will be automatically notified when it completes — do NOT sleep, poll, or proactively check on its progress. Continue with other work or respond to the user instead.
 - **Foreground vs background**: Pass \`run_in_background: false\` only when your very next action depends on the agent's result and nothing else could usefully happen while it runs — e.g., a research agent whose finding gates the edit you're about to make. Otherwise let it run in the background (the default) — this includes fire-and-forget work, independent investigations, and anything where the user might hand you something else in the meantime. Wanting the result "next" is not enough on its own.
 - **Don't race**: after launching a background agent, you know nothing about its results. Never fabricate or predict them in any format — not as prose, summary, or structured output. The completion notification arrives in a later turn; it is never something you write yourself. If the user asks before it lands, say the agent is still running — give status, not a guess.
-- Use resume with an agent ID or handle to continue a previous agent's work. A new (non-resume) Agent call starts a fresh agent with no memory of prior runs, so the prompt must be self-contained.
+- Use resume with an agent ID or handle to continue a previous agent's work. An agent whose in-memory record has been evicted is reopened from disk automatically, and the result says \`resumed from disk\` with the new record's id and handle. A new (non-resume) Agent call starts a fresh agent with no memory of prior runs, so the prompt must be self-contained.
 - Use steer_subagent to send mid-run messages to a running background agent.
 - Clearly tell the agent whether you expect it to write code or just to do research (search, file reads, etc.), since it is not aware of the user's intent.
 - If an agent's description says it should be used proactively, try to use it without the user having to ask for it first.
@@ -1697,9 +1707,10 @@ Terse command-style prompts produce shallow, generic work.
           description: "Defaults to true — the agent runs detached, returning its ID immediately, and you are notified on completion. Set false only when your very next action depends on the result; the call then blocks and returns the agent's full output inline.",
         }),
       ),
+      // LOCAL PATCH (pi-packages) — see docs/pi-subagents-local-patch.md
       resume: Type.Optional(
         Type.String({
-          description: "Optional agent ID or handle to resume from. Continues from previous context. Resumes detached like any other spawn; pass run_in_background: false to block and get the result inline. An agent can only be resumed once its current run has finished — use steer_subagent to reach one mid-run.",
+          description: "Optional agent ID or handle to resume from. Continues from previous context. Resumes detached like any other spawn; pass run_in_background: false to block and get the result inline. An agent whose in-memory record has been evicted is reopened from disk automatically, and the result says \"resumed from disk\" with the new record's id and handle. An agent can only be resumed once its current run has finished — use steer_subagent to reach one mid-run.",
         }),
       ),
       isolated: Type.Optional(
@@ -2072,6 +2083,7 @@ Terse command-style prompts produce shallow, generic work.
                 : `Agent "${label}" was evicted and the ${entry.type} agent is no longer available; its conversation cannot be reopened — re-dispatch a fresh implementer with the report file.`,
             );
           }
+          // LOCAL PATCH (pi-packages) — see docs/pi-subagents-local-patch.md
           const reopenOptions = {
             description: entry.description,
             reclaim: { handle: entry.handle, alias: entry.alias },
@@ -2081,20 +2093,39 @@ Terse command-style prompts produce shallow, generic work.
             const reopenedId = spawnResolved(pi, ctx, plan.type, params.prompt, { ...reopenOptions, isBackground: true });
             await manager.awaitStartup(reopenedId);
             const reopened = manager.getRecord(reopenedId)!;
+            // `spawnResolved` installs its own activity tracker rather than
+            // honouring a caller's callbacks, so the transcript is attached
+            // here — an `onSpawned` passed through it would be dropped.
+            attachTranscript(reopened, reopenedId);
+            const isQueued = reopened.status === "queued";
             return textResult(
-              `Agent resumed from disk (record evicted; new Agent ID: ${reopenedId}; handle: ${reopened.alias ?? reopened.handle ?? entry.handle}).\n` +
+              `Agent resumed from disk (record evicted).\n` +
+                identityLines(reopened) +
                 `Type: ${reopened.type}\n` +
+                (reopened.outputFile ? `Output file: ${reopened.outputFile}\n` : "") +
+                (isQueued ? `Position: queued (max ${manager.getMaxConcurrent()} concurrent)\n` : "") +
                 `\nYou will be notified when this agent completes.\n` +
                 `Use get_subagent_result to retrieve full results, or steer_subagent to send it messages.`,
               { ...detailBaseFor(reopened), toolUses: 0, tokens: "", durationMs: 0, status: "background" as const, agentId: reopenedId },
             );
           }
-          const { record: reopened } = await manager.spawnAndWait(pi, ctx, plan.type, params.prompt, reopenOptions);
-          const note = `Agent resumed from disk (record evicted; new Agent ID: ${reopened.id}; handle: ${reopened.alias ?? reopened.handle ?? entry.handle}).`;
+          // `signal` rides along exactly as it does on the foreground spawn and
+          // the live foreground resume: without it Esc abandons this tool result
+          // while the run keeps going, holding a foreground pool slot.
+          const { record: reopened } = await manager.spawnAndWait(
+            pi,
+            ctx,
+            plan.type,
+            params.prompt,
+            { ...reopenOptions, signal },
+            (reopenedId) => attachTranscript(manager.getRecord(reopenedId), reopenedId),
+          );
+          const note =
+            `Agent resumed from disk (record evicted)${getForegroundOutcomeNote(reopened.status)}.\n` + identityLines(reopened);
           if (reopened.status === "error") {
-            return textResult(`${note}\n\nAgent failed: ${reopened.error}${partialOutputSuffix(reopened)}`, buildDetails(detailBaseFor(reopened), reopened));
+            return textResult(`${note}\nAgent failed: ${reopened.error}${partialOutputSuffix(reopened)}`, buildDetails(detailBaseFor(reopened), reopened));
           }
-          return textResult(`${note}\n\n` + (reopened.result?.trim() || "No output."), buildDetails(detailBaseFor(reopened), reopened));
+          return textResult(`${note}\n` + (reopened.result?.trim() || "No output."), buildDetails(detailBaseFor(reopened), reopened));
         }
         const existing = target.record;
         if (!existing.session) {

@@ -413,7 +413,7 @@ Launch a sub-agent.
 | `thinking` | string | no | Thinking level: off, minimal, low, medium, high, xhigh, max (availability depends on pi version and model) |
 | `max_turns` | number | no | Max agentic turns. Omit for unlimited (default) |
 | `run_in_background` | boolean | no | Defaults to `true`; `false` blocks and returns the result inline |
-| `resume` | string | no | Agent ID or handle to resume a previous session |
+| `resume` | string | no | Agent ID or handle to resume a previous session. An agent whose in-memory record has been evicted is reopened from disk automatically, and the result says `resumed from disk` with the new record's id and handle |
 | `isolated` | boolean | no | No extension/MCP tools |
 | `isolation` | `"off"` \| `"worktree"` | no | `worktree` runs in an isolated git worktree; `off` (the default) does not. Absent from the schema entirely when `worktreeIsolation: false` |
 | `inherit_context` | boolean | no | Fork parent conversation into agent |
