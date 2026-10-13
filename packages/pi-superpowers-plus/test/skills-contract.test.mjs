@@ -297,11 +297,22 @@ test("the brainstorming step table carries explore and the document-coverage clo
   // literal-space match would pin the wrap point rather than the content (the human's ruling on
   // Task 2's review; see the fix commit 87e7367 for the same pattern).
   const flat = skill.replace(/\s+/g, " ");
-  assert.match(flat, /\|\s*`explore`\s*\|/);
-  assert.match(flat, /It runs \*\*before\*\* your first message and is never skipped/);
+  // Scope the row check to the step table itself: a bare /\|\s*`explore`\s*\|/ would match
+  // an `explore` cell in any table in the file, not necessarily the step table.
+  const stepTableStart = flat.indexOf("| Step | Close it when |");
+  assert.notEqual(stepTableStart, -1, "the step table header must be present");
+  const stepTable = flat.slice(stepTableStart);
+  assert.match(stepTable, /\|\s*`explore`\s*\|/);
+  assert.match(stepTable, /It runs \*\*before\*\* your first message and is never skipped/);
   assert.match(flat, /what the document `explore` read says/);
   assert.match(flat, /the written document is approved later, at `spec-approved`/);
-  assert.match(flat, /you read as `explore`, without asking/);
+  assert.doesNotMatch(flat, /by reading the document for a project/);
+  // Count, don't just match: a duplicated carve-out still satisfies a plain match.
+  assert.equal(
+    flat.split("you read as `explore`, without asking").length - 1,
+    1,
+    "the Offer recon carve-out appears exactly once",
+  );
 });
 
 run();

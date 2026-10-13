@@ -168,7 +168,8 @@ often more than one, and for a request that already states every decision that m
 ("make the icon cornflower blue") none at all. The test is coverage, not count: a
 decision is load-bearing when a wrong guess changes what gets built. Walk the **Ground
 to cover** list before you size the work, and be able to say of each line either what
-they told you or that it's your call — and say it out loud when it's your call. *(A
+they told you, **what the document `explore` read says**, or that it's your call —
+and say it out loud when it's your call. *(A
 local addition: upstream leaves the question count to the model's judgement.)*
 
 **Questions that work** anchor in specifics: "Walk me through the last
@@ -182,8 +183,6 @@ or the web. Say what you'd look for. They decide whether you go.
 This is about investigation beyond the request's own referents: what the
 request *names* — the bead, the spec, the file — you read as `explore`, without
 asking.
-investigation beyond the request's own referents: what the request *names* — the bead,
-the spec, the file — you read as `explore`, without asking.
 
 **Think wide privately.** Before you propose anything, come up with
 several ideas and drop the weak ones, including any that fight what
