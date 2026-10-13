@@ -280,6 +280,11 @@ const designApprovedIdx = v1Lines.findIndex((l) => l.includes("User approves des
 assert.ok(exploreIdx !== -1, `v1 explore row renders: ${v1Lines.join(" | ")}`);
 assert.ok(exploreIdx < designApprovedIdx, `v1 explore row leads, before design-approved: ${v1Lines.join(" | ")}`);
 assert.ok(v1Lines[exploreIdx].includes("\u25d0"), `v1 live step leads with the active marker: ${v1Lines[exploreIdx]}`);
+assert.equal(
+  v1Lines.filter((l) => l.includes("Explore project context")).length,
+  1,
+  `a fresh v1 molecule renders its explore row exactly once: ${v1Lines.join(" | ")}`,
+);
 assert.ok(
   !v1Lines[designApprovedIdx].includes("\u25d0"),
   `v1 design-approved is not marked current: ${v1Lines[designApprovedIdx]}`,
@@ -311,7 +316,44 @@ assert.ok(
   "the folded v1 rows collapse to the live step",
 );
 
-// ---------- full brainstorming fixture: 6 pre-impl tasks + 2 gates + implement + verify ----------
+// Review Focus 2: v1 mid-folded-phase — exactly one folded row, the live step leading it.
+assert.equal(
+  v1MidLines.filter((l) => /Explore project context|Ask clarifying questions|Propose approaches/.test(l)).length,
+  1,
+  `one folded row mid-phase: ${v1MidLines.join(" | ")}`,
+);
+
+// Review Focus 3: v1 with the whole folded phase closed — one row, the last of the three.
+const v1Closed = {
+  ...v1,
+  steps: v1.steps.map((s) =>
+    ["mol-v1.explore", "mol-v1.clarify", "mol-v1.approaches"].includes(s.id)
+      ? { ...s, status: "closed", step_status: "done" }
+      : s,
+  ),
+};
+const v1ClosedLines = moleculeWidgetLines(v1Closed, 200);
+assert.equal(
+  v1ClosedLines.filter((l) => /Explore project context|Ask clarifying questions|Propose approaches/.test(l)).length,
+  1,
+  `one folded row when the phase is closed: ${v1ClosedLines.join(" | ")}`,
+);
+assert.ok(
+  v1ClosedLines.some((l) => l.includes("Propose approaches")),
+  `the folded row is the last v1 step when all are closed: ${v1ClosedLines.join(" | ")}`,
+);
+
+// Review Focus 5: a partial v1 molecule (step:clarify, no step:explore) still renders one folded row.
+const v1Partial = { ...v1, steps: v1.steps.filter((s) => s.id !== "mol-v1.explore") };
+const v1PartialLines = moleculeWidgetLines(v1Partial, 200);
+assert.equal(
+  v1PartialLines.filter((l) => /Explore project context|Ask clarifying questions|Propose approaches/.test(l)).length,
+  1,
+  `a partial v1 molecule renders one folded row: ${v1PartialLines.join(" | ")}`,
+);
+
+// ---------- full brainstorming fixture (v2-shaped: 6 pre-impl tasks + 2 gates + implement + verify) ----------
+// Carries no `step:explore` — it was poured before formula v3 — which is what makes it Review Focus 1's fixture.
 const bstate = {
   molecule_id: "bd-mol-g0z",
   molecule_title: "superpowers-workflow",
@@ -425,6 +467,43 @@ const bstate = {
 
 // ---------- header: topic (not formula name) + phase label + done/total ----------
 const headerLines = moleculeWidgetLines(bstate, 120);
+
+// Review Focus 1: a v2 molecule (no step:explore) drops the explore row.
+assert.ok(!headerLines.some((l) => l.includes("Explore project context")), "a v2 molecule renders no explore row");
+
+// Review Focus 4: v3 — explore closed, conversation current — two rows, explore first.
+// (Placed here, not with the v1 cases, because its fixture spreads `bstate`.)
+const v3State = {
+  ...bstate,
+  current_step: {
+    id: "s1",
+    title: "Draw out intent: Superpowers widget changes",
+    status: "in_progress",
+    issue_type: "task",
+  },
+  steps: [
+    {
+      id: "s0",
+      title: "Explore project context",
+      labels: ["step:explore"],
+      status: "closed",
+      issue_type: "task",
+      created_at: "",
+      step_status: "done",
+      is_current: false,
+    },
+    ...bstate.steps.map((s) =>
+      s.labels.includes("step:conversation")
+        ? { ...s, status: "in_progress", step_status: "current", is_current: true }
+        : s,
+    ),
+  ],
+};
+const v3Lines = moleculeWidgetLines(v3State, 200);
+const v3ExploreIdx = v3Lines.findIndex((l) => l.includes("Explore project context"));
+const v3ConvIdx = v3Lines.findIndex((l) => l.includes("Draw out intent"));
+assert.ok(v3ExploreIdx !== -1 && v3ConvIdx > v3ExploreIdx, `v3 explore row leads conversation: ${v3Lines.join(" | ")}`);
+assert.ok(v3Lines[v3ConvIdx].includes("\u25d0"), `v3 conversation row is current: ${v3Lines[v3ConvIdx]}`);
 assert.ok(
   headerLines[0].includes("Superpowers:") && headerLines[0].includes("Superpowers widget changes"),
   headerLines[0],

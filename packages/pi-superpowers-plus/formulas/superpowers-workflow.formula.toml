@@ -1,6 +1,6 @@
 formula = "superpowers-workflow"
 description = "Brainstorm -> design -> plan -> implement -> wrap-up -> verify -> finish"
-version = 2
+version = 3
 type = "workflow"
 
 [vars.topic]
@@ -8,9 +8,15 @@ description = "The feature/topic being brainstormed"
 required = true
 
 [[steps]]
+id = "explore"
+title = "Explore project context"
+type = "task"
+
+[[steps]]
 id = "conversation"
 title = "Draw out intent: {{topic}}"
 type = "task"
+needs = ["explore"]
 
 [[steps]]
 id = "playback"

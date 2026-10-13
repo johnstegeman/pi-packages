@@ -418,6 +418,7 @@ function themeOf(theme) {
 // ---- phase views (formula step keys, resolved by their pour-time `step:<key>` labels) ----
 // Exported so test/widget-formula-coupling.test.mjs can pin them against the shipped formula.
 export const BRAINSTORM_VIEW = [
+  "explore",
   "conversation",
   "playback",
   "design-approved",
@@ -505,9 +506,38 @@ function legacyStepFor(steps, key) {
   return present.find((s) => s.step_status !== "done" && s.status !== "closed") ?? present[present.length - 1];
 }
 
-/** Resolve the canonical view keys against the molecule's steps (missing -> dropped; v1 key -> legacy step). */
+/**
+ * True when the molecule is a v1 pour: it carries one of the folded brainstorm ids
+ * (`clarify`/`approaches`) that v2+ replaced with `conversation`. A v3 molecule has neither.
+ */
+function isV1Molecule(steps) {
+  return (
+    Array.isArray(steps) &&
+    (steps.some((s) => hasStepKey(s, "clarify")) || steps.some((s) => hasStepKey(s, "approaches")))
+  );
+}
+
+/**
+ * Resolve the canonical view keys against the molecule's steps: missing -> dropped; a v1
+ * molecule's folded phase -> its live legacy step. Emits at most one row per step id, so a
+ * step reachable through two keys (v1's `explore`/`conversation`) is never rendered twice.
+ */
 function resolveRows(steps, keys) {
-  return keys.map((key) => stepByKey(steps, key) ?? legacyStepFor(steps, key)).filter(Boolean);
+  const v1 = isV1Molecule(steps);
+  const seen = new Set();
+  const rows = [];
+  for (const key of keys) {
+    // v1's folded phase is ONE row — the live step — shown at the `explore` position; the
+    // `conversation` key would otherwise resolve to that same step via its legacy fallback.
+    const step =
+      v1 && key === "explore"
+        ? legacyStepFor(steps, "conversation")
+        : (stepByKey(steps, key) ?? legacyStepFor(steps, key));
+    if (!step || seen.has(step.id)) continue;
+    seen.add(step.id);
+    rows.push(step);
+  }
+  return rows;
 }
 
 /** Keep ≤ justUnder slots, closed rows last; tail `+N more` counts the overflow. */

@@ -18,6 +18,14 @@ assert.deepEqual(needsOf("wrap-up"), ["implement"], "wrap-up runs after implemen
 assert.deepEqual(needsOf("verify"), ["wrap-up"], "verify runs after wrap-up");
 assert.deepEqual(needsOf("implement"), ["spec-approved"], "implement still runs after spec approval");
 assert.deepEqual(needsOf("finish"), ["smoke-test-approved"], "finish still runs after the smoke gate");
+assert.ok(byId.has("explore"), "the formula declares an explore step");
+assert.equal(byId.get("explore").title, "Explore project context", "explore keeps the v1 title");
+assert.deepEqual(needsOf("explore"), [], "explore is the first step, with no prerequisites");
+assert.deepEqual(needsOf("conversation"), ["explore"], "conversation runs after explore");
+assert.ok(
+  steps.findIndex((s) => s.id === "explore") < steps.findIndex((s) => s.id === "conversation"),
+  "explore precedes conversation",
+);
 assert.deepEqual(
   steps.map((s) => s.id),
   steps.map((s) => s.id).filter((id, i, all) => all.indexOf(id) === i),
