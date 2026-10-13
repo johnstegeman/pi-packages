@@ -2,32 +2,38 @@
 
 ```dot
 digraph brainstorming {
-    "Pour workflow molecule\n+ render widget" [shape=box, style=bold, color=red];
-    "Step 0 complete\n(widget shown)?" [shape=diamond];
-    "Explore project context" [shape=box];
-    "Ask clarifying questions" [shape=box];
-    "Propose 2-3 approaches" [shape=box];
-    "Present design sections" [shape=box];
-    "User approves design?" [shape=diamond];
-    "Write design doc" [shape=box];
-    "Spec self-review\n(fix inline)" [shape=box];
-    "User reviews spec?" [shape=diamond];
+    "Pre-check: anything non-trivial missing?" [shape=diamond];
+    "Do it; say what you did" [shape=box];
+    "Pour molecule + show widget" [shape=box];
+    "First message (opt-out offer + one question)" [shape=box];
+    "Conversation <-> playback" [shape=box];
+    "Size the work" [shape=box];
+    "Approve the description in chat" [shape=diamond];
+    "Write the document" [shape=box];
+    "Builder check (spec-review)" [shape=box];
+    "User approves the document?" [shape=diamond];
     "Print /plan for user; user runs it" [shape=doublecircle];
+    "Build it directly in the implement step" [shape=doublecircle];
 
-    "Pour workflow molecule\n+ render widget" -> "Step 0 complete\n(widget shown)?";
-    "Step 0 complete\n(widget shown)?" -> "Pour workflow molecule\n+ render widget" [label="no, not yet"];
-    "Step 0 complete\n(widget shown)?" -> "Explore project context" [label="yes"];
-    "Explore project context" -> "Ask clarifying questions";
-    "Ask clarifying questions" -> "Propose 2-3 approaches";
-    "Propose 2-3 approaches" -> "Present design sections";
-    "Present design sections" -> "User approves design?";
-    "User approves design?" -> "Present design sections" [label="no, revise"];
-    "User approves design?" -> "Write design doc" [label="yes"];
-    "Write design doc" -> "Spec self-review\n(fix inline)";
-    "Spec self-review\n(fix inline)" -> "User reviews spec?";
-    "User reviews spec?" -> "Write design doc" [label="changes requested"];
-    "User reviews spec?" -> "Print /plan for user; user runs it" [label="approved"];
+    "Pre-check: anything non-trivial missing?" -> "Do it; say what you did" [label="no, quick task"];
+    "Pre-check: anything non-trivial missing?" -> "Pour molecule + show widget" [label="yes"];
+    "Pour molecule + show widget" -> "First message (opt-out offer + one question)";
+    "First message (opt-out offer + one question)" -> "Conversation <-> playback";
+    "Conversation <-> playback" -> "Conversation <-> playback" [label="play back, then next question"];
+    "Conversation <-> playback" -> "Size the work";
+    "Size the work" -> "Approve the description in chat" [label="small change"];
+    "Size the work" -> "Write the document" [label="project"];
+    "Approve the description in chat" -> "Build it directly in the implement step" [label="approved"];
+    "Write the document" -> "Builder check (spec-review)";
+    "Builder check (spec-review)" -> "User approves the document?";
+    "User approves the document?" -> "Write the document" [label="changes requested"];
+    "User approves the document?" -> "Print /plan for user; user runs it" [label="approved"];
 }
 ```
 
-**The terminal state is handing off:** after the user approves, print **`Type /plan to continue`** — do NOT attempt to invoke writing-plans yourself; the user runs the command so the skill loads via pi expansion. Do NOT invoke frontend-design, mcp-builder, or any other implementation skill — writing-plans (via `/plan`) is the only onward step.
+**The terminal state:** a **project** hands off — after the user approves the document, print
+**`Type /plan to continue`**; do NOT attempt to invoke writing-plans yourself, the user runs the
+command so the skill loads via pi expansion. Do NOT invoke frontend-design, mcp-builder, or any
+other implementation skill — writing-plans (via `/plan`) is the only onward step. A **small
+change** does not hand off: its description is approved in chat, the document steps are resolved
+or skipped, and the work is done directly in the `implement` step (close it when done).

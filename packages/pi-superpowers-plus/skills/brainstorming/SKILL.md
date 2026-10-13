@@ -1,144 +1,297 @@
 ---
 name: brainstorming
-description: "You MUST use this before any creative work - creating features, building components, adding functionality, or modifying behavior. Explores user intent, requirements and design before implementation."
+description: "You MUST use this before any creative work - creating features, building components, adding functionality, modifying behavior, or planning anything new, in software or out of it (a talk, a business, a renovation)."
 disable-model-invocation: true
 ---
 
-> **Related skills:** Consider `/skill:using-git-worktrees` to set up an isolated workspace, then `/skill:writing-plans` (run `/plan`) for implementation planning.
+> **Related skills:** Consider `/skill:using-git-worktrees` to set up an isolated workspace. Only
+> work that sizes to a project continues in `/skill:writing-plans` (run `/plan`); a quick task and
+> a small change both do not. A small change continues in the molecule's `implement` step instead.
 
-# Brainstorming Ideas Into Designs
+# Brainstorming
 
-> **Reaching beads tools:** every `beads_*` tool has `codemode`/`deferred` exposure, so
-> none is in your tool list. Call them from a `codemode` script —
-> `await tools.beads_update({ ... })` — and find the deferred ones with
-> `await searchTools("beads")`. The call shapes below are that script's arguments.
+You are very good at building. You build what you believe your human
+partner wants, and that belief is usually thinner than it feels. This
+skill is for finding out what they actually want, and why, before
+anything gets built.
 
-Help turn ideas into fully formed designs and specs through natural collaborative dialogue.
+People often haven't finished working out what they want. Good questions
+help them think it through. When you understand the why, you make the
+hundred decisions they never mention the way they would have made them.
 
-Start by understanding the current project context, then ask questions one at a time to refine the idea. Once you understand what you're building, present the design and get user approval.
 At the start of the skill, call `set_phase({ phase: "brainstorming" })`.
-<HARD-GATE>
-**STOP — set up tracking before you do anything else.** Before you read any files, run
-any commands, or explore the project in any way (Step 1 below), you must pour the workflow
-molecule and put the widget on screen:
 
-- **Fresh topic:** pour the workflow formula, then note the returned root issue id
-  (the `Root issue:` line) — this is the molecule you work against for the rest of this
-  skill and for `writing-plans`/`executing-plans` afterward:
+## Tracking This Session
 
-  ```bash
+Work at **small change** and **project** size runs against a beads molecule,
+so the step you are on is visible in the widget and survives a resume. A
+**quick, clear task** does not: there is no molecule, no widget, and no step
+bookkeeping — do the work and say what you did.
+
+**Pour before you speak.** Once the private check says something non-trivial
+is missing, pour the workflow formula before you send your first message:
+
   beads_mol_pour({ proto: "superpowers-workflow", vars: "topic=<topic>" })
-  ```
 
-- **Existing epic** (e.g. "brainstorm beads-kp0"): this gate still applies — an existing
-  issue does NOT release you from pouring. Pour a NEW molecule as above, seeding
-  `--var topic="<existing issue's title>"`, then link the new root to the existing issue
-  without mutating it:
+Note the root issue id from the `Root issue:` line — it is the molecule you
+work against for the rest of this skill and for `writing-plans` /
+`executing-plans` afterward. Then show the widget immediately:
 
-  ```
+  beads_mol_current({ id: "<root-id>" })
+  beads_mol_ready({ id: "<root-id>" })
+
+**Brainstorming an existing bead** (e.g. "brainstorm beads-kp0"): an existing issue
+does not release you from pouring. Pour a NEW molecule as above, seeding `topic` with
+the existing issue's title, then link the new root to the existing issue without
+mutating it:
+
   beads_dep({ issue: "<new-root-id>", blocker: "<existing-issue-id>", type: "discovered-from" })
-  ```
 
-  If `discovered-from` is rejected by your `bd` version, use `--type related` instead —
-  both are non-blocking link types; do not use `blocks`. Never change the existing issue's
-  type, parent, or status — it stays exactly what it was.
+If `discovered-from` is rejected by your `bd` version, use `related` instead — both
+are non-blocking link types; never use `blocks`. The existing issue's type, parent, and
+status stay exactly what they were.
 
-- **Show the widget immediately after pouring:** run `beads_mol_current({ id: "<root-id>" })`
-  (and `beads_mol_ready({ id: "<root-id>" })`) so the user sees the live current step
-  before any exploration begins.
+**Reaching beads tools:** every `beads_*` tool has `codemode`/`deferred`
+exposure, so none is in your tool list. Call them from a `codemode` script —
+`await tools.beads_update({ ... })` — and find the deferred ones with
+`await searchTools("beads")`. The call shapes here are that script's
+arguments.
 
-Step 0 is **not complete until the widget is actually visible** — calling `beads_mol_pour` alone is not enough. **Do not begin Step 1 until Step 0 is complete.**
+**Working the steps.** Each step below is one formula step. Claim it when you
+begin, close it once its real output exists in the conversation. Resolve step
+ids at runtime with
+`beads_list({ label: "step:<key>", mol: "<root-id>" })`.
+
+| Step | Close it when |
+|---|---|
+| `conversation` | you have drawn out intent — questions, playback, and any recon your partner asked for are one continuous phase |
+| `playback` | your partner has corrected your playback and you agree on the description. **Record the size in the close reason** (`size: project` / `size: small change`) |
+| `design-approved` | your partner approved the full description — in chat for a small change, by reading the document for a project |
+| `write-spec` | the document is written and committed, and the four-point self-review is clean. **Project size only** — for a small change, close this and `spec-review` as skipped (`"small change: description agreed in chat"`) and **resolve the gate** (`beads_gate_resolve`), which closes the gated `spec-approved` step in the same call |
+| `spec-review` | the builder check returned and its questions were sorted (§ The Written Design) |
+| `spec-approved` | your partner has reviewed the document and answered the "theirs" pile |
+| `implement` | **project:** leave open — it represents the whole implementation phase, and `writing-plans` creates the task beads under it. **small change:** the work is done directly here; close it when it is done, so `wrap-up`/`verify`/`finish` can run |
+
+**When you claim step N+1, close step N in the same turn.** This applies to
+every handoff between consecutive steps, not just the pairs called out above.
+Closing on time is what keeps `bd mol current --json` honest so the widget
+shows the real current step.
+
+**Gates.** `design-approved` and `spec-approved` each carry a human gate.
+Record the verdict on the step, then resolve the gate so the next step becomes
+ready:
+
+- Approved: `beads_update({ id: "<step-id>", setMetadata: "review.verdict=done" })`
+  then `beads_gate_resolve({ id: "<gate-id>" })` — find the gate via
+  `beads_list({ label: "step:gate-design-approved", mol: "<root-id>" })`.
+- Changes requested: `beads_update({ id: "<step-id>", setMetadata: "review.verdict=iterate" })`,
+  then comment a specific revision summary and loop back. Do NOT resolve the gate.
+
+**Small change:** `spec-approved` is skipped, but its gate still blocks `implement`.
+Resolve it without a verdict: close `write-spec` and `spec-review` as skipped, then
+`beads_gate_resolve({ id: "<spec-approved-gate-id>" })` — the one call resolves the gate
+and closes the gated `spec-approved` step, freeing `implement`. Find it via
+`beads_list({ label: "step:gate-spec-approved", mol: "<root-id>" })`.
+
+> **Read now:** [reference/verdict-recording.md](reference/verdict-recording.md) — resume, changes-requested, and gate-resolve edge cases.
+
+## First: What Do You Actually Know?
+
+Before you reply, ask yourself: what do I know about what they want, and
+why?
+
+- **Everything that matters is in the request** ("make the icon cornflower
+  blue"). This is a quick, clear task. Do it, and say what you did.
+- **Something non-trivial is missing.** Start the conversation.
+
+## Your First Message
+
+Your first message is two things, in this order:
+
+1. One line letting them know that if they'd rather skip the questions and
+   have you just start, they can say so. If they take you up on it, this
+   skill is done: state any significant how-it-gets-made choice
+   (platform, language, medium) in one plain line, then do what they
+   asked through the normal workflow. This path uses no tracking steps; a
+   molecule already poured is simply left where it is.
+2. One open question that gets them describing. Ask about a real moment
+   or a concrete picture: "What's the moment you find yourself wishing
+   this existed?" or "Tell me about the people who'll be in the room."
+
+That's the whole message.
+
+## The Conversation
+
+Each message ends with one question: a single sentence with no list of
+example answers hanging off it. Use plain language, pitched just a little
+above where your human partner is. Match their vocabulary; never use
+process jargon.
+
+Be clear and concise. Lead with what matters. Avoid jargon. When you
+report what you found, give them the most important findings and offer
+the rest.
+
+**Get them describing.** Open questions come first. Their own words carry
+intent that your options can't. Offer a short menu only when they're
+stuck. When they say "just guess" or "what do you think?", propose
+something concrete.
+
+**How it gets made.** Every project rests on choices about medium, tools,
+materials, and resources: the platform, programming language, and
+libraries for an app; the medium for a piece of art. Find out early which
+of those choices they want to make, which they're handing to you, and what
+they already have to work with. Someone with strong views or skills will
+want to talk it through. Someone counting on you needs sensible defaults,
+said in plain words. When there's existing work, build on what it already
+uses. Any choice you make goes in the design as your call, never as
+something they agreed to.
+
+**Ground to cover.** This is territory, not a script. Never read these
+out as questions:
+
+- what kind of thing this is, and what makes it special
+- why now, and what success looks like to them
+- goals, non-goals, and anti-goals (what would make this a failure even
+  if it technically works)
+- prior art: what they've seen elsewhere, loved or hated
+- current state: what exists now, what they've tried
+- the details they care about
+
+**Questions that work** anchor in specifics: "Walk me through the last
+time...", "If it could only do one of these well, which?", "What would
+make you wince if I got it wrong?" A guess they can correct ("I'm
+guessing this is because X keeps biting you?") often beats a question.
+
+**Offer recon.** Once you have a bit of grounding and looking would help,
+offer to go look: their codebase or project, their own files and data,
+or the web. Say what you'd look for. They decide whether you go.
+
+**Think wide privately.** Before you propose anything, come up with
+several ideas and drop the weak ones, including any that fight what
+they've told you about why. Show the comparison only when it helps them
+decide.
+
+**Spike to feel things out.** Agentic work is waterfall, but very, very
+fast. A quick throwaway build is often the cheapest way to learn what
+they want or whether something works. Offer one when it would help.
+When they just want to spike, get out of the way. Spikes get no tests
+or minimal ones, aren't bulletproof, and skip the plan, implementation,
+and review process. Bring what the spike taught you back into the
+conversation.
+
+## Play It Back
+
+Play back as you go. As soon as you understand one part well enough to
+describe it (what it's for and who it serves, say, or how one piece
+behaves), describe that part back in about 200-300 words, then return to
+questions about the next part. Playback and questions alternate through
+the whole conversation; the last chunk covers whatever is left.
+
+Mark anything you're guessing as your guess; only what they said goes in
+as theirs. End each chunk by asking what's wrong or missing.
+
+## Size the Work
+
+Once you understand what they want, pick a size and say it in plain
+words. They can override it.
+
+| Size | The full description | Then |
+|------|----------------------|------|
+| A quick, clear task | the request itself | do it |
+| A small change | in chat | worked directly in the `implement` step |
+| A project with a written design | a written design document | a full plan (for software: superpowers:writing-plans) |
+
+If it grows mid-task, stop, say so, and step up a size.
+
+If this is really several independent projects, say so, agree on an
+order, and brainstorm them one at a time.
+
+**Tracking:** this is the branch that decides the molecule's fate — a small
+change closes `write-spec` and `spec-review` as skipped and resolves the
+`spec-approved` gate, a project works them all. See [Tracking This Session](#tracking-this-session).
+
+## The Written Design
+
+For a project, write a plain document a talented builder in the domain
+could plan from without going back to your human partner. Cover:
+
+- intent and the why
+- goals, non-goals, anti-goals
+- constraints
+- the parts of the how they decided, as they decided them
+- what's left to the builder
+
+**Where it goes:** in a software repo,
+`docs/superpowers/specs/YYYY-MM-DD-<topic>-design.md`, committed.
+Otherwise, ask. Your human partner's preferences override both.
+
+**Builder check:** this is the `spec-review` step. Dispatch a fresh subagent
+with `builder-check-prompt.md` in this directory, blocking
+(`run_in_background: false`) — the document must not be handed over until the
+check is back. Sort what the builder asks into three piles:
+
+- **Answered already** by the conversation or the project: put the answer
+  in the document.
+- **Minor:** a sensible builder could settle it without changing what gets
+  built. Settle it yourself and mark it in the document as your call.
+- **Theirs:** only your human partner can answer it, and the answer changes
+  what gets built.
+
+Bring the "theirs" pile in one message, most important first. Update the
+document with their answers, then hand it over with a short list of the
+calls you made so they can check those while reading. That's the only
+round of questions the check produces. Without a subagent tool, read the
+document as that builder yourself.
+
+<HARD-GATE>
+Nothing gets built until your human partner approves the full
+description: in chat for a small change, the document for a project.
+Building includes writing product code, scaffolding, installing
+dependencies, creating projects, and invoking an implementation skill.
+Reading and exploring are fine. This applies to EVERY project regardless
+of perceived simplicity.
+
+Two exceptions. If they opted out of the questions, the skill is done and
+the gate goes with it. A spike they said yes to may be built; it stays
+labeled throwaway, and keeping what it produced is a new request that
+comes back through this gate.
+
+After a project's document is approved, the next step is the plan. For
+software, print `/plan` for your human partner to run — it loads the
+writing-plans skill via pi's native skill expansion. Do not invoke any
+other skill.
 </HARD-GATE>
 
 <HARD-GATE>
-Do NOT invoke any implementation skill, write any code, scaffold any project, or take any implementation action until you have presented a design and the user has approved it. This applies to EVERY project regardless of perceived simplicity.
+Brainstorming spans many conversation turns, not one. Each tracking step
+is real work: claim it when you begin, close it when its output actually
+exists in the conversation. Never close several in a row within one turn,
+and never treat a step as done because the checklist "looks" finished.
+The failure this guards against is batching step closes to make the widget
+look complete.
 </HARD-GATE>
 
-<HARD-GATE>
-Brainstorming spans many conversation turns, not one. Each checklist item below is real work, not a formality to wave through. Specifically:
-- "Ask clarifying questions" is not satisfied by asking one question. Keep asking, one per turn, across as many real turns as it takes, until you actually understand purpose/constraints/success criteria — and stop after each question to wait for the user's actual reply.
-- Never answer your own question on the user's behalf, assume what they "probably" meant, or draft the rest of the checklist (approaches, design, doc) in the same turn as the question. Each checklist item is completed in its own turn(s), grounded in what the user actually said.
-- Do not mark a checklist item — or the overall brainstorming phase — complete until its real output exists in the conversation: an approved design section, a written+committed spec file, or explicit user sign-off. Marking items complete ahead of that work, or moving on to `writing-plans`/execution because the checklist "looks done," is the failure mode this gate exists to prevent.
-</HARD-GATE>
+## Red Flags
+
+| Thought | Reality |
+|---------|---------|
+| "I'll offer options to save them effort" | Options steer. Ask them to describe it first. |
+| "I'll fill in sensible defaults" | Good. Say them out loud. A default they never heard is one they couldn't reject. |
+| "I should explain the process first" | Ask your question. The process shows itself. |
+| "They said 'sounds good' to the idea" | Approval covers what you showed them. A description you haven't written isn't approved. |
+| "The spike works, I'll keep building on it" | Keeping it is a new request. Back through the gate. |
 
 ## Boundaries
-- Read code and docs: yes
-- Write to docs/superpowers/specs/: yes
-- Edit or create any other files: no
 
-> **Read now:** [reference/anti-patterns.md](reference/anti-patterns.md) — the three anti-patterns (too simple, rushing the checklist, peeking at the repo). Read before starting the checklist.
-## Checklist
-
-**Step 0 — Pour the workflow molecule and show the widget (MANDATORY — see the STOP gate at the top of this skill).** Do this before anything else; the full commands and the existing-epic branch live in that gate. Step 0 is complete only when `beads_mol_pour` **and** `beads_mol_current` have both been called **and** the widget is visible on screen. This applies even when an existing epic already tracks this work — pour a NEW molecule, link it via `discovered-from` (`--type related` if rejected), and leave the existing issue untouched.
-
-**Do not begin Step 1 below until Step 0 is complete.**
-
-Each checklist item from Step 1 on corresponds to one formula step. Claim the step when you begin
-it (`beads_update({ id: "<step-id>", claim: true })`), work it, and close it (`beads_close({ ids: "<step-id>", reason:
-"<one-line summary>" })`) only once its real output actually exists in the conversation (see
-the hard-gate above) — never close several in a row within the same turn. Step ids in
-this molecule: `explore`, `clarify`, `approaches`, `design`, `design-approved` (a gate —
-see After the Design below), then `write-spec`/`spec-review`/`spec-approved` continue
-into spec work, handed off to `writing-plans` at `implement`. Resolve each step id at
-runtime via `beads_list({ label: "step:<key>", mol: "<root-id>" })` — e.g. `step:explore`,
-`step:clarify`, `step:design`, `step:write-spec`; gates are `step:gate-<key>` (e.g.
-`step:gate-design-approved`).
-Close each step bead in the same turn its real output exists (never batch several closes at the end of a phase) — this is what keeps `bd mol current --json` honest so the widget shows the real current step.
-**When you claim step N+1, close step N you just completed in the same turn** — this general rule applies to every handoff between consecutive steps above, not just the specific pairs called out below (e.g. approaches→design).
-
-1. **Explore project context** (`beads_update({ id: "<explore-step-id>", claim: true })`) — check files, docs, recent commits in the **user's current working directory** (not the skill's install directory — see `using-superpowers` → Working Directory). Close with `beads_close({ ids: "<explore-step-id>" })` once done.
-2. **Ask clarifying questions** (`beads_update({ id: "<clarify-step-id>", claim: true })`) — one at a time, across as many turns as it takes, waiting for the user's actual reply each time, until you understand purpose/constraints/success criteria. Do not close this step after a single question.
-3. **Propose 2-3 approaches** (`beads_update({ id: "<approaches-step-id>", claim: true })`) — with trade-offs and your recommendation
-4. **Present design** (`beads_update({ id: "<design-step-id>", claim: true })`) — in sections scaled to their complexity, get user approval after each section. **When you claim the design step, close the approaches step in the same turn — never move forward leaving the previous step open.**
-5. **Write design doc** — save to `docs/superpowers/specs/YYYY-MM-DD-<topic>-design.md` and commit
-6. **Spec self-review** — quick inline check for placeholders, contradictions, ambiguity, scope (see below)
-7. **User reviews written spec** — ask user to review the spec file before proceeding
-8. **Transition to implementation** — print `/plan` for the user to run; the user types it to load the writing-plans skill and create the implementation plan
-
-## After the Design
-
-**Documentation:**
-
-- Write the validated design (spec) to `docs/superpowers/specs/YYYY-MM-DD-<topic>-design.md`
-  - (User preferences for spec location override this default)
-- Commit the design document to git
-> **Read now:** [reference/verdict-recording.md](reference/verdict-recording.md) — resume, changes-requested, and gate-resolve edge cases. Read before recording the design verdict.
-- After presenting the design, record the verdict on the `design-approved` step so a
-  resumed session or the widget can see it without replaying the conversation:
-  - Approved: `beads_update({ id: "<design-approved-id>", setMetadata: "review.verdict=done" })`,
-    then resolve the gate so `write-spec` becomes ready:
-    `beads_gate_resolve({ id: "<design-approved-gate-id>" })` (find the gate id via
-    `beads_list({ label: "step:gate-design-approved", mol: "<root-id>" })`).
-  - Changes requested: `beads_update({ id: "<design-approved-id>", setMetadata: "review.verdict=iterate" })`,
-    then write a specific revision summary and loop back into the design presentation —
-    do NOT resolve the gate. The full procedure and edge cases are in the read-gate above.
-
-**Spec Self-Review:**
-After writing the spec document, look at it with fresh eyes:
-
-1. **Placeholder scan:** Any "TBD", "TODO", incomplete sections, or vague requirements? Fix them.
-2. **Internal consistency:** Do any sections contradict each other? Does the architecture match the feature descriptions?
-3. **Scope check:** Is this focused enough for a single implementation plan, or does it need decomposition?
-4. **Ambiguity check:** Could any requirement be interpreted two different ways? If so, pick one and make it explicit.
-
-Fix any issues inline. No need to re-review — just fix and move on.
-
-**User Review Gate:**
-After the spec review loop passes, ask the user to review the written spec before proceeding:
-
-> "Spec written and committed to `<path>`. Please review it and let me know if you want to make any changes before we start writing out the implementation plan."
-
-Wait for the user's response. If they request changes, make them and re-run the spec review loop. Only proceed once the user approves. **When you claim the spec-approved step, close the spec-review step in the same turn — never move forward leaving the previous step open.**
-
-**Implementation:**
-
-- Print `/plan` for the user to run — the user types it, loading the writing-plans skill via pi expansion, to create a detailed implementation plan
-- Do NOT invoke any other skill. writing-plans is the next step.
-
+| Size | Read code and docs | Write to `docs/superpowers/specs/` | Edit anything else |
+|---|---|---|---|
+| A quick, clear task | yes | no | no — do the work itself |
+| A small change | yes | no (the description lives in chat) | no — the work is done directly in the `implement` step once approved |
+| A project | yes | yes | no |
 
 ## Reference material
 
-- [reference/anti-patterns.md](reference/anti-patterns.md) — the three anti-patterns: too simple, rushing the checklist, peeking at the repo.
+- [reference/anti-patterns.md](reference/anti-patterns.md) — the three anti-patterns: too simple to need a document, rushing the steps, exploring before you pour.
 - [reference/process-flow.md](reference/process-flow.md) — the brainstorming process-flow diagram and the terminal hand-off state.
-- [reference/process-guidance.md](reference/process-guidance.md) — elaboration on understanding the idea, exploring approaches, design for isolation, and working in existing codebases.
+- [reference/process-guidance.md](reference/process-guidance.md) — YAGNI, working in existing codebases, design for isolation (a local addition), and the spec self-review.
 - [reference/verdict-recording.md](reference/verdict-recording.md) — design-verdict edge cases: changes requested, resume, gate-resolve, and close ordering.

@@ -30,6 +30,9 @@ Each task's Acceptance Criteria are also passed as the `acceptance` field in
 - Produces: [what later tasks rely on — exact function names, parameter
   and return types. A task's implementer sees only their own task; this
   block is how they learn the names and types neighboring tasks use.]
+- Constraints: the plan-approval gate bead (`RESULT.gate`), which holds the
+  Global Constraints and Review Focus blocks. Read it before you start —
+  `beads_show({ id: "<plan-approval-gate-bead-id>", full: true })`.
 
 **Acceptance Criteria:**
 - [ ] [observable, checkable outcome — one per line]
@@ -47,12 +50,11 @@ def test_specific_behavior():
 Run: `pytest tests/path/test.py::test_name -v`
 Expected: FAIL with "function not defined"
 
-- [ ] **Step 3: Write minimal implementation**
+- [ ] **Step 3: Implement `function(input: InputType) -> ResultType` in `exact/path/to/file.py`**
 
-```python
-def function(input):
-    return expected
-```
+One line on the approach when the signature and the test leave a choice
+(which library call, which data structure); a code block only for an
+algorithm they do not determine.
 
 - [ ] **Step 4: Run test to verify it passes**
 

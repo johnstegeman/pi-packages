@@ -1,4 +1,6 @@
 import { createHash } from "node:crypto";
+import { readFileSync } from "node:fs";
+import { parseFormulaSteps } from "./formula-parse.mjs";
 
 /**
  * Pure parsing + rendering for the superpowers molecule widget.
@@ -250,18 +252,75 @@ export function pickWorkspaceMolecule(candidates) {
   return best?.frame ?? null;
 }
 
-const EXPLORE_PREFIX = "Explore project context: ";
-
 // ---- topic + phase helpers (superpowers-workflow formula coupling) ----
-// The widget and the formula ship in the same package; these key off the
-// formula's step titles (spec 2026-09-03-superpowers-widget-phase-views-design.md).
+// The widget and the formula ship in the same package. Steps are resolved by the
+// `step:<key>` labels stamped at pour time (spec 2026-09-03-step-labels-at-pour-design.md),
+// so renaming a step's human-readable title cannot silently detach the widget from the
+// formula. A title still carries two things the widget matches by title, though: the topic
+// (its prefix is read from the shipped formula rather than restated here) and the implement
+// head / wrap-up step (`phaseFor` and `isWrapUpStep` below).
+
+const FORMULA_FILE = new URL("../formulas/superpowers-workflow.formula.toml", import.meta.url);
+const TOPIC_VAR = "{{topic}}";
+const CONVERSATION_KEY = "conversation";
+const LEGACY_TOPIC_PREFIX = "Explore project context: ";
+
+/** True when a step carries the `step:<key>` label stamped at pour time. */
+export function hasStepKey(step, key) {
+  return Array.isArray(step?.labels) && step.labels.includes(`step:${key}`);
+}
+
+/** The step carrying `step:<key>`, or undefined. */
+export function stepByKey(steps, key) {
+  return Array.isArray(steps) ? steps.find((s) => hasStepKey(s, key)) : undefined;
+}
+
+/**
+ * The `conversation` step's title template in `formulaSource`, minus `{{topic}}`
+ * (`Draw out intent: {{topic}}` -> `Draw out intent: `). "" when the formula carries no
+ * such step or no topic placeholder.
+ */
+export function topicPrefix(formulaSource) {
+  const conversation = parseFormulaSteps(formulaSource).find((s) => s.id === CONVERSATION_KEY);
+  if (!conversation) return "";
+  const at = conversation.title.indexOf(TOPIC_VAR);
+  return at < 0 ? "" : conversation.title.slice(0, at);
+}
+
+let cachedTopicPrefix;
+
+function shippedTopicPrefix() {
+  if (cachedTopicPrefix === undefined) {
+    let src = "";
+    try {
+      src = readFileSync(FORMULA_FILE, "utf8");
+    } catch {
+      // no readable formula: topicFor falls back to molecule_title
+    }
+    cachedTopicPrefix = topicPrefix(src);
+  }
+  return cachedTopicPrefix;
+}
+
 export function topicFor(state) {
   if (!state || !Array.isArray(state.steps)) return "";
-  const explore = state.steps.find((s) => s.title?.startsWith(EXPLORE_PREFIX));
-  if (explore) {
-    const t = explore.title.slice(EXPLORE_PREFIX.length).trim();
+  const conversation = stepByKey(state.steps, CONVERSATION_KEY);
+  const prefix = shippedTopicPrefix();
+  if (conversation && prefix && conversation.title?.startsWith(prefix)) {
+    const t = conversation.title.slice(prefix.length).trim();
     if (t) return t;
   }
+  // Formula v1 molecules carry no `step:conversation` label: the topic rode on the `explore`
+  // step's title. Read it back from there so an in-flight v1 molecule keeps its real topic
+  // rather than the formula name.
+  const legacyExplore = state.steps.find((s) => s.title?.startsWith(LEGACY_TOPIC_PREFIX));
+  if (legacyExplore) {
+    const t = legacyExplore.title.slice(LEGACY_TOPIC_PREFIX.length).trim();
+    if (t) return t;
+  }
+  // No `step:conversation` label, no legacy `explore` title, no matching title prefix, or no
+  // readable formula: fall back to the molecule title. Molecules poured before pour-time label
+  // stamping (pre-2026-09-03) carry no labels, so they always take this branch.
   return state.molecule_title ?? "";
 }
 
@@ -356,23 +415,18 @@ function themeOf(theme) {
   return theme && typeof theme.fg === "function" ? (c, t) => theme.fg(c, t) : PLAIN_FG;
 }
 
-// ---- phase views (canonical formula-step titles) ----
-const BRAINSTORM_VIEW = [
-  { label: "Explore project context", test: (t) => t.startsWith(EXPLORE_PREFIX) },
-  { label: "Ask clarifying questions", test: (t) => t === "Ask clarifying questions" },
-  { label: "Propose approaches", test: (t) => t === "Propose approaches" },
-  { label: "Present design sections", test: (t) => t === "Present design sections" },
-  { label: "User approves design", test: (t) => t === "User approves design" },
-  { label: "Write spec to docs/superpowers/specs/", test: (t) => t.startsWith("Write spec") },
-  { label: "Spec self-review", test: (t) => t === "Spec self-review" },
-  { label: "User reviews written spec", test: (t) => t === "User reviews written spec" },
+// ---- phase views (formula step keys, resolved by their pour-time `step:<key>` labels) ----
+// Exported so test/widget-formula-coupling.test.mjs can pin them against the shipped formula.
+export const BRAINSTORM_VIEW = [
+  "conversation",
+  "playback",
+  "design-approved",
+  "write-spec",
+  "spec-review",
+  "spec-approved",
 ];
 
-const FINISH_VIEW = [
-  { label: "Verify", test: (t) => t === "Verify" },
-  { label: "Smoke test / manual QA sign-off", test: (t) => t === "Smoke test / manual QA sign-off" },
-  { label: "Finish development branch", test: (t) => t === "Finish development branch" },
-];
+export const FINISH_VIEW = ["verify", "smoke-test-approved", "finish"];
 
 const PHASE_LABEL = {
   brainstorming: "Brainstorming",
@@ -382,8 +436,8 @@ const PHASE_LABEL = {
 
 /** Plan-order chain for the current phase (brainstorm/finish views; implement head + kids). */
 function chainForPhase(state, phase) {
-  if (phase === "brainstorming") return resolveRows(state.steps, BRAINSTORM_VIEW).map((v) => v.step);
-  if (phase === "finishing") return resolveRows(state.steps, FINISH_VIEW).map((v) => v.step);
+  if (phase === "brainstorming") return resolveRows(state.steps, BRAINSTORM_VIEW);
+  if (phase === "finishing") return resolveRows(state.steps, FINISH_VIEW);
   const impl = state.steps.find((s) => /^Implement( |$)/.test(s.title ?? ""));
   if (!impl) return [];
   return [
@@ -404,11 +458,11 @@ function chainForPhase(state, phase) {
   ];
 }
 
-/** Human gates (by formula label) → the review step each one blocks. */
-const GATE_TO_REVIEW_STEP = {
-  "step:gate-design-approved": "User approves design",
-  "step:gate-spec-approved": "User reviews written spec",
-  "step:gate-smoke-test-approved": "Smoke test / manual QA sign-off",
+/** Human gates (by pour-time label) → the formula key of the review step each one blocks. */
+export const GATE_TO_REVIEW_STEP = {
+  "step:gate-design-approved": "design-approved",
+  "step:gate-spec-approved": "spec-approved",
+  "step:gate-smoke-test-approved": "smoke-test-approved",
 };
 
 /**
@@ -424,24 +478,36 @@ export function waitingReviewStep(state, chainOrder) {
   if (inProgress) return null;
   const firstOpen = chainOrder.find((s) => s.step_status !== "done" && s.status !== "closed");
   if (!firstOpen) return null;
-  const label = Object.keys(GATE_TO_REVIEW_STEP).find((l) => GATE_TO_REVIEW_STEP[l] === firstOpen.title);
-  if (!label) return null;
-  const gate = state.steps.find((s) => s.issue_type === "gate" && Array.isArray(s.labels) && s.labels.includes(label));
+  const gateLabel = Object.keys(GATE_TO_REVIEW_STEP).find((l) => hasStepKey(firstOpen, GATE_TO_REVIEW_STEP[l]));
+  if (!gateLabel) return null;
+  const gate = state.steps.find(
+    (s) => s.issue_type === "gate" && Array.isArray(s.labels) && s.labels.includes(gateLabel),
+  );
   if (!gate || gate.status !== "open") return null;
   return firstOpen;
 }
 
 const MAX_LINES = 15;
 
-/** Resolve the canonical view rows against the molecule's steps (missing -> null). */
-function resolveRows(steps, view) {
-  return view
-    .map((v) => {
-      const s = steps.find((x) => v.test(x.title));
-      if (!s) return null;
-      return { label: v.label, step: s };
-    })
-    .filter(Boolean);
+// Formula v1 molecules (step ids explore/clarify/approaches/design) predate the pour-time
+// labels the views key on. When a view key resolves to nothing, fall back to the v1 step(s)
+// that folded into it, so an in-flight v1 molecule keeps its leading rows and the real
+// current step leads — instead of the first surviving row (`design-approved`) being shown
+// as the current one.
+const LEGACY_VIEW_FALLBACK = {
+  conversation: ["explore", "clarify", "approaches"],
+  playback: ["design"],
+};
+
+/** The v1 step standing in for `key`: the first present, not-done one (the live step), else the last present. */
+function legacyStepFor(steps, key) {
+  const present = (LEGACY_VIEW_FALLBACK[key] ?? []).map((k) => stepByKey(steps, k)).filter(Boolean);
+  return present.find((s) => s.step_status !== "done" && s.status !== "closed") ?? present[present.length - 1];
+}
+
+/** Resolve the canonical view keys against the molecule's steps (missing -> dropped; v1 key -> legacy step). */
+function resolveRows(steps, keys) {
+  return keys.map((key) => stepByKey(steps, key) ?? legacyStepFor(steps, key)).filter(Boolean);
 }
 
 /** Keep ≤ justUnder slots, closed rows last; tail `+N more` counts the overflow. */
@@ -541,7 +607,7 @@ export function moleculeWidgetLines(state, width, theme) {
   };
   if (gateCurrent) rows.push(awaitingLine);
 
-  const stepRow = (step, label, lead) => {
+  const stepRow = (step, lead) => {
     const active = step === awaitingStep || (lead && step === lead);
     return {
       text: assemble(
@@ -551,7 +617,7 @@ export function moleculeWidgetLines(state, width, theme) {
             paint: (t) => fg(step.status === "closed" ? "text" : "warning", t),
           },
           { text: ` ${step.id ?? ""}`, paint: (t) => fg("muted", t) },
-          { text: ` ${label ?? step.title ?? ""}`, paint: (t) => fg(step.status === "closed" ? "muted" : "text", t) },
+          { text: ` ${step.title ?? ""}`, paint: (t) => fg(step.status === "closed" ? "muted" : "text", t) },
         ],
         width,
       ).text,
@@ -562,8 +628,8 @@ export function moleculeWidgetLines(state, width, theme) {
 
   if (phase === "brainstorming") {
     const view = resolveRows(state.steps, BRAINSTORM_VIEW);
-    const lead = leadCandidate(view.map((v) => v.step));
-    for (const s of view) rows.push(stepRow(s.step, s.label, lead));
+    const lead = leadCandidate(view);
+    for (const s of view) rows.push(stepRow(s, lead));
   } else if (phase === "implementing") {
     const [impl, ...kids] = chainOrder;
     if (impl) rows.push(stepRow(impl));
@@ -595,12 +661,12 @@ export function moleculeWidgetLines(state, width, theme) {
     // as a top-level row and carries the only ◐ marker.
     const wrapUp = state.steps.find((s) => isWrapUpStep(s.title));
     if (impl.step_status === "done" && wrapUp && wrapUp.step_status !== "done") {
-      rows.push(stepRow(wrapUp, null, wrapUp));
+      rows.push(stepRow(wrapUp, wrapUp));
     }
   } else if (phase === "finishing") {
     const view = resolveRows(state.steps, FINISH_VIEW);
-    const lead = leadCandidate(view.map((v) => v.step));
-    for (const s of view) rows.push(stepRow(s.step, s.label, lead));
+    const lead = leadCandidate(view);
+    for (const s of view) rows.push(stepRow(s, lead));
   }
 
   // Awaiting line when nothing is in progress goes after the view rows, so the

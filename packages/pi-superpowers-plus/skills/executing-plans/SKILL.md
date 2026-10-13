@@ -35,8 +35,13 @@ Call `set_phase({ phase: "development" })`.
    task bead's status and the current/next step.
 2. Review critically — read each task bead's full description
    (`beads_show({ id: "<task-id>" })`) and identify any questions or concerns about the plan.
-3. If concerns: Raise them with your human partner before starting.
-4. If no concerns: confirm the `plan-approved` gate is resolved
+3. Read the plan-level constraints: `beads_show({ id: "<plan-approval-gate-bead-id>", full: true })`.
+   The plan-approval gate bead's description holds the plan-level **Global Constraints** and
+   **Review Focus** blocks, and every task's requirements implicitly include them. On this route
+   nothing else surfaces them to whoever works a task — unlike the subagent-driven route, whose
+   dispatch scripts pass the gate bead directly — so read them before starting.
+4. If concerns: Raise them with your human partner before starting.
+5. If no concerns: confirm the `plan-approved` gate is resolved
    (`beads_show({ id: "<plan-approval-human-gate-id>" })` — status should be `closed`; if not, stop and ask
    the human to run `beads_gate_resolve({ id: "<plan-approval-human-gate-id>" })` before proceeding).
 
@@ -48,7 +53,9 @@ what's unblocked right now):
 1. Claim it: `beads_update({ id: "<task-id>", claim: true })` (atomically sets assignee + `in_progress`).
 2. Follow the task bead's full description exactly (it holds the same bite-sized steps that used to live in a plan file — now they live in the
    task bead's description).
-3. Run verifications as specified in the description.
+3. Run verifications as specified in the description. Record each result in the batch report
+   (Step 3) and the close reason (step 4); when a passing command prints nothing, record
+   `→ (no output)` — a finished task must not read as unfinished.
 4. Close it: `beads_close({ ids: "<task-id>", reason: "<what was done>" })` — this unblocks whatever
    depended on it; re-run `beads_mol_ready({ id: "<implement-step-id>" })` to see the next batch.
 
