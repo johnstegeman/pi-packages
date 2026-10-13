@@ -266,8 +266,7 @@ of perceived simplicity.
 
 Two exceptions. If they opted out of the questions, the gate goes with it —
 the molecule stays, and its skipped steps are closed as skipped (see
-`## Tracking This Session`).
-A spike they said yes to may be built; it stays
+`## Tracking This Session`). A spike they said yes to may be built; it stays
 labeled throwaway, and keeping what it produced is a new request that
 comes back through this gate.
 

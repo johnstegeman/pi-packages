@@ -283,11 +283,12 @@ test("beads guardrail: no prompt source is left unguarded", () => {
 
 test("the brainstorming pour is unconditional", () => {
   const skill = readFileSync(join(root, "skills", "brainstorming", "SKILL.md"), "utf8");
-  assert.match(skill, /\*\*Pour before you speak — unconditionally\.\*\*/);
-  assert.doesNotMatch(skill, /Once the private check says something non-trivial/);
-  assert.doesNotMatch(skill, /there is no molecule, no widget, and no step/);
-  assert.match(skill, /\*\*A document is named\*\*/);
-  assert.match(skill, /the molecule stays, and its skipped steps are closed as skipped/);
+  const flat = skill.replace(/\s+/g, " ");
+  assert.match(flat, /\*\*Pour before you speak — unconditionally\.\*\*/);
+  assert.doesNotMatch(flat, /Once the private check says something non-trivial/);
+  assert.doesNotMatch(flat, /there is no molecule, no widget, and no step/);
+  assert.match(flat, /\*\*A document is named\*\*/);
+  assert.match(flat, /the molecule stays, and its skipped steps are closed as skipped/);
 });
 
 run();
