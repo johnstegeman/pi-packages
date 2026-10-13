@@ -5,13 +5,15 @@
 
 > **Superseded in part (2026-10-13).** §6.1 ("Sizing vs. Step 0") and §7 ("Formula changes") are
 > superseded by `2026-10-13-brainstorming-pour-first-and-explore-design.md`: the pour is
-> unconditional again and `explore` returns as formula step 1 (formula v3). Three further blocks of
-> upstream-derived prose were rewritten or extended locally, outside `## Tracking This Session`, and
-> carry no inline marker: `## First: What Do You Actually Know?` (the pre-check now carries the
-> fast-route offer and the pointer rule), the first `<HARD-GATE>` (the opt-out now keeps the molecule
-> and closes its skipped steps), and `## The Conversation` → **Offer recon** (the request's own
-> referents are read without asking). Re-read all five places against the newer document before the
-> next upstream sync — do not diff-copy them.
+> unconditional again and `explore` returns as formula step 1 (formula v3). Four further blocks of
+> upstream-derived prose were rewritten locally, outside `## Tracking This Session`, and carry no
+> inline marker: `## First: What Do You Actually Know?` (the pre-check now carries the fast-route
+> offer and the pointer rule), the first `<HARD-GATE>` (the opt-out now keeps the molecule and
+> closes its skipped steps), `## Your First Message` (the opt-out is human-only, and a documented
+> intent is not one), and `## The Conversation` → **Offer recon** (the request's own referents are
+> read without asking). `## Size the Work` changed too — its size-table row and its `**Tracking:**`
+> line — as tracking rather than upstream prose. Re-read all seven places against the newer
+> document before the next upstream sync — do not diff-copy them.
 
 **Upstream:** `obra/superpowers` v7.0.0 (released 2026-10-10) — PRs #2463, #2482, #2483, plus the writing-plans rework in the same release
 

@@ -23,6 +23,7 @@ digraph brainstorming {
     "Size the work" -> "Approve the description in chat" [label="small change"];
     "Size the work" -> "Write the document" [label="project"];
     "Approve the description in chat" -> "Close the skipped steps; work it in the implement step" [label="approved"];
+    "Approve the description in chat" -> "Conversation <-> playback" [label="changes requested"];
     "Write the document" -> "Builder check (spec-review)";
     "Builder check (spec-review)" -> "User approves the document?";
     "User approves the document?" -> "Write the document" [label="changes requested"];
@@ -33,8 +34,8 @@ digraph brainstorming {
 **The terminal state:** a **project** hands off — after the user approves the document, print
 **`Type /plan to continue`**; do NOT attempt to invoke writing-plans yourself, the user runs the
 command so the skill loads via pi expansion. Do NOT invoke frontend-design, mcp-builder, or any
-other implementation skill — writing-plans (via `/plan`) is the only onward step.
-A **small change** does not hand off either: its description is approved in chat, the document
-steps are resolved or skipped, and the work is done directly in the `implement` step (close it when
-done). A **fast task** — the human took the opt-out at the first message — likewise works directly
-in `implement`, after the skipped steps are closed as skipped and both human gates are resolved.
+other implementation skill — writing-plans (via `/plan`) is the only onward step. A **small
+change** does not hand off either: its description is approved in chat, the document steps are
+resolved or skipped, and the work is done directly in the `implement` step (close it when done).
+A **fast task** — the human took the opt-out at the first message — likewise works directly in
+`implement`, after the skipped steps are closed as skipped and both human gates are resolved.
