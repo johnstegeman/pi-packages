@@ -4,9 +4,10 @@ description: "You MUST use this before any creative work - creating features, bu
 disable-model-invocation: true
 ---
 
-> **Related skills:** Consider `/skill:using-git-worktrees` to set up an isolated workspace. Only
-> work that sizes to a project continues in `/skill:writing-plans` (run `/plan`); a quick task and
-> a small change both do not. A small change continues in the molecule's `implement` step instead.
+> **Related skills:** Consider `/skill:using-git-worktrees` to set up an isolated
+> workspace. Only work that sizes to a project continues in `/skill:writing-plans`
+> (run `/plan`); a fast task and a small change both do not. A small change
+> continues in the molecule's `implement` step instead.
 
 # Brainstorming
 
@@ -30,7 +31,7 @@ which you *close as skipped* — never whether the molecule exists.
 **Pour before you speak — unconditionally.** Pour the workflow formula and put the widget
 on screen *before* you read any file, run any command, or look at the project in any way.
 This is not a judgement call and it has no exception: an existing bead or epic does not
-release you from pouring.
+release you from pouring:
 
   beads_mol_pour({ proto: "superpowers-workflow", vars: "topic=<topic>" })
 
@@ -95,6 +96,14 @@ Resolve it without a verdict: close `write-spec` and `spec-review` as skipped, t
 and closes the gated `spec-approved` step, freeing `implement`. Find it via
 `beads_list({ label: "step:gate-spec-approved", mol: "<root-id>" })`.
 
+**Fast task:** the human took the opt-out at your first message. The molecule
+still exists, and `explore` is already closed. Close `conversation` and
+`playback` as skipped (`"fast route: human opted out at the first message"`),
+record `review.verdict=done` on `design-approved` (`"fast route: the opt-out is
+the approval"`) and resolve `step:gate-design-approved`, close `write-spec` and
+`spec-review` as skipped, then resolve `step:gate-spec-approved` — which closes
+the gated `spec-approved` step and frees `implement`.
+
 > **Read now:** [reference/verdict-recording.md](reference/verdict-recording.md) — resume, changes-requested, and gate-resolve edge cases.
 
 ## First: What Do You Actually Know?
@@ -115,11 +124,11 @@ yourself: what do I know about what they want, and why?
 Your first message is two things, in this order:
 
 1. One line letting them know that if they'd rather skip the questions and
-   have you just start, they can say so. If they take you up on it, this
-   skill is done: state any significant how-it-gets-made choice
-   (platform, language, medium) in one plain line, then do what they
-   asked through the normal workflow. This path uses no tracking steps; a
-   molecule already poured is simply left where it is.
+   have you just start, they can say so. Only they can take it — you never
+   take it for them, and a documented intent is not an opt-out. If they do,
+   state any significant how-it-gets-made choice (platform, language, medium)
+   in one plain line, close the steps you skipped, and do what they asked in
+   the `implement` step.
 2. One open question that gets them describing. Ask about a real moment
    or a concrete picture: "What's the moment you find yourself wishing
    this existed?" or "Tell me about the people who'll be in the room."
@@ -215,7 +224,7 @@ words. They can override it.
 
 | Size | The full description | Then |
 |------|----------------------|------|
-| A quick, clear task | the request itself | do it |
+| A fast task (they took the opt-out) | the request itself | close the steps you skipped, then work it in the `implement` step |
 | A small change | in chat | worked directly in the `implement` step |
 | A project with a written design | a written design document | a full plan (for software: superpowers:writing-plans) |
 
@@ -224,9 +233,11 @@ If it grows mid-task, stop, say so, and step up a size.
 If this is really several independent projects, say so, agree on an
 order, and brainstorm them one at a time.
 
-**Tracking:** this is the branch that decides the molecule's fate — a small
-change closes `write-spec` and `spec-review` as skipped and resolves the
-`spec-approved` gate, a project works them all. See [Tracking This Session](#tracking-this-session).
+**Tracking:** this is the branch that decides which steps you work — the
+molecule exists either way. A fast task closes every pre-implement step as
+skipped, a small change closes `write-spec`, `spec-review`, and `spec-approved`
+as skipped, and a project works them all. See
+[Tracking This Session](#tracking-this-session).
 
 ## The Written Design
 
@@ -287,7 +298,9 @@ is real work: claim it when you begin, close it when its output actually
 exists in the conversation. Never close several in a row within one turn,
 and never treat a step as done because the checklist "looks" finished.
 The failure this guards against is batching step closes to make the widget
-look complete.
+look complete. One exception: on a **fast route** the human has just
+approved, the skipped steps may be closed in a single turn — they were
+considered and declined, and the close reason is what records that.
 </HARD-GATE>
 
 ## Red Flags
@@ -306,7 +319,7 @@ look complete.
 
 | Size | Read code and docs | Write to `docs/superpowers/specs/` | Edit anything else |
 |---|---|---|---|
-| A quick, clear task | yes | no | no — do the work itself |
+| A fast task (they took the opt-out) | yes | no | no — the work is done in the `implement` step |
 | A small change | yes | no (the description lives in chat) | no — the work is done directly in the `implement` step once approved |
 | A project | yes | yes | no |
 

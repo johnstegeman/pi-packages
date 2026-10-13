@@ -53,3 +53,23 @@ order-enforcement above), so a small change never closes that step on its own.
 that its questions were sorted into the three piles — not that a self-review happened. The
 mechanical four-point self-review belongs to writing the document and is recorded in
 `write-spec`'s close reason instead (see [process-guidance.md](process-guidance.md)).
+
+## The fast route
+
+When the human takes the opt-out at your first message, the molecule stays and `explore` is already
+closed — it runs before that message. Close the rest of the pre-implement steps in order; close
+order is enforced, so each becomes closable only once the previous step closes or its gate
+resolves.
+
+1. `beads_close({ ids: "<conversation-id>", reason: "fast route: human opted out at the first message" })`
+2. `beads_close({ ids: "<playback-id>", reason: "fast route: human opted out at the first message" })`
+3. `beads_update({ id: "<design-approved-id>", setMetadata: "review.verdict=done" })` — the opt-out
+   *is* the approval — then `beads_gate_resolve({ id: "<step:gate-design-approved-gate-id>" })`,
+   which resolves the gate and closes the gated `design-approved` step in one call.
+4. `beads_close({ ids: "<write-spec-id>", reason: "fast route: human opted out at the first message" })`
+5. `beads_close({ ids: "<spec-review-id>", reason: "fast route: human opted out at the first message" })`
+6. `beads_gate_resolve({ id: "<step:gate-spec-approved-gate-id>" })` — resolves the gate and closes
+   `spec-approved`, freeing `implement`.
+
+This is the one place the batch-close rule bends: the closes in steps 1–2 and 4–5 may happen in a
+single turn, because the human has just declined those steps and the close reason records it.
