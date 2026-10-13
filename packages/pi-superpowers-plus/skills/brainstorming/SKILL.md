@@ -64,7 +64,7 @@ ids at runtime with
 
 | Step | Close it when |
 |---|---|
-| `conversation` | you have drawn out intent — questions, playback, and any recon your partner asked for are one continuous phase |
+| `conversation` | you have drawn out intent — questions, playback, and any recon your partner asked for are one continuous phase. Every line of **Ground to cover** is either what they told you or your call — name which in the close reason |
 | `playback` | your partner has corrected your playback and you agree on the description. **Record the size in the close reason** (`size: project` / `size: small change`) |
 | `design-approved` | your partner approved the full description — in chat for a small change, by reading the document for a project |
 | `write-spec` | the document is written and committed, and the four-point self-review is clean. **Project size only** — for a small change, close this and `spec-review` as skipped (`"small change: description agreed in chat"`) and **resolve the gate** (`beads_gate_resolve`), which closes the gated `spec-approved` step in the same call |
@@ -156,6 +156,14 @@ out as questions:
 - prior art: what they've seen elsewhere, loved or hated
 - current state: what exists now, what they've tried
 - the details they care about
+
+**Enough is not a number.** Ask as many questions as the load-bearing decisions need —
+often more than one, and for a request that already states every decision that matters
+("make the icon cornflower blue") none at all. The test is coverage, not count: a
+decision is load-bearing when a wrong guess changes what gets built. Walk the **Ground
+to cover** list before you size the work, and be able to say of each line either what
+they told you or that it's your call — and say it out loud when it's your call. *(A
+local addition: upstream leaves the question count to the model's judgement.)*
 
 **Questions that work** anchor in specifics: "Walk me through the last
 time...", "If it could only do one of these well, which?", "What would
@@ -276,6 +284,8 @@ look complete.
 | Thought | Reality |
 |---------|---------|
 | "I'll offer options to save them effort" | Options steer. Ask them to describe it first. |
+| "They answered my first question, so the intent is clear" | Clear about what they said, not about what they didn't. Walk the ground-to-cover list before sizing. |
+| "I'll ask a few more questions to be thorough" | A question they can't answer better than you is noise. Ask when a wrong guess would change what gets built. |
 | "I'll fill in sensible defaults" | Good. Say them out loud. A default they never heard is one they couldn't reject. |
 | "I should explain the process first" | Ask your question. The process shows itself. |
 | "They said 'sounds good' to the idea" | Approval covers what you showed them. A description you haven't written isn't approved. |
