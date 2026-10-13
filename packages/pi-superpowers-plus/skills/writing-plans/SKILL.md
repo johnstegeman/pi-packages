@@ -15,9 +15,7 @@ disable-model-invocation: true
 
 ## Overview
 
-Write comprehensive implementation plans assuming the engineer has zero context for our codebase and questionable taste. Document everything they need to know: which files to touch for each task, code, testing, docs they might need to check, how to test it. Give them the whole plan as bite-sized tasks. DRY. YAGNI. TDD. Frequent commits.
-
-Assume they are a skilled developer, but know almost nothing about our toolset or problem domain. Assume they don't know good test design very well.
+Write implementation plans for an engineer who has not seen this codebase or this spec. Assume they write idiomatic code in the project's language once they know the exact interface and the exact test, and that they will make a reasonable choice wherever the plan leaves one open. What they cannot know is what you decided: which files, which names and signatures, which values from the spec, which tests prove each task. Document those. Give them the whole plan as bite-sized tasks. DRY. YAGNI. TDD. Frequent commits.
 
 **Announce at start:** "I'm using the writing-plans skill to create the implementation plan."
 Call `set_phase({ phase: "brainstorming" })`
@@ -60,9 +58,9 @@ deliverable needs them; split only where a reviewer could meaningfully
 reject one task while approving its neighbor. Each task ends with an
 independently testable deliverable.
 
-## Bite-Sized Task Granularity
+## Step Granularity
 
-**Each step is one action (2-5 minutes):**
+**Each step is one action with a checkable result:**
 - "Write the failing test" - step
 - "Run it to make sure it fails" - step
 - "Implement the minimal code to make the test pass" - step
@@ -89,13 +87,36 @@ multiple create calls for the same plan.
 
 > **Read now:** [reference/creating-task-beads.md](reference/creating-task-beads.md) — the single `beads_create_list` call, plan-order rule, and plan-approval verdict recording. Read before creating task beads.
 
+## What a Step Contains
+
+A step is done when the implementer can write exactly one reasonable thing
+from it. That is the whole requirement: unambiguous, not complete. Each kind
+of step carries what makes it unambiguous and nothing more:
+
+- **A test step:** the test's name and its assertions, as code, with the
+  spec's exact values in them.
+- **A code step:** the exact signature (name, parameters, return type), the
+  file it lives in, and the specific values the spec pins. The implementer
+  writes the body. A body appears only for an algorithm the signature and
+  tests do not determine, or for exact copy the spec fixes.
+- **A verification step:** the command to run and the output that means it
+  passed.
+- **A reference to another task:** that task's Interfaces block says what
+  to use; the plan does not repeat that task's code.
+
+A plan is the set of decisions the implementer cannot make alone. A plan
+longer than the code it describes has written the code instead. Lines that
+decide nothing ("TBD", "handle edge cases", "add appropriate validation",
+"write tests for the above", a type or function no task defines) are the
+opposite failure, and the self-review catches both.
+
 ## Self-Review
 
 After writing the complete plan, look at the spec with fresh eyes and check the plan against it. This is a checklist you run yourself — not a subagent dispatch.
 
 **1. Spec coverage:** Skim each section/requirement in the spec. Can you point to a task that implements it? List any gaps.
 
-**2. Placeholder scan:** Search your plan for red flags — any of the patterns in [reference/red-flags.md](reference/red-flags.md). Fix them.
+**2. Step scan:** Search your plan for the red flags in [reference/red-flags.md](reference/red-flags.md). Every step must let the implementer write exactly one reasonable thing, and no step may carry more than that: a line that decides nothing is a gap, a function body the signature and tests already determine is a transcript. Fix both.
 
 **3. Type consistency:** Do the types, method signatures, and property names you used in later tasks match what you defined in earlier tasks? A function called `clearLayers()` in Task 3 but `clearFullLayers()` in Task 7 is a bug.
 
@@ -105,6 +126,8 @@ After writing the complete plan, look at the spec with fresh eyes and check the 
    `write-spec`/`spec-approved`/`plan-approved`, not to a task under `implement`. Any
    task that duplicates formula-owned work is a plan bug: remove it before wiring tasks
    into beads in Step 3 below.
+
+**5. Proportion:** Compare the plan's length to the spec's. A plan several times longer than the spec it implements is a transcript of the program, not a plan. If code blocks are most of the document, replace bodies with signatures, test names and assertions, and check that each step is still unambiguous.
 
 If you find issues, fix them inline. No need to re-review — just fix and move on. If you find a spec requirement with no task, add the task.
 
@@ -153,4 +176,4 @@ Alternatively, use `/execute` to enter the execution phase (presents both option
 
 - [reference/task-template.md](reference/task-template.md) — the exact task-bead description template and the optional Gate line.
 - [reference/creating-task-beads.md](reference/creating-task-beads.md) — the single `beads_create_list` call, plan-order rule, gate description, and plan-approval verdict recording.
-- [reference/red-flags.md](reference/red-flags.md) — the placeholder red-flag catalog scanned during Self-Review item 2.
+- [reference/red-flags.md](reference/red-flags.md) — the step red-flag catalog scanned during Self-Review item 2.
