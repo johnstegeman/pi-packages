@@ -291,4 +291,17 @@ test("the brainstorming pour is unconditional", () => {
   assert.match(flat, /the molecule stays, and its skipped steps are closed as skipped/);
 });
 
+test("the brainstorming step table carries explore and the document-coverage close", () => {
+  const skill = readFileSync(join(root, "skills", "brainstorming", "SKILL.md"), "utf8");
+  // Flatten whitespace first: these phrases live in prose wrapped at ~80 columns, so a
+  // literal-space match would pin the wrap point rather than the content (the human's ruling on
+  // Task 2's review; see the fix commit 87e7367 for the same pattern).
+  const flat = skill.replace(/\s+/g, " ");
+  assert.match(flat, /\|\s*`explore`\s*\|/);
+  assert.match(flat, /It runs \*\*before\*\* your first message and is never skipped/);
+  assert.match(flat, /what the document `explore` read says/);
+  assert.match(flat, /the written document is approved later, at `spec-approved`/);
+  assert.match(flat, /you read as `explore`, without asking/);
+});
+
 run();

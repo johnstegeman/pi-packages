@@ -65,9 +65,10 @@ ids at runtime with
 
 | Step | Close it when |
 |---|---|
-| `conversation` | you have drawn out intent — questions, playback, and any recon your partner asked for are one continuous phase. Every line of **Ground to cover** is either what they told you or your call — name which in the close reason |
+| `explore` | you have read what the request points at — the bead, the spec, the named files — plus enough context to make your first message intelligent. Name what you read and what it told you. It runs **before** your first message and is never skipped |
+| `conversation` | you have drawn out intent — questions, playback, and any recon your partner asked for are one continuous phase. Every line of **Ground to cover** is either what they told you, **what the document `explore` read says**, or your call — name which in the close reason. When the document settles everything, say so and ask nothing |
 | `playback` | your partner has corrected your playback and you agree on the description. **Record the size in the close reason** (`size: project` / `size: small change`) |
-| `design-approved` | your partner approved the full description — in chat for a small change, by reading the document for a project |
+| `design-approved` | your partner approved the full description — in chat, for both sizes. For a project this is the design as played back; the written document is approved later, at `spec-approved` |
 | `write-spec` | the document is written and committed, and the four-point self-review is clean. **Project size only** — for a small change, close this and `spec-review` as skipped (`"small change: description agreed in chat"`) and **resolve the gate** (`beads_gate_resolve`), which closes the gated `spec-approved` step in the same call |
 | `spec-review` | the builder check returned and its questions were sorted (§ The Written Design) |
 | `spec-approved` | your partner has reviewed the document and answered the "theirs" pile |
@@ -178,6 +179,11 @@ guessing this is because X keeps biting you?") often beats a question.
 **Offer recon.** Once you have a bit of grounding and looking would help,
 offer to go look: their codebase or project, their own files and data,
 or the web. Say what you'd look for. They decide whether you go.
+This is about investigation beyond the request's own referents: what the
+request *names* — the bead, the spec, the file — you read as `explore`, without
+asking.
+investigation beyond the request's own referents: what the request *names* — the bead,
+the spec, the file — you read as `explore`, without asking.
 
 **Think wide privately.** Before you propose anything, come up with
 several ideas and drop the weak ones, including any that fight what
