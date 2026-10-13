@@ -12,16 +12,16 @@ Changes-requested commands are in `SKILL.md`; this file covers the surrounding p
 
 `beads_update({ id: "<design-approved-id>", setMetadata: "review.verdict=iterate" })`, then write a specific revision summary naming exactly
 which sections/assumptions/questions need another pass:
-`beads_comment({ id: "<design-approved-id>", text: "<what needs to change>" })`. Re-claim `design`
-(`beads_update({ id: "<design-step-id>", claim: true })`) and loop back into Step 2's design-
-presentation work — do NOT resolve the gate. Never treat "changes requested" as
+`beads_comment({ id: "<design-approved-id>", text: "<what needs to change>" })`. Re-claim `playback`
+(`beads_update({ id: "<playback-step-id>", claim: true })`) and loop back into the
+playback work — do NOT resolve the gate. Never treat "changes requested" as
 an unstructured do-over: the revision summary is what the next pass reads before
 touching the design again.
 
 ## On resume
 
 On resume (new session, or picking this back up after a gap): read the design
-content already written (`beads_show({ id: "<design-step-id>" })`) plus the latest verdict and
+content already agreed (`beads_show({ id: "<playback-step-id>" })`) plus the latest verdict and
 revision summary (`beads_show({ id: "<design-approved-id>" })`) before continuing — revise the
 existing design in place; never discard earlier answered questions, approach
 trade-offs, or already-approved sections.
@@ -39,3 +39,10 @@ Closing steps is order-enforced: `beads_close({ ids: "<step>" })` fails ("blocke
 unblocks the dependent step and closes the gate bead itself in one call — e.g. after
 `writing-plans` reveals the plan, a single `beads_gate_resolve` on the plan-approval gate
 handles both resolve and close, so no separate close is needed.
+
+## `spec-review`'s close
+
+`spec-review` is the builder check. Its close reason asserts that the check *returned* and
+that its questions were sorted into the three piles — not that a self-review happened. The
+mechanical four-point self-review belongs to writing the document and is recorded in
+`write-spec`'s close reason instead (see [process-guidance.md](process-guidance.md)).

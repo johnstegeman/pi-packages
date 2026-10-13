@@ -1,6 +1,6 @@
 formula = "superpowers-workflow"
 description = "Brainstorm -> design -> plan -> implement -> wrap-up -> verify -> finish"
-version = 1
+version = 2
 type = "workflow"
 
 [vars.topic]
@@ -8,33 +8,21 @@ description = "The feature/topic being brainstormed"
 required = true
 
 [[steps]]
-id = "explore"
-title = "Explore project context: {{topic}}"
+id = "conversation"
+title = "Draw out intent: {{topic}}"
 type = "task"
 
 [[steps]]
-id = "clarify"
-title = "Ask clarifying questions"
+id = "playback"
+title = "Play back understanding"
 type = "task"
-needs = ["explore"]
-
-[[steps]]
-id = "approaches"
-title = "Propose approaches"
-type = "task"
-needs = ["clarify"]
-
-[[steps]]
-id = "design"
-title = "Present design sections"
-type = "task"
-needs = ["approaches"]
+needs = ["conversation"]
 
 [[steps]]
 id = "design-approved"
-title = "User approves design"
+title = "User approves the full description"
 type = "task"
-needs = ["design"]
+needs = ["playback"]
 
 [steps.gate]
 type = "human"
@@ -47,7 +35,7 @@ needs = ["design-approved"]
 
 [[steps]]
 id = "spec-review"
-title = "Spec self-review"
+title = "Builder check"
 type = "task"
 needs = ["write-spec"]
 
