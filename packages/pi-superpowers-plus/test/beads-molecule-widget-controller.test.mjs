@@ -1,6 +1,19 @@
 import assert from "node:assert/strict";
 import { createMoleculeWidgetController, resolveBdTimeout } from "../extensions/beads-molecule-widget-controller.mjs";
 
+// The `step:<key>` label `bd mol pour` stamps for a fixture title; the widget resolves
+// its phase-view rows by that label, not by the human-readable title.
+const keyForTitle = (title) => {
+  if (title.startsWith("Draw out intent")) return "conversation";
+  if (title === "Play back understanding") return "playback";
+  if (title === "User approves the full description") return "design-approved";
+  if (title === "Write spec to docs/superpowers/specs/") return "write-spec";
+  if (title === "Builder check") return "spec-review";
+  if (title === "User reviews written spec") return "spec-approved";
+  if (title.startsWith("Implement")) return "implement";
+  return "";
+};
+
 const raw = (id, current, impl) =>
   JSON.stringify([
     {
@@ -10,12 +23,24 @@ const raw = (id, current, impl) =>
       next_step: null,
       steps: [
         {
-          issue: { id: `${id}.1`, title: current, issue_type: "task", status: "in_progress" },
+          issue: {
+            id: `${id}.1`,
+            title: current,
+            labels: [`step:${keyForTitle(current)}`],
+            issue_type: "task",
+            status: "in_progress",
+          },
           status: "current",
           is_current: true,
         },
         {
-          issue: { id: `${id}.2`, title: impl, issue_type: "task", status: "open" },
+          issue: {
+            id: `${id}.2`,
+            title: impl,
+            labels: [`step:${keyForTitle(impl)}`],
+            issue_type: "task",
+            status: "open",
+          },
           status: "pending",
           is_current: false,
         },
@@ -23,8 +48,8 @@ const raw = (id, current, impl) =>
     },
   ]);
 
-const RAW_A = raw("bd-mol-A", "Ask clarifying questions", "Implement A");
-const RAW_B = raw("bd-mol-B", "Propose approaches", "Implement B");
+const RAW_A = raw("bd-mol-A", "Play back understanding", "Implement A");
+const RAW_B = raw("bd-mol-B", "User approves the full description", "Implement B");
 
 function makeFakeUi() {
   const calls = [];
@@ -86,7 +111,7 @@ function makeClock(start = 1_000_000) {
   assert.deepEqual(calls.at(-1), ["bd", "mol", "current", "--json"], "no-id inference on first bind");
   const lines = ui.lastLines();
   assert.ok(
-    lines?.some((l) => l.includes("Ask clarifying questions")),
+    lines?.some((l) => l.includes("Play back understanding")),
     `rendered frame: ${lines}`,
   );
 }
@@ -109,10 +134,10 @@ function makeClock(start = 1_000_000) {
   controller.render();
   const lines = ui.lastLines();
   assert.ok(
-    lines.some((l) => l.includes("Propose approaches")),
+    lines.some((l) => l.includes("User approves the full description")),
     `newest frame wins: ${lines}`,
   );
-  assert.ok(!lines.some((l) => l.includes("Ask clarifying questions")), `stale frame discarded: ${lines}`);
+  assert.ok(!lines.some((l) => l.includes("Play back understanding")), `stale frame discarded: ${lines}`);
 }
 
 // ---------- unbindSession: cancels timer, unsubscribes, resets, discards in-flight ----------
@@ -171,14 +196,14 @@ function makeClock(start = 1_000_000) {
   await tick();
   const seeded = ui.lastLines();
   assert.ok(
-    seeded?.some((l) => l.includes("Ask clarifying questions")),
+    seeded?.some((l) => l.includes("Play back understanding")),
     `frame seeded before transient failure: ${seeded}`,
   );
   await controller.refresh(); // transient non-zero error
   controller.render();
   const after = ui.lastLines();
   assert.ok(
-    after?.some((l) => l.includes("Ask clarifying questions")),
+    after?.some((l) => l.includes("Play back understanding")),
     `transient failure keeps the prior frame: ${after}`,
   );
   assert.equal(warns.length, 1, "transient failure warns and is non-fatal");
@@ -200,7 +225,7 @@ function makeClock(start = 1_000_000) {
   controller.bindSession({ ui, cwd: "/repo" }); // seeds a frame
   await tick();
   assert.ok(
-    ui.lastLines()?.some((l) => l.includes("Ask clarifying questions")),
+    ui.lastLines()?.some((l) => l.includes("Play back understanding")),
     "frame seeded before clean not-found",
   );
   await controller.refresh(); // clean not-found
@@ -257,7 +282,7 @@ function makeClock(start = 1_000_000) {
   controller.render();
   assert.equal(calls.at(-1)?.cwd, "/repo-new", "setCwd refreshes against the new cwd");
   assert.ok(
-    ui.lastLines()?.some((l) => l.includes("Ask clarifying questions")),
+    ui.lastLines()?.some((l) => l.includes("Play back understanding")),
     "setCwd renders the refreshed frame",
   );
 }
@@ -280,10 +305,10 @@ function makeClock(start = 1_000_000) {
   controller.render();
   const lines = ui.lastLines();
   assert.ok(
-    lines.some((l) => l.includes("Propose approaches")),
+    lines.some((l) => l.includes("User approves the full description")),
     `newest frame wins: ${lines}`,
   );
-  assert.ok(!lines.some((l) => l.includes("Ask clarifying questions")), `stale clear discarded: ${lines}`);
+  assert.ok(!lines.some((l) => l.includes("Play back understanding")), `stale clear discarded: ${lines}`);
 }
 
 // ---------- bindSession idempotency + triggerChange no-op ----------
@@ -353,7 +378,7 @@ function makeClock(start = 1_000_000) {
   assert.equal(calls.length, 1, "the first change issues exactly one bd query");
   assert.equal(calls.at(-1)?.cwd, "/repo-2", "refresh uses the latest cwd");
   assert.ok(
-    ui.lastLines()?.some((l) => l.includes("Ask clarifying questions")),
+    ui.lastLines()?.some((l) => l.includes("Play back understanding")),
     "the first change paints the frame",
   );
 
@@ -396,7 +421,7 @@ const roots = (entries) => JSON.stringify(entries.map((e) => ({ issue_type: "mol
   assert.deepEqual(calls[0], ["bd", "list", "--type", "molecule", "--label", "ws:k1", "--json"]);
   assert.deepEqual(calls[1], ["bd", "mol", "current", "bd-mol-A", "--json"]);
   assert.ok(
-    ui.lastLines()?.some((l) => l.includes("Ask clarifying questions")),
+    ui.lastLines()?.some((l) => l.includes("Play back understanding")),
     `rendered: ${ui.lastLines()}`,
   );
 }
@@ -423,7 +448,7 @@ const roots = (entries) => JSON.stringify(entries.map((e) => ({ issue_type: "mol
   controller.bindSession({ ui, cwd: "/repo", workspaceKey: "k1" });
   await tick();
   assert.ok(
-    ui.lastLines()?.some((l) => l.includes("Propose approaches")),
+    ui.lastLines()?.some((l) => l.includes("User approves the full description")),
     `active wins: ${ui.lastLines()}`,
   );
 }
@@ -440,7 +465,7 @@ const roots = (entries) => JSON.stringify(entries.map((e) => ({ issue_type: "mol
   });
   controller.bindSession({ ui, cwd: "/repo", workspaceKey: "k1" });
   await tick();
-  assert.ok(ui.lastLines()?.some((l) => l.includes("Ask clarifying questions")));
+  assert.ok(ui.lastLines()?.some((l) => l.includes("Play back understanding")));
 }
 
 // ---------- workspace: no roots + two global candidates -> clear ----------
@@ -558,10 +583,10 @@ const roots = (entries) => JSON.stringify(entries.map((e) => ({ issue_type: "mol
   controller.render();
   const lines = ui.lastLines();
   assert.ok(
-    lines.some((l) => l.includes("Propose approaches")),
+    lines.some((l) => l.includes("User approves the full description")),
     `newest workspace frame wins: ${lines}`,
   );
-  assert.ok(!lines.some((l) => l.includes("Ask clarifying questions")), `stale frame discarded: ${lines}`);
+  assert.ok(!lines.some((l) => l.includes("Play back understanding")), `stale frame discarded: ${lines}`);
 }
 
 // ---------- workspace: lock held -> list skipped ----------
@@ -603,11 +628,11 @@ const roots = (entries) => JSON.stringify(entries.map((e) => ({ issue_type: "mol
   });
   controller.bindSession({ ui, cwd: "/repo", workspaceKey: "k1" });
   await tick();
-  assert.ok(ui.lastLines()?.some((l) => l.includes("Ask clarifying questions")));
+  assert.ok(ui.lastLines()?.some((l) => l.includes("Play back understanding")));
   controller.setCwd("/repo2", { workspaceKey: "k2" });
   await tick();
   assert.ok(
-    ui.lastLines()?.some((l) => l.includes("Propose approaches")),
+    ui.lastLines()?.some((l) => l.includes("User approves the full description")),
     `key change re-resolves: ${ui.lastLines()}`,
   );
 }
@@ -770,7 +795,7 @@ const roots = (entries) => JSON.stringify(entries.map((e) => ({ issue_type: "mol
   controller.render();
   assert.equal(warns.length, 0, "a lock that clears on retry emits zero warnings");
   assert.ok(
-    ui.lastLines()?.some((l) => l.includes("Ask clarifying questions")),
+    ui.lastLines()?.some((l) => l.includes("Play back understanding")),
     `frame applied after the lock clears: ${ui.lastLines()}`,
   );
 }
@@ -902,7 +927,7 @@ const immediateTimers = {
   assert.equal(calls, 1, "a code-0 result containing lock text is never retried");
   assert.equal(warns.length, 0, "a code-0 result emits no warning");
   assert.ok(
-    ui.lastLines()?.some((l) => l.includes("Ask clarifying questions")),
+    ui.lastLines()?.some((l) => l.includes("Play back understanding")),
     "a code-0 result still paints the frame",
   );
 }
@@ -950,7 +975,7 @@ const immediateTimers = {
   assert.equal(call, 2, "cancelled attempt is retried once");
   assert.equal(warns.length, 0, "happy retry emits no warning");
   assert.ok(
-    ui.lastLines()?.some((l) => l.includes("Ask clarifying questions")),
+    ui.lastLines()?.some((l) => l.includes("Play back understanding")),
     "frame painted after retry",
   );
 }
@@ -974,7 +999,7 @@ const immediateTimers = {
   controller.bindSession({ ui, cwd: "/repo" });
   await tick();
   assert.ok(
-    ui.lastLines()?.some((l) => l.includes("Ask clarifying questions")),
+    ui.lastLines()?.some((l) => l.includes("Play back understanding")),
     "seeded frame",
   );
   const before = call;
@@ -982,7 +1007,7 @@ const immediateTimers = {
   assert.equal(call - before, 2, "cancellation retried once (2 attempts) then gave up");
   assert.equal(warns.length, 0, "an exhausted cancellation is silent");
   assert.ok(
-    ui.lastLines()?.some((l) => l.includes("Ask clarifying questions")),
+    ui.lastLines()?.some((l) => l.includes("Play back understanding")),
     "prior frame kept",
   );
 }
@@ -1008,7 +1033,7 @@ const immediateTimers = {
   await controller.refresh();
   assert.equal(warns.length, 0, "an exhausted lock is silent");
   assert.ok(
-    ui.lastLines()?.some((l) => l.includes("Ask clarifying questions")),
+    ui.lastLines()?.some((l) => l.includes("Play back understanding")),
     "prior frame kept through a contention episode",
   );
 }
@@ -1035,7 +1060,7 @@ const immediateTimers = {
   controller.bindSession({ ui, cwd: "/repo", workspaceKey: "k1" });
   await tick();
   assert.ok(
-    ui.lastLines()?.some((l) => l.includes("Ask clarifying questions")),
+    ui.lastLines()?.some((l) => l.includes("Play back understanding")),
     "frame seeded before the contention episode",
   );
   mode = "lock";
@@ -1046,7 +1071,7 @@ const immediateTimers = {
   await controller.refresh();
   assert.equal(calls.length, frozen, "no bd calls while cooling down");
   assert.ok(
-    ui.lastLines()?.some((l) => l.includes("Ask clarifying questions")),
+    ui.lastLines()?.some((l) => l.includes("Play back understanding")),
     "prior frame kept through the cooldown",
   );
   clock.advance(2500);
@@ -1107,7 +1132,7 @@ const immediateTimers = {
   assert.equal(warns.length, 0, "the bypass probe is silent");
   controller.render();
   assert.ok(
-    ui.lastLines()?.some((l) => l.includes("Ask clarifying questions")),
+    ui.lastLines()?.some((l) => l.includes("Play back understanding")),
     "prior frame is still displayed while the cooldown is active",
   );
 
@@ -1121,7 +1146,7 @@ const immediateTimers = {
   await controller.refresh();
   assert.ok(calls.length > beforeCooldown, "resumes after the doubled cooldown expires");
   assert.ok(
-    ui.lastLines()?.some((l) => l.includes("Ask clarifying questions")),
+    ui.lastLines()?.some((l) => l.includes("Play back understanding")),
     "frame painted after resuming",
   );
 }

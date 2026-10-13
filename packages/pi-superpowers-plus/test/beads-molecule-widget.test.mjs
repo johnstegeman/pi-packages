@@ -106,7 +106,8 @@ const RAW = JSON.stringify([
     molecule_title: "superpowers-workflow",
     current_step: {
       id: "bd-mol-1vz",
-      title: "Ask clarifying questions",
+      title: "Play back understanding",
+      labels: ["step:playback"],
       status: "in_progress",
       issue_type: "task",
       started_at: "2026-09-02T15:34:18Z",
@@ -116,7 +117,8 @@ const RAW = JSON.stringify([
       {
         issue: {
           id: "bd-mol-meq",
-          title: "Explore project context: Superpowers widget changes",
+          title: "Draw out intent: Superpowers widget changes",
+          labels: ["step:conversation"],
           issue_type: "task",
           status: "closed",
         },
@@ -124,7 +126,13 @@ const RAW = JSON.stringify([
         is_current: false,
       },
       {
-        issue: { id: "bd-mol-1vz", title: "Ask clarifying questions", issue_type: "task", status: "in_progress" },
+        issue: {
+          id: "bd-mol-1vz",
+          title: "Play back understanding",
+          labels: ["step:playback"],
+          issue_type: "task",
+          status: "in_progress",
+        },
         status: "current",
         is_current: true,
       },
@@ -140,7 +148,13 @@ const RAW = JSON.stringify([
         is_current: false,
       },
       {
-        issue: { id: "bd-mol-9ev", title: "Implement", issue_type: "task", status: "open" },
+        issue: {
+          id: "bd-mol-9ev",
+          title: "Implement",
+          labels: ["step:implement"],
+          issue_type: "task",
+          status: "open",
+        },
         status: "pending",
         is_current: false,
       },
@@ -151,7 +165,7 @@ const parsed = parseMoleculeCurrent(RAW);
 assert.equal(parsed.molecule_id, "bd-mol-g0z");
 assert.equal(parsed.doneCount, 1);
 assert.equal(parsed.total, 4);
-assert.equal(parsed.steps[0].title, "Explore project context: Superpowers widget changes");
+assert.equal(parsed.steps[0].title, "Draw out intent: Superpowers widget changes");
 assert.equal(parsed.steps[1].step_status, "current");
 assert.equal(parsed.steps[1].is_current, true);
 assert.equal(parsed.steps[0].created_at, "");
@@ -160,7 +174,7 @@ assert.deepEqual(parsed.steps[2].labels, ["step:gate-design-approved"]);
 // ---------- topic + phase helpers ----------
 assert.equal(topicFor(parsed), "Superpowers widget changes");
 assert.equal(
-  topicFor({ ...parsed, steps: parsed.steps.filter((s) => !s.title.startsWith("Explore")) }),
+  topicFor({ ...parsed, steps: parsed.steps.filter((s) => !s.labels.includes("step:conversation")) }),
   "superpowers-workflow",
 );
 assert.equal(topicFor(null), "");
@@ -207,18 +221,19 @@ assert.equal(
 assert.deepEqual(moleculeWidgetLines(null, 80), []);
 assert.deepEqual(moleculeWidgetLines(parsed, 0), []);
 
-// ---------- full brainstorming fixture: all 8 pre-impl tasks + 2 gates + implement ----------
+// ---------- full brainstorming fixture: 6 pre-impl tasks + 2 gates + implement + verify ----------
 const bstate = {
   molecule_id: "bd-mol-g0z",
   molecule_title: "superpowers-workflow",
-  current_step: { id: "bd-mol-1vz", title: "Ask clarifying questions", status: "in_progress", issue_type: "task" },
+  current_step: { id: "bd-mol-1vz", title: "Play back understanding", status: "in_progress", issue_type: "task" },
   next_step: null,
-  doneCount: 4,
-  total: 12,
+  doneCount: 1,
+  total: 10,
   steps: [
     {
       id: "s1",
-      title: "Explore project context: Superpowers widget changes",
+      title: "Draw out intent: Superpowers widget changes",
+      labels: ["step:conversation"],
       status: "closed",
       issue_type: "task",
       created_at: "",
@@ -227,7 +242,8 @@ const bstate = {
     },
     {
       id: "s2",
-      title: "Ask clarifying questions",
+      title: "Play back understanding",
+      labels: ["step:playback"],
       status: "in_progress",
       issue_type: "task",
       created_at: "",
@@ -236,7 +252,8 @@ const bstate = {
     },
     {
       id: "s3",
-      title: "Propose approaches",
+      title: "User approves the full description",
+      labels: ["step:design-approved"],
       status: "open",
       issue_type: "task",
       created_at: "",
@@ -244,8 +261,18 @@ const bstate = {
       is_current: false,
     },
     {
+      id: "g1",
+      title: "Gate: human",
+      labels: ["step:gate-design-approved"],
+      status: "open",
+      created_at: "",
+      step_status: "pending",
+      is_current: false,
+    },
+    {
       id: "s4",
-      title: "Present design sections",
+      title: "Write spec to docs/superpowers/specs/",
+      labels: ["step:write-spec"],
       status: "open",
       issue_type: "task",
       created_at: "",
@@ -254,43 +281,18 @@ const bstate = {
     },
     {
       id: "s5",
-      title: "User approves design",
+      title: "Builder check",
+      labels: ["step:spec-review"],
       status: "open",
       issue_type: "task",
-      created_at: "",
-      step_status: "pending",
-      is_current: false,
-    },
-    {
-      id: "g1",
-      title: "Gate: human",
-      status: "open",
-      issue_type: "gate",
       created_at: "",
       step_status: "pending",
       is_current: false,
     },
     {
       id: "s6",
-      title: "Write spec to docs/superpowers/specs/",
-      status: "open",
-      issue_type: "task",
-      created_at: "",
-      step_status: "pending",
-      is_current: false,
-    },
-    {
-      id: "s7",
-      title: "Spec self-review",
-      status: "open",
-      issue_type: "task",
-      created_at: "",
-      step_status: "pending",
-      is_current: false,
-    },
-    {
-      id: "s8",
       title: "User reviews written spec",
+      labels: ["step:spec-approved"],
       status: "open",
       issue_type: "task",
       created_at: "",
@@ -300,6 +302,7 @@ const bstate = {
     {
       id: "g2",
       title: "Gate: human",
+      labels: ["step:gate-spec-approved"],
       status: "open",
       issue_type: "gate",
       created_at: "",
@@ -307,8 +310,9 @@ const bstate = {
       is_current: false,
     },
     {
-      id: "s9",
+      id: "s7",
       title: "Implement Superpowers widget changes",
+      labels: ["step:implement"],
       status: "open",
       issue_type: "task",
       created_at: "",
@@ -316,8 +320,9 @@ const bstate = {
       is_current: false,
     },
     {
-      id: "s10",
+      id: "s8",
       title: "Verify",
+      labels: ["step:verify"],
       status: "open",
       issue_type: "task",
       created_at: "",
@@ -334,33 +339,32 @@ assert.ok(
   headerLines[0],
 );
 assert.ok(headerLines[0].includes("Brainstorming"), headerLines[0]);
-assert.ok(headerLines[0].includes("4/12"), headerLines[0]);
+assert.ok(headerLines[0].includes("1/10"), headerLines[0]);
 assert.ok(!headerLines[0].includes("superpowers-workflow"), "formula name not in header");
 
-// ---------- brainstorming: all 8 tasks incl. done, formula order, markers ----------
+// ---------- brainstorming: all 6 tasks incl. done, formula order, markers ----------
 assert.ok(headerLines.length <= 15);
 const labelAt = (label) => headerLines.findIndex((l) => l.includes(label));
 const order = [
-  "Explore project context",
-  "Ask clarifying questions",
-  "Propose approaches",
-  "Present design sections",
-  "User approves design",
+  "Draw out intent",
+  "Play back understanding",
+  "User approves the full description",
   "Write spec",
-  "Spec self-review",
+  "Builder check",
   "User reviews written spec",
 ].map(labelAt);
 for (let i = 1; i < order.length; i++) {
   assert.ok(order[i - 1] !== -1 && order[i] > order[i - 1], `${i} out of order: ${order}`);
 }
-assert.ok(headerLines[order[0]].includes("✓"), "done explore row: ✓");
+assert.ok(headerLines[order[0]].includes("✓"), "done conversation row: ✓");
+assert.ok(headerLines[order[1]].includes("◐"), "current playback row: ◐");
 assert.ok(headerLines[order[1]].includes("◐"), "current clarify row: ◐");
 
 // ---------- gate as current => waiting line, checklist still shown ----------
 const gateCurrent = { ...bstate, current_step: { id: "gate-g", title: "Gate: human", issue_type: "gate" } };
 const gLines = moleculeWidgetLines(gateCurrent, 120);
 assert.ok(gLines.some((l) => l.includes("Waiting on you:") && l.includes("Gate: human")));
-assert.ok(gLines.some((l) => l.includes("Ask clarifying questions")));
+assert.ok(gLines.some((l) => l.includes("Play back understanding")));
 const gWait = gLines.find((l) => l.includes("Waiting on you:"));
 assert.ok(gWait && gWait.includes("gate-g"), `gate-current footer falls back to gate id (got '${gWait}')`);
 
@@ -375,7 +379,8 @@ const awaitState = {
   steps: [
     {
       id: "a1",
-      title: "Explore project context: widget fixes",
+      title: "Draw out intent: widget fixes",
+      labels: ["step:conversation"],
       status: "closed",
       issue_type: "task",
       created_at: "",
@@ -385,6 +390,7 @@ const awaitState = {
     {
       id: "a2",
       title: "Write spec to docs/superpowers/specs/",
+      labels: ["step:write-spec"],
       status: "closed",
       issue_type: "task",
       created_at: "",
@@ -393,7 +399,8 @@ const awaitState = {
     },
     {
       id: "a3",
-      title: "Spec self-review",
+      title: "Builder check",
+      labels: ["step:spec-review"],
       status: "closed",
       issue_type: "task",
       created_at: "",
@@ -403,6 +410,7 @@ const awaitState = {
     {
       id: "a4",
       title: "User reviews written spec",
+      labels: ["step:spec-approved"],
       status: "open",
       issue_type: "task",
       created_at: "",
@@ -422,6 +430,7 @@ const awaitState = {
     {
       id: "a6",
       title: "Implement widget fixes",
+      labels: ["step:implement"],
       status: "open",
       issue_type: "task",
       created_at: "",
@@ -469,7 +478,8 @@ assert.ok(
     steps: [
       {
         id: "t1",
-        title: "Explore project context: footer test",
+        title: "Draw out intent: footer test",
+        labels: ["step:conversation"],
         status: "closed",
         issue_type: "task",
         created_at: "",
@@ -478,7 +488,8 @@ assert.ok(
       },
       {
         id: "t2",
-        title: "Ask clarifying questions",
+        title: "Play back understanding",
+        labels: ["step:playback"],
         status: "closed",
         issue_type: "task",
         created_at: "",
@@ -505,7 +516,8 @@ assert.ok(
       },
       {
         id: "t5",
-        title: "User approves design",
+        title: "User approves the full description",
+        labels: ["step:design-approved"],
         status: "open",
         issue_type: "task",
         created_at: "",
@@ -525,6 +537,7 @@ assert.ok(
       {
         id: "t6",
         title: "Write spec to docs/superpowers/specs/",
+        labels: ["step:write-spec"],
         status: "open",
         issue_type: "task",
         created_at: "",
@@ -536,7 +549,7 @@ assert.ok(
   const approveLines = moleculeWidgetLines(approveState, 200);
   const foot = approveLines.find((l) => l.includes("Waiting on you:"));
   assert.ok(foot, `awaiting footer present: ${approveLines.join(" | ")}`);
-  assert.ok(foot.includes("User approves design"), `footer shows gated step title (got '${foot}')`);
+  assert.ok(foot.includes("User approves the full description"), `footer shows gated step title (got '${foot}')`);
   assert.ok(!foot.includes("Gate: human"), `footer does not expose raw gate title (got '${foot}')`);
   assert.ok(foot.includes("t5"), `footer carries the gated step id (got '${foot}')`);
 }
@@ -553,6 +566,7 @@ const awaitOverflowState = {
     {
       id: "o.i",
       title: "Implement overflow widget",
+      labels: ["step:implement"],
       status: "open",
       issue_type: "task",
       created_at: "t0",
@@ -580,6 +594,7 @@ const awaitOverflowState = {
     {
       id: "o.done",
       title: "Finish development branch",
+      labels: ["step:finish"],
       status: "open",
       issue_type: "task",
       created_at: "t26",
@@ -615,6 +630,7 @@ const implState = {
     {
       id: "mol-9.i",
       title: "Implement Superpowers widget changes",
+      labels: ["step:implement"],
       status: "in_progress",
       issue_type: "task",
       created_at: "t0",
@@ -651,6 +667,7 @@ const implState = {
     {
       id: "mol-9.u.1",
       title: "Finish development branch",
+      labels: ["step:finish"],
       status: "open",
       issue_type: "task",
       created_at: "t9",
@@ -690,6 +707,7 @@ const wrapState = {
     {
       id: "mol-9.w",
       title: "Wrap up: disposition all parked findings",
+      labels: ["step:wrap-up"],
       status: "open",
       issue_type: "task",
       created_at: "t8",
@@ -729,6 +747,7 @@ const implNotDoneState = {
     {
       id: "mol-9.w",
       title: "Wrap up: disposition all parked findings",
+      labels: ["step:wrap-up"],
       status: "open",
       issue_type: "task",
       created_at: "t8",
@@ -753,7 +772,8 @@ const finState = {
   steps: [
     {
       id: "m1",
-      title: "Explore project context: Superpowers widget changes",
+      title: "Draw out intent: Superpowers widget changes",
+      labels: ["step:conversation"],
       status: "closed",
       issue_type: "task",
       created_at: "",
@@ -763,6 +783,7 @@ const finState = {
     {
       id: "m2",
       title: "Implement Superpowers widget changes",
+      labels: ["step:implement"],
       status: "closed",
       issue_type: "task",
       created_at: "",
@@ -772,6 +793,7 @@ const finState = {
     {
       id: "f1",
       title: "Verify",
+      labels: ["step:verify"],
       status: "in_progress",
       issue_type: "task",
       created_at: "",
@@ -781,6 +803,7 @@ const finState = {
     {
       id: "f2",
       title: "Smoke test / manual QA sign-off",
+      labels: ["step:smoke-test-approved"],
       status: "open",
       issue_type: "task",
       created_at: "",
@@ -790,6 +813,7 @@ const finState = {
     {
       id: "f3",
       title: "Finish development branch",
+      labels: ["step:finish"],
       status: "open",
       issue_type: "task",
       created_at: "",
@@ -806,7 +830,7 @@ const fIdx = fLines.findIndex((l) => l.includes("Finish development branch"));
 assert.ok(vIdx !== -1 && sIdx !== -1 && fIdx !== -1);
 assert.ok(vIdx < sIdx && sIdx < fIdx, "finish rows in formula order");
 assert.ok(fLines[vIdx].includes("◐"), "verify current");
-assert.ok(!fLines.some((l) => l.includes("Explore project context")), "brainstorming hidden during finishing");
+assert.ok(!fLines.some((l) => l.includes("Draw out intent")), "brainstorming hidden during finishing");
 
 // ---------- fully complete: single finished line ----------
 const doneState = {
@@ -828,6 +852,7 @@ const manyTasks = {
     {
       id: "m",
       title: "Implement Superpowers widget changes",
+      labels: ["step:implement"],
       status: "in_progress",
       issue_type: "task",
       created_at: "t0",
@@ -846,6 +871,7 @@ const manyTasks = {
     {
       id: "m.done",
       title: "Finish development branch",
+      labels: ["step:finish"],
       status: "open",
       issue_type: "task",
       created_at: "t99",
@@ -877,7 +903,8 @@ for (const line of moleculeWidgetLines(implState, 30)) assert.ok(displayWidth(li
     molecule_title: "superpowers-workflow",
     current_step: {
       id: "pi-packages-mol-abc123.2",
-      title: "Ask clarifying questions",
+      title: "Play back understanding",
+      labels: ["step:playback"],
       status: "in_progress",
       issue_type: "task",
     },
@@ -887,7 +914,8 @@ for (const line of moleculeWidgetLines(implState, 30)) assert.ok(displayWidth(li
     steps: [
       {
         id: "pi-packages-mol-abc123.1",
-        title: "Explore project context: bead ids restore",
+        title: "Draw out intent: bead ids restore",
+        labels: ["step:conversation"],
         status: "closed",
         issue_type: "task",
         created_at: "",
@@ -896,7 +924,8 @@ for (const line of moleculeWidgetLines(implState, 30)) assert.ok(displayWidth(li
       },
       {
         id: "pi-packages-mol-abc123.2",
-        title: "Ask clarifying questions",
+        title: "Play back understanding",
+        labels: ["step:playback"],
         status: "in_progress",
         issue_type: "task",
         created_at: "",
@@ -906,23 +935,23 @@ for (const line of moleculeWidgetLines(implState, 30)) assert.ok(displayWidth(li
     ],
   };
   const idLines = moleculeWidgetLines(idState, 200);
-  const exploreRow = idLines.find((l) => l.includes("Explore project context"));
+  const exploreRow = idLines.find((l) => l.includes("Draw out intent"));
   assert.ok(
     exploreRow && exploreRow.includes("pi-packages-mol-abc123.1"),
     `done step row carries its bead id (got '${exploreRow}')`,
   );
-  const clarifyRow = idLines.find((l) => l.includes("Ask clarifying questions"));
+  const clarifyRow = idLines.find((l) => l.includes("Play back understanding"));
   assert.ok(
     clarifyRow && clarifyRow.includes("pi-packages-mol-abc123.2"),
     `current step row carries its bead id (got '${clarifyRow}')`,
   );
   // step rows lead with the bead id right after the status marker (before the title)
   assert.ok(
-    exploreRow && exploreRow.indexOf("pi-packages-mol-abc123.1") < exploreRow.indexOf("Explore project context"),
+    exploreRow && exploreRow.indexOf("pi-packages-mol-abc123.1") < exploreRow.indexOf("Draw out intent"),
     `step id precedes title: '${exploreRow}'`,
   );
   assert.ok(
-    clarifyRow && clarifyRow.indexOf("pi-packages-mol-abc123.2") < clarifyRow.indexOf("Ask clarifying questions"),
+    clarifyRow && clarifyRow.indexOf("pi-packages-mol-abc123.2") < clarifyRow.indexOf("Play back understanding"),
     `step id precedes title: '${clarifyRow}'`,
   );
 }
@@ -1129,7 +1158,8 @@ assert.deepEqual(nextRefreshArgs("bd-mol-abc"), ["mol", "current", "bd-mol-abc",
         {
           issue: {
             id: "bd-mol-e",
-            title: "Explore project context: stale-frame fix",
+            title: "Draw out intent: stale-frame fix",
+            labels: ["step:conversation"],
             issue_type: "task",
             status: "closed",
           },
@@ -1137,17 +1167,35 @@ assert.deepEqual(nextRefreshArgs("bd-mol-abc"), ["mol", "current", "bd-mol-abc",
           is_current: false,
         },
         {
-          issue: { id: "bd-mol-i", title: "Implement stale-frame fix", issue_type: "task", status: "in_progress" },
+          issue: {
+            id: "bd-mol-i",
+            title: "Implement stale-frame fix",
+            labels: ["step:implement"],
+            issue_type: "task",
+            status: "in_progress",
+          },
           status: "current",
           is_current: true,
         },
         {
-          issue: { id: "bd-mol-v", title: "Verify", issue_type: "task", status: "open" },
+          issue: {
+            id: "bd-mol-v",
+            title: "Verify",
+            labels: ["step:verify"],
+            issue_type: "task",
+            status: "open",
+          },
           status: "ready",
           is_current: false,
         },
         {
-          issue: { id: "bd-mol-f", title: "Finish development branch", issue_type: "task", status: "open" },
+          issue: {
+            id: "bd-mol-f",
+            title: "Finish development branch",
+            labels: ["step:finish"],
+            issue_type: "task",
+            status: "open",
+          },
           status: "pending",
           is_current: false,
         },
@@ -1165,7 +1213,8 @@ assert.deepEqual(nextRefreshArgs("bd-mol-abc"), ["mol", "current", "bd-mol-abc",
         {
           issue: {
             id: "bd-mol-e",
-            title: "Explore project context: stale-frame fix",
+            title: "Draw out intent: stale-frame fix",
+            labels: ["step:conversation"],
             issue_type: "task",
             status: "closed",
           },
@@ -1173,17 +1222,35 @@ assert.deepEqual(nextRefreshArgs("bd-mol-abc"), ["mol", "current", "bd-mol-abc",
           is_current: false,
         },
         {
-          issue: { id: "bd-mol-i", title: "Implement stale-frame fix", issue_type: "task", status: "closed" },
+          issue: {
+            id: "bd-mol-i",
+            title: "Implement stale-frame fix",
+            labels: ["step:implement"],
+            issue_type: "task",
+            status: "closed",
+          },
           status: "done",
           is_current: false,
         },
         {
-          issue: { id: "bd-mol-v", title: "Verify", issue_type: "task", status: "in_progress" },
+          issue: {
+            id: "bd-mol-v",
+            title: "Verify",
+            labels: ["step:verify"],
+            issue_type: "task",
+            status: "in_progress",
+          },
           status: "current",
           is_current: true,
         },
         {
-          issue: { id: "bd-mol-f", title: "Finish development branch", issue_type: "task", status: "open" },
+          issue: {
+            id: "bd-mol-f",
+            title: "Finish development branch",
+            labels: ["step:finish"],
+            issue_type: "task",
+            status: "open",
+          },
           status: "pending",
           is_current: false,
         },
@@ -1289,12 +1356,24 @@ assert.deepEqual(nextRefreshArgs("bd-mol-abc"), ["mol", "current", "bd-mol-abc",
       next_step: null,
       steps: [
         {
-          issue: { id: "A.1", title: "Explore project context: A", issue_type: "task", status: "closed" },
+          issue: {
+            id: "A.1",
+            title: "Draw out intent: A",
+            labels: ["step:conversation"],
+            issue_type: "task",
+            status: "closed",
+          },
           status: "done",
           is_current: false,
         },
         {
-          issue: { id: "A.2", title: "Implement A", issue_type: "task", status: "closed" },
+          issue: {
+            id: "A.2",
+            title: "Implement A",
+            labels: ["step:implement"],
+            issue_type: "task",
+            status: "closed",
+          },
           status: "done",
           is_current: false,
         },
@@ -1309,12 +1388,24 @@ assert.deepEqual(nextRefreshArgs("bd-mol-abc"), ["mol", "current", "bd-mol-abc",
       next_step: null,
       steps: [
         {
-          issue: { id: "B.1", title: "Explore project context: B", issue_type: "task", status: "closed" },
+          issue: {
+            id: "B.1",
+            title: "Draw out intent: B",
+            labels: ["step:conversation"],
+            issue_type: "task",
+            status: "closed",
+          },
           status: "done",
           is_current: false,
         },
         {
-          issue: { id: "B.2", title: "Implement B", issue_type: "task", status: "in_progress" },
+          issue: {
+            id: "B.2",
+            title: "Implement B",
+            labels: ["step:implement"],
+            issue_type: "task",
+            status: "in_progress",
+          },
           status: "current",
           is_current: true,
         },
@@ -1455,12 +1546,24 @@ assert.deepEqual(nextRefreshArgs("bd-mol-abc"), ["mol", "current", "bd-mol-abc",
       next_step: null,
       steps: [
         {
-          issue: { id: "mal.1", title: "Explore project context: x", issue_type: "task", status: "closed" },
+          issue: {
+            id: "mal.1",
+            title: "Draw out intent: x",
+            labels: ["step:conversation"],
+            issue_type: "task",
+            status: "closed",
+          },
           status: "done",
           is_current: false,
         },
         {
-          issue: { id: "mal.2", title: "Implement x", issue_type: "task", status: "closed" },
+          issue: {
+            id: "mal.2",
+            title: "Implement x",
+            labels: ["step:implement"],
+            issue_type: "task",
+            status: "closed",
+          },
           status: "done",
           is_current: false,
         },
@@ -1514,18 +1617,18 @@ assert.deepEqual(nextRefreshArgs("bd-mol-abc"), ["mol", "current", "bd-mol-abc",
     })),
   };
   const gapLines = moleculeWidgetLines(gapState, 200);
-  const proposeIdx = gapLines.findIndex((l) => l.includes("Propose approaches"));
-  assert.ok(proposeIdx !== -1, `propose row rendered: ${gapLines.join(" | ")}`);
+  const approveIdx = gapLines.findIndex((l) => l.includes("User approves the full description"));
+  assert.ok(approveIdx !== -1, `next ready row rendered: ${gapLines.join(" | ")}`);
   assert.ok(
-    gapLines[proposeIdx].includes("\u25d0"),
-    `fallback step carries the active marker: ${gapLines[proposeIdx]}`,
+    gapLines[approveIdx].includes("\u25d0"),
+    `fallback step carries the active marker: ${gapLines[approveIdx]}`,
   );
   const gapActive = gapLines.filter((l) => l.includes("\u25d0")).length;
   assert.equal(gapActive, 1, `exactly one active row, got ${gapActive}: ${gapLines.join(" | ")}`);
 }
 
 {
-  // deeper of two open/ready steps wins (s7 beats s5): deepest = last in render order.
+  // deeper of two open/ready steps wins (s6 beats s4): deepest = last in render order.
   const deepState = {
     ...bstate,
     current_step: null,
@@ -1536,26 +1639,26 @@ assert.deepEqual(nextRefreshArgs("bd-mol-abc"), ["mol", "current", "bd-mol-abc",
         : {
             ...s,
             is_current: false,
-            ...(s.id === "s5" || s.id === "s7" ? { step_status: "ready", status: "open" } : {}),
+            ...(s.id === "s4" || s.id === "s6" ? { step_status: "ready", status: "open" } : {}),
           },
     ),
   };
   const deepLines = moleculeWidgetLines(deepState, 200);
-  const s5Idx = deepLines.findIndex((l) => l.includes("User approves design"));
-  const s7Idx = deepLines.findIndex((l) => l.includes("Spec self-review"));
-  assert.ok(s5Idx !== -1 && s7Idx !== -1, `deep rows rendered: ${deepLines.join(" | ")}`);
-  assert.ok(deepLines[s7Idx].includes("\u25d0"), `deepest open/ready step leads: ${deepLines[s7Idx]}`);
-  assert.ok(!deepLines[s5Idx].includes("\u25d0"), `shallower ready step must not lead: ${deepLines[s5Idx]}`);
+  const s4Idx = deepLines.findIndex((l) => l.includes("Write spec"));
+  const s6Idx = deepLines.findIndex((l) => l.includes("User reviews written spec"));
+  assert.ok(s4Idx !== -1 && s6Idx !== -1, `deep rows rendered: ${deepLines.join(" | ")}`);
+  assert.ok(deepLines[s6Idx].includes("\u25d0"), `deepest open/ready step leads: ${deepLines[s6Idx]}`);
+  assert.ok(!deepLines[s4Idx].includes("\u25d0"), `shallower ready step must not lead: ${deepLines[s4Idx]}`);
 }
 
 // a step marked is_current still wins over any open/ready fallback (no regression).
 {
   const lines = moleculeWidgetLines(bstate, 200); // s2 is_current:true, s3 open+ready
-  const clarifyIdx = lines.findIndex((l) => l.includes("Ask clarifying questions"));
-  const proposeIdx = lines.findIndex((l) => l.includes("Propose approaches"));
-  assert.ok(clarifyIdx !== -1 && proposeIdx !== -1);
-  assert.ok(lines[clarifyIdx].includes("\u25d0"), `is_current row keeps the marker: ${lines[clarifyIdx]}`);
-  assert.ok(!lines[proposeIdx].includes("\u25d0"), `fallback must not steal from is_current: ${lines[proposeIdx]}`);
+  const playbackIdx = lines.findIndex((l) => l.includes("Play back understanding"));
+  const approveIdx = lines.findIndex((l) => l.includes("User approves the full description"));
+  assert.ok(playbackIdx !== -1 && approveIdx !== -1);
+  assert.ok(lines[playbackIdx].includes("\u25d0"), `is_current row keeps the marker: ${lines[playbackIdx]}`);
+  assert.ok(!lines[approveIdx].includes("\u25d0"), `fallback must not steal from is_current: ${lines[approveIdx]}`);
   const activeCount = lines.filter((l) => l.includes("\u25d0")).length;
   assert.equal(activeCount, 1, `only the is_current step is active: ${lines.join(" | ")}`);
 }
@@ -1621,6 +1724,7 @@ assert.deepEqual(nextRefreshArgs("bd-mol-abc"), ["mol", "current", "bd-mol-abc",
     current_step: {
       id: "mol-9.i",
       title: "Implement Superpowers widget changes",
+      labels: ["step:implement"],
       status: "in_progress",
       issue_type: "task",
     },
@@ -1645,13 +1749,20 @@ const reviewState = {
   steps: [
     {
       id: "r1",
-      title: "Explore project context: x",
+      title: "Draw out intent: x",
+      labels: ["step:conversation"],
       status: "closed",
       issue_type: "task",
       step_status: "done",
-      labels: [],
     },
-    { id: "r2", title: "User approves design", status: "open", issue_type: "task", step_status: "pending", labels: [] },
+    {
+      id: "r2",
+      title: "User approves the full description",
+      labels: ["step:design-approved"],
+      status: "open",
+      issue_type: "task",
+      step_status: "pending",
+    },
     {
       id: "r3",
       title: "Gate: human",
@@ -1663,10 +1774,10 @@ const reviewState = {
     {
       id: "r4",
       title: "Write spec to docs/superpowers/specs/",
+      labels: ["step:write-spec"],
       status: "open",
       issue_type: "task",
       step_status: "pending",
-      labels: [],
     },
   ],
 };
@@ -1751,32 +1862,32 @@ assert.equal(
       {
         id: "sw.1",
         title: "Implement widget fixes",
+        labels: ["step:implement"],
         status: "closed",
         issue_type: "task",
         created_at: "",
         step_status: "done",
         is_current: false,
-        labels: [],
       },
       {
         id: "sw.2",
         title: "Verify",
+        labels: ["step:verify"],
         status: "closed",
         issue_type: "task",
         created_at: "",
         step_status: "done",
         is_current: false,
-        labels: [],
       },
       {
         id: "sw.3",
         title: "Smoke test / manual QA sign-off",
+        labels: ["step:smoke-test-approved"],
         status: "open",
         issue_type: "task",
         created_at: "",
         step_status: "pending",
         is_current: false,
-        labels: [],
       },
       {
         id: "sw.g",
@@ -1791,12 +1902,12 @@ assert.equal(
       {
         id: "sw.4",
         title: "Finish development branch",
+        labels: ["step:finish"],
         status: "open",
         issue_type: "task",
         created_at: "",
         step_status: "pending",
         is_current: false,
-        labels: [],
       },
     ],
   };

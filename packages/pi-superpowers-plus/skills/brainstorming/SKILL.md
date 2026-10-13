@@ -40,6 +40,17 @@ work against for the rest of this skill and for `writing-plans` /
   beads_mol_current({ id: "<root-id>" })
   beads_mol_ready({ id: "<root-id>" })
 
+**Brainstorming an existing bead** (e.g. "brainstorm beads-kp0"): an existing issue
+does not release you from pouring. Pour a NEW molecule as above, seeding `topic` with
+the existing issue's title, then link the new root to the existing issue without
+mutating it:
+
+  beads_dep({ issue: "<new-root-id>", blocker: "<existing-issue-id>", type: "discovered-from" })
+
+If `discovered-from` is rejected by your `bd` version, use `related` instead — both
+are non-blocking link types; never use `blocks`. The existing issue's type, parent, and
+status stay exactly what they were.
+
 **Reaching beads tools:** every `beads_*` tool has `codemode`/`deferred`
 exposure, so none is in your tool list. Call them from a `codemode` script —
 `await tools.beads_update({ ... })` — and find the deferred ones with
