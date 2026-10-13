@@ -343,13 +343,39 @@ assert.ok(
   `the folded row is the last v1 step when all are closed: ${v1ClosedLines.join(" | ")}`,
 );
 
-// Review Focus 5: a partial v1 molecule (step:clarify, no step:explore) still renders one folded row.
+// A partial v1 molecule (step:clarify, no step:explore) still renders a non-empty folded
+// row. It does NOT exercise the dedup below: with no labelled `explore`,
+// `legacyStepFor("explore")` is undefined, so only the `conversation` key resolves.
 const v1Partial = { ...v1, steps: v1.steps.filter((s) => s.id !== "mol-v1.explore") };
 const v1PartialLines = moleculeWidgetLines(v1Partial, 200);
 assert.equal(
   v1PartialLines.filter((l) => /Explore project context|Ask clarifying questions|Propose approaches/.test(l)).length,
   1,
   `a partial v1 molecule renders one folded row: ${v1PartialLines.join(" | ")}`,
+);
+
+// Review Focus 5 (dedup): a molecule carrying BOTH a labelled `explore` step and the folded
+// v1 steps must render that phase once. `explore` resolves via its own label AND
+// `conversation` resolves to the same step through its legacy fallback, so a `resolveRows`
+// without the `seen` guard renders the row twice.
+const v1Dedup = {
+  ...v1,
+  steps: [
+    v1Step("explore", "Explore project context", { step_status: "in_progress", is_current: true }),
+    v1Step("clarify", "Ask clarifying questions"),
+    v1Step("approaches", "Propose approaches"),
+    v1Step("design", "Present design sections"),
+  ],
+};
+const v1DedupLines = moleculeWidgetLines(v1Dedup, 200);
+assert.equal(
+  v1DedupLines.filter((l) => l.includes("mol-v1.explore")).length,
+  1,
+  `a labelled explore step plus the folded steps renders once: ${v1DedupLines.join(" | ")}`,
+);
+assert.ok(
+  !v1DedupLines.some((l) => /Ask clarifying questions|Propose approaches/.test(l)),
+  `the folded steps collapse into the explore row: ${v1DedupLines.join(" | ")}`,
 );
 
 // ---------- full brainstorming fixture (v2-shaped: 6 pre-impl tasks + 2 gates + implement + verify) ----------
@@ -495,7 +521,9 @@ const v3State = {
     ...bstate.steps.map((s) =>
       s.labels.includes("step:conversation")
         ? { ...s, status: "in_progress", step_status: "current", is_current: true }
-        : s,
+        : s.labels.includes("step:playback")
+          ? { ...s, status: "closed", step_status: "done", is_current: false }
+          : s,
     ),
   ],
 };

@@ -23,8 +23,9 @@ Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 - **The rebuilt `brainstorming` skill makes decision coverage explicit, not question count.**
   The `conversation` step now closes only when every line of **Ground to cover** is accounted
-  for — something the human said, or a call the skill names in its close reason, so scope and
-  other load-bearing decisions are settled before the work is sized — while a request that
+  for — something the human said, a call the skill names in its close reason, and (from the
+  v3 entry below) what the document `explore` read says, so scope and other load-bearing
+  decisions are settled before the work is sized — while a request that
   already states every decision that matters ("make the icon cornflower blue") still needs
   no questions at all. A local addition: upstream leaves the count to the model's
   judgement, and its "propose 2-3 approaches" round stays dropped (measured upstream as
@@ -32,8 +33,9 @@ Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 - **The workflow formula is v2: `explore`/`clarify`/`approaches` fold into one `conversation`
   step and `design` becomes `playback`.** Nine steps become seven, matching upstream's single
-  continuous conversation phase. `formulas/superpowers-workflow.formula.toml` is updated in
-  place; molecules poured under v1 keep working (see Fixed).
+  continuous conversation phase. *(Superseded by the v3 entry below — the shipped formula is
+  v3, with `explore` back as step 1.)* `formulas/superpowers-workflow.formula.toml` is updated
+  in place; molecules poured under v1 keep working (see Fixed).
 
 - **The molecule pour is unconditional again, and `explore` returns as formula step 1 (formula v3).**
   The v7.0.0 re-base had made the pour conditional on the agent's own private pre-check and folded

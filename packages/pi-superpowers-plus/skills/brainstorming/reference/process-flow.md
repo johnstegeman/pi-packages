@@ -20,9 +20,9 @@ digraph brainstorming {
     "First message (opt-out offer + one question)" -> "Close the skipped steps; work it in the implement step" [label="fast task: opt-out taken"];
     "Conversation <-> playback" -> "Conversation <-> playback" [label="play back, then next question"];
     "Conversation <-> playback" -> "Size the work";
-    "Size the work" -> "Approve the description in chat" [label="small change"];
-    "Size the work" -> "Write the document" [label="project"];
-    "Approve the description in chat" -> "Close the skipped steps; work it in the implement step" [label="approved"];
+    "Size the work" -> "Approve the description in chat" [label="small change or project"];
+    "Approve the description in chat" -> "Close the skipped steps; work it in the implement step" [label="small change approved"];
+    "Approve the description in chat" -> "Write the document" [label="project approved"];
     "Approve the description in chat" -> "Conversation <-> playback" [label="changes requested"];
     "Write the document" -> "Builder check (spec-review)";
     "Builder check (spec-review)" -> "User approves the document?";

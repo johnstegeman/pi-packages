@@ -251,6 +251,6 @@ the two do not contradict each other.
 
 - The stale v1 template proto in the pi-packages beads DB (`superpowers-workflow`, label `template`,
   created 2026-09-02, 16 steps). Pours read the formula file, not the proto — `bd mol pour
-  superpowers-workflow --dry-run` produces the v2 shape — so it is inert for pours and leaks only
+  superpowers-workflow --dry-run` produces the v3 shape — so it is inert for pours and leaks only
   into `bd ready` / `bd mol show`. Filed separately.
 - The `smoke-test-approved` gate and the finish phase.

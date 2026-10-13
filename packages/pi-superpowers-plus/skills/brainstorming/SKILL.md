@@ -66,7 +66,7 @@ ids at runtime with
 
 | Step | Close it when |
 |---|---|
-| `explore` | you have read what the request points at — the bead, the spec, the named files — plus enough context to make your first message intelligent. Name what you read and what it told you. It runs **before** your first message and is never skipped |
+| `explore` | you have read what the request points at — the bead, the spec, the named files — plus enough context to make your first message intelligent. Name what you read and what it told you; when there is nothing to read, close it with `"nothing to read; the request is self-contained"`. It runs **before** your first message and is never skipped |
 | `conversation` | you have drawn out intent — questions, playback, and any recon your partner asked for are one continuous phase. Every line of **Ground to cover** is either what they told you, **what the document `explore` read says**, or your call — name which in the close reason. When the document settles everything, say so and ask nothing |
 | `playback` | your partner has corrected your playback and you agree on the description. **Record the size in the close reason** (`size: project` / `size: small change`) |
 | `design-approved` | your partner approved the full description — in chat, for both sizes. For a project this is the design as played back; the written document is approved later, at `spec-approved` |
@@ -99,10 +99,14 @@ and closes the gated `spec-approved` step, freeing `implement`. Find it via
 **Fast task:** the human took the opt-out at your first message. The molecule
 still exists, and `explore` is already closed. Close `conversation` and
 `playback` as skipped (`"fast route: human opted out at the first message"`),
-record `review.verdict=done` on `design-approved` (`"fast route: the opt-out is
-the approval"`) and resolve `step:gate-design-approved`, close `write-spec` and
-`spec-review` as skipped, then resolve `step:gate-spec-approved` — which closes
-the gated `spec-approved` step and frees `implement`.
+record `review.verdict=done` on `design-approved` (the opt-out *is* the
+approval — comment `"fast route: the opt-out is the approval"` if you want it on
+the record), then resolve its gate with `beads_gate_resolve({ id: "<gate-id>" })`.
+Close `write-spec` and `spec-review` as skipped, then resolve the spec gate the
+same way — it closes the gated `spec-approved` step and frees `implement`. Find
+each gate id with the lookup above:
+`beads_list({ label: "step:gate-design-approved", mol: "<root-id>" })` and
+`beads_list({ label: "step:gate-spec-approved", mol: "<root-id>" })`.
 
 > **Read now:** [reference/verdict-recording.md](reference/verdict-recording.md) — resume, changes-requested, and gate-resolve edge cases.
 
@@ -112,8 +116,8 @@ You have already poured — the molecule exists either way. Before you reply, as
 yourself: what do I know about what they want, and why?
 
 - **Everything that matters is in the request** ("make the icon cornflower
-  blue"). This is a fast task: your first message may lead with the offer to
-  skip the questions.
+  blue"). This is a fast-route candidate: your first message may lead with the
+  offer to skip the questions.
 - **A document is named** — a bead, a spec, an issue, a file. That is not a
   self-contained request and it is not a fast task. Read it first: that is what
   `explore` is for.
@@ -275,7 +279,8 @@ document as that builder yourself.
 
 <HARD-GATE>
 Nothing gets built until your human partner approves the full
-description: in chat for a small change, the document for a project.
+description — in chat, for both sizes. For a project that is the design as played
+back; the written document is approved later, at `spec-approved`.
 Building includes writing product code, scaffolding, installing
 dependencies, creating projects, and invoking an implementation skill.
 Reading and exploring are fine. This applies to EVERY project regardless
@@ -326,7 +331,7 @@ considered and declined, and the close reason is what records that.
 
 ## Reference material
 
-- [reference/anti-patterns.md](reference/anti-patterns.md) — the three anti-patterns: too simple to need a document, rushing the steps, exploring before you pour.
+- [reference/anti-patterns.md](reference/anti-patterns.md) — the four anti-patterns: too simple to need a document, rushing the steps, one question then sizing, exploring before you pour.
 - [reference/process-flow.md](reference/process-flow.md) — the brainstorming process-flow diagram and the terminal hand-off state.
 - [reference/process-guidance.md](reference/process-guidance.md) — YAGNI, working in existing codebases, design for isolation (a local addition), and the spec self-review.
 - [reference/verdict-recording.md](reference/verdict-recording.md) — design-verdict edge cases: changes requested, resume, gate-resolve, and close ordering.

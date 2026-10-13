@@ -335,9 +335,59 @@ test("the fast route is human-approved, with its own skip sequence", () => {
   assert.match(skill, /release you from pouring:\n/);
   assert.doesNotMatch(flat, /This path uses no tracking steps/);
   assert.doesNotMatch(flat, /decides the molecule's fate/);
+  // Important 5: the pre-check names a fast-route *candidate*, not a decided size — the
+  // human's opt-out is what makes it a fast task. Pin the phrase so the labelling can't regress.
+  assert.match(flat, /This is a fast-route candidate:/);
   const verdict = readFileSync(join(root, "skills", "brainstorming", "reference", "verdict-recording.md"), "utf8");
   assert.match(verdict, /## The fast route/);
   assert.match(verdict, /step:gate-design-approved/);
+  // The skip ORDER is the point: close order is enforced, so a reorder or a dropped
+  // gate-resolve must fail. Flatten like `skill` above, then pin every step's position.
+  // Scope to the fast-route section first: the small-change section above also names
+  // `step:gate-spec-approved`, so a whole-file indexOf would find that earlier occurrence.
+  const verdictFlat = verdict.slice(verdict.indexOf("## The fast route")).replace(/\s+/g, " ");
+  const fastRouteOrder = [
+    "<conversation-id>",
+    "<playback-id>",
+    "<design-approved-id>",
+    "step:gate-design-approved",
+    "<write-spec-id>",
+    "<spec-review-id>",
+    "step:gate-spec-approved",
+  ].map((marker) => verdictFlat.indexOf(marker));
+  assert.ok(
+    fastRouteOrder.every((at) => at >= 0),
+    `every fast-route step is present in verdict-recording.md: ${fastRouteOrder}`,
+  );
+  for (let i = 1; i < fastRouteOrder.length; i++) {
+    assert.ok(
+      fastRouteOrder[i] > fastRouteOrder[i - 1],
+      `fast-route step ${i} follows step ${i - 1}: ${fastRouteOrder}`,
+    );
+  }
+});
+
+test("the CHANGELOG's [Unreleased] formula bullet matches the shipped formula version", () => {
+  // Guard against the class of contradiction this branch shipped: prose A updated, prose B
+  // left behind. The shipped formula's `version` must be the newest formula version the
+  // [Unreleased] notes name — if someone bumps the formula and leaves the notes stale, fail.
+  const formula = readFileSync(join(root, "formulas", "superpowers-workflow.formula.toml"), "utf8");
+  const version = formula.match(/^version\s*=\s*(\d+)/m)?.[1];
+  assert.ok(version, "the shipped formula declares a version");
+  const changelog = readFileSync(join(root, "CHANGELOG.md"), "utf8");
+  const start = changelog.indexOf("## [Unreleased]");
+  assert.notEqual(start, -1, "the CHANGELOG has an [Unreleased] section");
+  const rest = changelog.slice(start + "## [Unreleased]".length);
+  const next = rest.indexOf("\n## [");
+  const unreleased = next === -1 ? rest : rest.slice(0, next);
+  const named = [...unreleased.matchAll(/formula (?:is )?v(\d+)/g)].map((m) => Number(m[1]));
+  assert.ok(named.length > 0, "the [Unreleased] section names a formula version");
+  const newest = Math.max(...named);
+  assert.equal(
+    newest,
+    Number(version),
+    `the newest [Unreleased] formula version (v${newest}) matches the shipped formula (v${version})`,
+  );
 });
 
 run();
