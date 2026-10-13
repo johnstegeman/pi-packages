@@ -283,7 +283,7 @@ test("beads guardrail: no prompt source is left unguarded", () => {
 
 test("the brainstorming pour is unconditional", () => {
   const skill = readFileSync(join(root, "skills", "brainstorming", "SKILL.md"), "utf8");
-  const flat = skill.replace(/\s+/g, " ");
+  const flat = skill.replace(/^> ?/gm, "").replace(/\s+/g, " ");
   assert.match(flat, /\*\*Pour before you speak — unconditionally\.\*\*/);
   assert.doesNotMatch(flat, /Once the private check says something non-trivial/);
   assert.doesNotMatch(flat, /there is no molecule, no widget, and no step/);
@@ -296,7 +296,7 @@ test("the brainstorming step table carries explore and the document-coverage clo
   // Flatten whitespace first: these phrases live in prose wrapped at ~80 columns, so a
   // literal-space match would pin the wrap point rather than the content (the human's ruling on
   // Task 2's review; see the fix commit 87e7367 for the same pattern).
-  const flat = skill.replace(/\s+/g, " ");
+  const flat = skill.replace(/^> ?/gm, "").replace(/\s+/g, " ");
   // Scope the row check to the step table itself: a bare /\|\s*`explore`\s*\|/ would match
   // an `explore` cell in any table in the file, not necessarily the step table.
   const stepTableStart = flat.indexOf("| Step | Close it when |");
@@ -319,11 +319,12 @@ test("the fast route is human-approved, with its own skip sequence", () => {
   const skill = readFileSync(join(root, "skills", "brainstorming", "SKILL.md"), "utf8");
   // Flatten whitespace first: these phrases live in prose wrapped at ~80 columns, so a
   // literal-space match would pin the wrap point rather than the content (the human's ruling on
-  // Task 2's review; see the fix commit 87e7367 for the same pattern). The colon assertion below
+  // Task 2's review; see the fix commit 87e7367 for the same pattern). The `release you from pouring:` assertion below
   // deliberately tests the raw text, because the newline after the colon is the thing it pins.
-  const flat = skill.replace(/\s+/g, " ");
+  const flat = skill.replace(/^> ?/gm, "").replace(/\s+/g, " ");
   assert.match(flat, /A fast task \(they took the opt-out\)/);
   assert.match(flat, /\*\*Fast task:\*\*/);
+  assert.equal(flat.split("**Fast task:**").length - 1, 1, "the Fast task paragraph appears exactly once");
   assert.match(flat, /fast route: the opt-out is the approval/);
   assert.match(flat, /they were considered and declined/);
   assert.match(flat, /Only they can take it — you never take it for them/);
@@ -371,6 +372,9 @@ test("the CHANGELOG's [Unreleased] formula bullet matches the shipped formula ve
   // Guard against the class of contradiction this branch shipped: prose A updated, prose B
   // left behind. The shipped formula's `version` must be the newest formula version the
   // [Unreleased] notes name — if someone bumps the formula and leaves the notes stale, fail.
+  // Scope the match to the bullets that state the shipped version ("The workflow formula
+  // is/went to vN"): a version named elsewhere in [Unreleased] — an older pour described in
+  // `Fixed`, or a future-looking note — must not trip the guard.
   const formula = readFileSync(join(root, "formulas", "superpowers-workflow.formula.toml"), "utf8");
   const version = formula.match(/^version\s*=\s*(\d+)/m)?.[1];
   assert.ok(version, "the shipped formula declares a version");
@@ -380,7 +384,7 @@ test("the CHANGELOG's [Unreleased] formula bullet matches the shipped formula ve
   const rest = changelog.slice(start + "## [Unreleased]".length);
   const next = rest.indexOf("\n## [");
   const unreleased = next === -1 ? rest : rest.slice(0, next);
-  const named = [...unreleased.matchAll(/formula (?:is )?v(\d+)/g)].map((m) => Number(m[1]));
+  const named = [...unreleased.matchAll(/The workflow formula (?:is|went to) v(\d+)/g)].map((m) => Number(m[1]));
   assert.ok(named.length > 0, "the [Unreleased] section names a formula version");
   const newest = Math.max(...named);
   assert.equal(

@@ -25,8 +25,9 @@ At the start of the skill, call `set_phase({ phase: "brainstorming" })`.
 ## Tracking This Session
 
 Every session runs against a beads molecule, so the step you are on is visible in the
-widget and survives a resume. The size of the work decides which steps you *work* and
-which you *close as skipped* — never whether the molecule exists.
+widget and survives a resume. The size of the work decides which steps you *work*, which
+you *close as skipped*, and which the opt-out *approves* — never whether the molecule
+exists.
 
 **Pour before you speak — unconditionally.** Pour the workflow formula and put the widget
 on screen *before* you read any file, run any command, or look at the project in any way.
@@ -68,7 +69,7 @@ ids at runtime with
 |---|---|
 | `explore` | you have read what the request points at — the bead, the spec, the named files — plus enough context to make your first message intelligent. Name what you read and what it told you; when there is nothing to read, close it with `"nothing to read; the request is self-contained"`. It runs **before** your first message and is never skipped |
 | `conversation` | you have drawn out intent — questions, playback, and any recon your partner asked for are one continuous phase. Every line of **Ground to cover** is either what they told you, **what the document `explore` read says**, or your call — name which in the close reason. When the document settles everything, say so and ask nothing |
-| `playback` | your partner has corrected your playback and you agree on the description. **Record the size in the close reason** (`size: project` / `size: small change`) |
+| `playback` | your partner has corrected your playback and you agree on the description. **Record the size in the close reason** (`size: project` / `size: small change`) — on the fast route there is no size to record: the opt-out *is* the size, and the close reason is the fast route's own |
 | `design-approved` | your partner approved the full description — in chat, for both sizes. For a project this is the design as played back; the written document is approved later, at `spec-approved` |
 | `write-spec` | the document is written and committed, and the four-point self-review is clean. **Project size only** — for a small change, close this and `spec-review` as skipped (`"small change: description agreed in chat"`) and **resolve the gate** (`beads_gate_resolve`), which closes the gated `spec-approved` step in the same call |
 | `spec-review` | the builder check returned and its questions were sorted (§ The Written Design) |
@@ -108,7 +109,7 @@ each gate id with the lookup above:
 `beads_list({ label: "step:gate-design-approved", mol: "<root-id>" })` and
 `beads_list({ label: "step:gate-spec-approved", mol: "<root-id>" })`.
 
-> **Read now:** [reference/verdict-recording.md](reference/verdict-recording.md) — resume, changes-requested, and gate-resolve edge cases.
+> **Read now:** [reference/verdict-recording.md](reference/verdict-recording.md) — resume, changes-requested, and gate-resolve edge cases, plus the fast route's ordered close sequence.
 
 ## First: What Do You Actually Know?
 
@@ -239,9 +240,10 @@ order, and brainstorm them one at a time.
 
 **Tracking:** this is the branch that decides which steps you work — the
 molecule exists either way. A fast task closes `conversation`, `playback`,
-`write-spec`, and `spec-review` as skipped and approves `design-approved` with
-the opt-out itself, a small change closes `write-spec`, `spec-review`, and
-`spec-approved` as skipped, and a project works them all. See
+`write-spec`, and `spec-review` as skipped, approves `design-approved` with
+the opt-out itself, and then closes `spec-approved` by resolving its gate; a
+small change closes `write-spec`, `spec-review`, and `spec-approved` as
+skipped, and a project works them all. See
 [Tracking This Session](#tracking-this-session).
 
 ## The Written Design
@@ -334,4 +336,4 @@ considered and declined, and the close reason is what records that.
 - [reference/anti-patterns.md](reference/anti-patterns.md) — the four anti-patterns: too simple to need a document, rushing the steps, one question then sizing, exploring before you pour.
 - [reference/process-flow.md](reference/process-flow.md) — the brainstorming process-flow diagram and the terminal hand-off state.
 - [reference/process-guidance.md](reference/process-guidance.md) — YAGNI, working in existing codebases, design for isolation (a local addition), and the spec self-review.
-- [reference/verdict-recording.md](reference/verdict-recording.md) — design-verdict edge cases: changes requested, resume, gate-resolve, and close ordering.
+- [reference/verdict-recording.md](reference/verdict-recording.md) — design-verdict edge cases: changes requested, resume, gate-resolve, close ordering, and the fast route's ordered close sequence.

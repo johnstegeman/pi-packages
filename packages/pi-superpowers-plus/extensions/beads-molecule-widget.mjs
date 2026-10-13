@@ -533,8 +533,8 @@ function resolveRows(steps, keys) {
       v1 && key === "explore"
         ? legacyStepFor(steps, "conversation")
         : (stepByKey(steps, key) ?? legacyStepFor(steps, key));
-    if (!step || seen.has(step.id)) continue;
-    seen.add(step.id);
+    if (!step || seen.has(step.id ?? key)) continue;
+    seen.add(step.id ?? key);
     rows.push(step);
   }
   return rows;

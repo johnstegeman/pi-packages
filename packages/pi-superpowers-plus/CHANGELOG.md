@@ -37,8 +37,9 @@ Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   v3, with `explore` back as step 1.)* `formulas/superpowers-workflow.formula.toml` is updated
   in place; molecules poured under v1 keep working (see Fixed).
 
-- **The molecule pour is unconditional again, and `explore` returns as formula step 1 (formula v3).**
-  The v7.0.0 re-base had made the pour conditional on the agent's own private pre-check and folded
+- **The workflow formula went to v3: the molecule pour is unconditional again, and `explore`
+  returns as formula step 1.** The v7.0.0 re-base had made the pour conditional on the agent's own
+  private pre-check and folded
   `explore` into `conversation`. A request that *pointed at* a document — "the intent is fully
   documented in the bead" — then read as self-contained, so the agent skipped the molecule entirely
   and edited files unapproved. Now the pour happens before anything is read, `explore` reads what

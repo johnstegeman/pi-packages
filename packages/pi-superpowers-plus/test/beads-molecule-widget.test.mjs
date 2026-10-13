@@ -355,9 +355,9 @@ assert.equal(
 );
 
 // Review Focus 5 (dedup): a molecule carrying BOTH a labelled `explore` step and the folded
-// v1 steps must render that phase once. `explore` resolves via its own label AND
-// `conversation` resolves to the same step through its legacy fallback, so a `resolveRows`
-// without the `seen` guard renders the row twice.
+// v1 steps must render that phase once. `explore` resolves AND `conversation` resolves
+// to the same step through its legacy fallback, so a `resolveRows` without the `seen`
+// guard renders the row twice.
 const v1Dedup = {
   ...v1,
   steps: [
@@ -496,9 +496,20 @@ const headerLines = moleculeWidgetLines(bstate, 120);
 
 // Review Focus 1: a v2 molecule (no step:explore) drops the explore row.
 assert.ok(!headerLines.some((l) => l.includes("Explore project context")), "a v2 molecule renders no explore row");
+// Dropping it must not disturb which step the widget marks current: exactly one row leads,
+// it is the step bd reports as current (the row that led before the `explore` key existed),
+// and the dropped explore row is not the marked one.
+const v2Current = bstate.steps.find((s) => s.is_current);
+const v2Marked = headerLines.filter((l) => l.includes("\u25d0"));
+assert.equal(v2Marked.length, 1, `exactly one row leads in a v2 molecule: ${headerLines.join(" | ")}`);
+assert.ok(v2Marked[0].includes(v2Current.title), `the marked row is still the step bd reports current: ${v2Marked[0]}`);
+assert.ok(!v2Marked[0].includes("Explore project context"), "the dropped explore row is not the marked one");
 
-// Review Focus 4: v3 — explore closed, conversation current — two rows, explore first.
-// (Placed here, not with the v1 cases, because its fixture spreads `bstate`.)
+// Review Focus 4: v3 — explore closed, conversation leading — two rows, explore first, and
+// the conversation row's ◐ can only come from the lead logic: its own status is `open`
+// (`markerFor` gives ○), `is_current` is false, and the gated `design-approved` step is demoted to
+// pending so it cannot out-rank conversation as the deepest ready step. Placed here, not with the
+// v1 cases, because its fixture spreads `bstate`.
 const v3State = {
   ...bstate,
   current_step: {
@@ -520,17 +531,22 @@ const v3State = {
     },
     ...bstate.steps.map((s) =>
       s.labels.includes("step:conversation")
-        ? { ...s, status: "in_progress", step_status: "current", is_current: true }
+        ? { ...s, status: "open", step_status: "ready", is_current: false }
         : s.labels.includes("step:playback")
           ? { ...s, status: "closed", step_status: "done", is_current: false }
-          : s,
+          : s.labels.includes("step:design-approved")
+            ? { ...s, status: "open", step_status: "pending", is_current: false }
+            : s,
     ),
   ],
 };
 const v3Lines = moleculeWidgetLines(v3State, 200);
 const v3ExploreIdx = v3Lines.findIndex((l) => l.includes("Explore project context"));
 const v3ConvIdx = v3Lines.findIndex((l) => l.includes("Draw out intent"));
-assert.ok(v3ExploreIdx !== -1 && v3ConvIdx > v3ExploreIdx, `v3 explore row leads conversation: ${v3Lines.join(" | ")}`);
+assert.ok(
+  v3ExploreIdx !== -1 && v3ConvIdx === v3ExploreIdx + 1,
+  `v3 explore row leads conversation, adjacent: ${v3Lines.join(" | ")}`,
+);
 assert.ok(v3Lines[v3ConvIdx].includes("\u25d0"), `v3 conversation row is current: ${v3Lines[v3ConvIdx]}`);
 assert.ok(
   headerLines[0].includes("Superpowers:") && headerLines[0].includes("Superpowers widget changes"),

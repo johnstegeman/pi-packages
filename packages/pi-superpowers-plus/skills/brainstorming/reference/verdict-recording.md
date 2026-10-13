@@ -5,8 +5,10 @@
 > `await tools.beads_update({ ... })` — and find the deferred ones with
 > `await searchTools("beads")`. The call shapes below are that script's arguments.
 
-Edge cases for recording the verdict on the `design-approved` step. The Approved and
-Changes-requested commands are in `SKILL.md`; this file covers the surrounding procedure.
+Edge cases for recording the verdict and closing the pre-implement steps: the `design-approved`
+verdict in detail, plus the fast route's ordered close sequence for every step before `implement`.
+The Approved and Changes-requested commands are in `SKILL.md`; this file covers the surrounding
+procedure.
 
 ## Changes requested
 
