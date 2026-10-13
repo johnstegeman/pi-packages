@@ -44,6 +44,16 @@ The gate bead's `description` is the **canonical Global Constraints artifact**: 
 where the constraints block is authored (exact values, exact formats, stated component
 relationships). It stays readable after the gate is resolved/closed.
 
+Author that block to upstream's content rule: the spec's project-wide requirements — version
+floors, dependency limits, naming and copy rules, platform requirements — **one line each,
+with exact values copied verbatim from the spec.** Every task's requirements implicitly
+include this section.
+
+The same description also carries a `## Review Focus` block: the input classes or failure
+modes the spec implies but no task's tests exercise, most likely to bite a person first, one
+line each. Write the **list** here once, at plan level, with the spec in front of you — then
+put **each line's test into the owning task**, in that task's own step style.
+
 Each task bead's `description` is the task's **entire** breakdown — every step, every
 code block, exactly as written. This bead is what
 `executing-plans`/`subagent-driven-development` read during execution —

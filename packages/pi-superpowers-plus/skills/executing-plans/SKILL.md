@@ -35,8 +35,13 @@ Call `set_phase({ phase: "development" })`.
    task bead's status and the current/next step.
 2. Review critically — read each task bead's full description
    (`beads_show({ id: "<task-id>" })`) and identify any questions or concerns about the plan.
-3. If concerns: Raise them with your human partner before starting.
-4. If no concerns: confirm the `plan-approved` gate is resolved
+3. Read the plan-level constraints: `beads_show({ id: "<plan-approval-gate-bead-id>", full: true })`.
+   The plan-approval gate bead's description holds the plan-level **Global Constraints** and
+   **Review Focus** blocks, and every task's requirements implicitly include them. On this route
+   nothing else surfaces them to whoever works a task — unlike the subagent-driven route, whose
+   dispatch scripts pass the gate bead directly — so read them before starting.
+4. If concerns: Raise them with your human partner before starting.
+5. If no concerns: confirm the `plan-approved` gate is resolved
    (`beads_show({ id: "<plan-approval-human-gate-id>" })` — status should be `closed`; if not, stop and ask
    the human to run `beads_gate_resolve({ id: "<plan-approval-human-gate-id>" })` before proceeding).
 

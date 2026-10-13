@@ -30,6 +30,9 @@ Each task's Acceptance Criteria are also passed as the `acceptance` field in
 - Produces: [what later tasks rely on — exact function names, parameter
   and return types. A task's implementer sees only their own task; this
   block is how they learn the names and types neighboring tasks use.]
+- Constraints: the plan-approval gate bead (`RESULT.gate`), which holds the
+  Global Constraints and Review Focus blocks. Read it before you start —
+  `beads_show({ id: "<plan-approval-gate-bead-id>", full: true })`.
 
 **Acceptance Criteria:**
 - [ ] [observable, checkable outcome — one per line]
