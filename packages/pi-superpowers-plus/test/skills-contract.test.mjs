@@ -281,4 +281,13 @@ test("beads guardrail: no prompt source is left unguarded", () => {
   assert.deepEqual(offenders, [], "every prompt source must carry CORE — see the spec's inventory");
 });
 
+test("the brainstorming pour is unconditional", () => {
+  const skill = readFileSync(join(root, "skills", "brainstorming", "SKILL.md"), "utf8");
+  assert.match(skill, /\*\*Pour before you speak — unconditionally\.\*\*/);
+  assert.doesNotMatch(skill, /Once the private check says something non-trivial/);
+  assert.doesNotMatch(skill, /there is no molecule, no widget, and no step/);
+  assert.match(skill, /\*\*A document is named\*\*/);
+  assert.match(skill, /the molecule stays, and its skipped steps are closed as skipped/);
+});
+
 run();

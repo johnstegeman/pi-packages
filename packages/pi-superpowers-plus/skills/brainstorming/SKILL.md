@@ -23,13 +23,14 @@ At the start of the skill, call `set_phase({ phase: "brainstorming" })`.
 
 ## Tracking This Session
 
-Work at **small change** and **project** size runs against a beads molecule,
-so the step you are on is visible in the widget and survives a resume. A
-**quick, clear task** does not: there is no molecule, no widget, and no step
-bookkeeping — do the work and say what you did.
+Every session runs against a beads molecule, so the step you are on is visible in the
+widget and survives a resume. The size of the work decides which steps you *work* and
+which you *close as skipped* — never whether the molecule exists.
 
-**Pour before you speak.** Once the private check says something non-trivial
-is missing, pour the workflow formula before you send your first message:
+**Pour before you speak — unconditionally.** Pour the workflow formula and put the widget
+on screen *before* you read any file, run any command, or look at the project in any way.
+This is not a judgement call and it has no exception: an existing bead or epic does not
+release you from pouring.
 
   beads_mol_pour({ proto: "superpowers-workflow", vars: "topic=<topic>" })
 
@@ -97,11 +98,15 @@ and closes the gated `spec-approved` step, freeing `implement`. Find it via
 
 ## First: What Do You Actually Know?
 
-Before you reply, ask yourself: what do I know about what they want, and
-why?
+You have already poured — the molecule exists either way. Before you reply, ask
+yourself: what do I know about what they want, and why?
 
 - **Everything that matters is in the request** ("make the icon cornflower
-  blue"). This is a quick, clear task. Do it, and say what you did.
+  blue"). This is a fast task: your first message may lead with the offer to
+  skip the questions.
+- **A document is named** — a bead, a spec, an issue, a file. That is not a
+  self-contained request and it is not a fast task. Read it first: that is what
+  `explore` is for.
 - **Something non-trivial is missing.** Start the conversation.
 
 ## Your First Message
@@ -259,8 +264,10 @@ dependencies, creating projects, and invoking an implementation skill.
 Reading and exploring are fine. This applies to EVERY project regardless
 of perceived simplicity.
 
-Two exceptions. If they opted out of the questions, the skill is done and
-the gate goes with it. A spike they said yes to may be built; it stays
+Two exceptions. If they opted out of the questions, the gate goes with it —
+the molecule stays, and its skipped steps are closed as skipped (see
+`## Tracking This Session`).
+A spike they said yes to may be built; it stays
 labeled throwaway, and keeping what it produced is a new request that
 comes back through this gate.
 
