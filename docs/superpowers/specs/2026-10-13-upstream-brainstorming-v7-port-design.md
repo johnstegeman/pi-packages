@@ -232,7 +232,7 @@ look complete.
 | Size | Read code and docs | Write to `docs/superpowers/specs/` | Edit anything else |
 |---|---|---|---|
 | A quick, clear task | yes | no | no — do the work itself |
-| A small change | yes | no (the description lives in chat) | no — build it through the normal workflow once approved |
+| A small change | yes | no (the description lives in chat) | no — do the work directly in the `implement` step once approved |
 | A project | yes | yes | no |
 ```
 
@@ -289,10 +289,10 @@ ids at runtime with
 | `conversation` | you have drawn out intent — questions, playback, and any recon your partner asked for are one continuous phase |
 | `playback` | your partner has corrected your playback and you agree on the description. **Record the size in the close reason** (`size: project` / `size: small change`) |
 | `design-approved` | your partner approved the full description — in chat for a small change, by reading the document for a project |
-| `write-spec` | the document is written and committed, and the four-point self-review is clean. **Project size only** — for a small change, close this and the two steps below as skipped: `"small change: description agreed in chat"` |
+| `write-spec` | the document is written and committed, and the four-point self-review is clean. **Project size only** — for a small change, close this and `spec-review` as skipped (`"small change: description agreed in chat"`) and resolve the `spec-approved` gate (`beads_gate_resolve`), which closes the gated `spec-approved` step in the same call |
 | `spec-review` | the builder check returned and its questions were sorted (§ The Written Design) |
 | `spec-approved` | your partner has reviewed the document and answered the "theirs" pile |
-| `implement` | leave open — it represents the whole implementation phase |
+| `implement` | **project:** leave open — it represents the whole implementation phase, and `writing-plans` creates the task beads under it. **small change:** the work is done directly here; close it when it is done, so `wrap-up`/`verify`/`finish` can run |
 
 **When you claim step N+1, close step N in the same turn.** This applies to
 every handoff between consecutive steps, not just the pairs called out above.
@@ -309,13 +309,20 @@ ready:
 - Changes requested: `beads_update({ id: "<step-id>", setMetadata: "review.verdict=iterate" })`,
   then comment a specific revision summary and loop back. Do NOT resolve the gate.
 
+**Small change:** `spec-approved` is skipped, but its gate still blocks `implement`
+step, so resolve it without a verdict: close `write-spec` and `spec-review` as
+skipped, then `beads_gate_resolve({ id: "<spec-approved-gate-id>" })` — the one
+call resolves the gate and closes the gated `spec-approved` step, freeing
+`implement`. Find it via
+`beads_list({ label: "step:gate-spec-approved", mol: "<root-id>" })`.
+
 > **Read now:** [reference/verdict-recording.md](reference/verdict-recording.md) —
 > resume, changes-requested, and gate-resolve edge cases.
 ```
 
 **Two drafting notes for `/plan`:**
 
-1. The `write-spec` row encodes the §6.1 resolution (close-as-skipped). If the plan prefers an explicit `size` step, that row and §7 change together.
+1. The `write-spec` row encodes the §6.1 resolution (close-as-skipped + gate resolve). If the plan prefers an explicit `size` step, that row and §7 change together.
 2. The step table's middle column is prose, not commands — the plan should keep it that way, since the current skill's over-specification of close mechanics is part of what made it long.
 
 ---
@@ -330,18 +337,20 @@ ready:
 
 1. **The pre-check gates the pour.** Upstream's `## First: What Do You Actually Know?` is a private, exploration-free check, so it can run before anything is poured. "Everything that matters is in the request" → no molecule at all. Anything non-trivial → pour, then send the first message.
 2. **The pour therefore happens earlier than today, not later.** Today's gate says "before you read any files, run any commands, or explore the project in any way". Under upstream's flow there is no exploration before the first message, so pouring at the pre-check satisfies the gate's purpose in a stronger form.
-3. **A small change closes the document steps as skipped.** The three-way size is only known *after* the conversation, so a single unconditioned pour is the only mechanism available without new beads tools (§1.4). When the size resolves to "small change", `write-spec`, `spec-review`, and `spec-approved` close with reason `"small change: description agreed in chat"`.
+3. **A small change closes `write-spec` and `spec-review` as skipped and resolves the `spec-approved` gate.** The three-way size is only known *after* the conversation, so a single unconditioned pour is the only mechanism available without new beads tools (§1.4). When the size resolves to "small change", `write-spec` and `spec-review` close with reason `"small change: description agreed in chat"`, then `beads_gate_resolve` on `step:gate-spec-approved` resolves the gate and closes the gated `spec-approved` step in the same call, freeing `implement`. `implement` is then worked directly — no `writing-plans`, no task beads — and closed by the agent when the work is done.
+
+> **Revised after final review.** This section originally had all three document steps close as skipped. That is unimplementable: `spec-approved` is the gated step of the formula's `[steps.gate] type = "human"`, and beads enforces close order, so `bd close` fails with "cannot close blocked issue" while the gate is open. The user ruled that a small change resolves the gate as skipped instead — `beads_gate_resolve` clears the gated step in the same call — which is the mechanism the shipped skill and `reference/verdict-recording.md` now describe.
 
 **Why close-as-skipped rather than the alternatives:**
 
 | Option | Mechanism | Verdict |
 |---|---|---|
-| **A1 (chosen)** | one formula, poured at pre-check; document steps closed-as-skipped on small changes | No new machinery; widget present from the first message through the whole conversation (where resume-safety matters most); reads honestly in `bd mol show` — those steps were considered and skipped, not silently absent. Cost: ~3 closed-as-skipped steps on a small change |
+| **A1 (chosen)** | one formula, poured at pre-check; `write-spec`/`spec-review` closed-as-skipped and the `spec-approved` gate resolved on small changes | No new machinery; widget present from the first message through the whole conversation (where resume-safety matters most); reads honestly in `bd mol show` — those steps were considered and skipped, not silently absent. Cost: ~2 closed-as-skipped steps and a gate resolve on a small change |
 | **A2** | one formula with `condition` on the document steps, poured at the *size decision* | Clean step list, no skipped steps — but no widget during the conversation, which is the longest phase, and the fork's largest investment (Step 0 + the widget extension) exists precisely to cover it. Rejected |
 | **B** | two formulas bonded at the size decision | Cleanest widget, but needs a new `beads_mol_bond` tool in pi-beads. Recorded as a follow-up (§2.2) |
 | **C** | one formula, `bd mol squash` on small changes | Needs a new tool, and throws away the small change's tracking. Rejected |
 
-**The honest cost, stated plainly:** a small-change session shows roughly three steps closed-as-skipped. That is bookkeeping, not work, and the widget already renders closed steps. If it proves noisy in practice, option B is the escape hatch.
+**The honest cost, stated plainly:** a small-change session shows roughly two steps closed-as-skipped (plus a gate resolve that also clears the gated `spec-approved` step). That is bookkeeping, not work, and the widget already renders closed steps. If it proves noisy in practice, option B is the escape hatch.
 
 ### 6.2 The builder check vs. the `spec-review` step
 
@@ -382,7 +391,7 @@ These are different instruments, which is why a naive port breaks:
 | `explore`, `clarify`, `approaches` | **`conversation`** | `Draw out intent: {{topic}}` | — | upstream folds recon, questions, and private option-generation into one continuous phase; three steps there would invent gates upstream deliberately removed |
 | `design` | **`playback`** | `Play back understanding` | `conversation` | renamed to upstream's term; the size is recorded in this step's close reason rather than given its own step |
 | `design-approved` | unchanged | `User approves the full description` | `playback` | title already matches upstream; `[steps.gate] type = "human"` unchanged |
-| `write-spec` | unchanged | `Write the design document` | `design-approved` | project size only; closed-as-skipped otherwise (§6.1) |
+| `write-spec` | unchanged | `Write the design document` | `design-approved` | project size only; `write-spec`/`spec-review` closed-as-skipped and the `spec-approved` gate resolved otherwise (§6.1) |
 | `spec-review` | unchanged id | `Builder check` | `write-spec` | content changes (§6.2) |
 | `spec-approved` | unchanged | `User reviews the document` | `spec-review` | gate unchanged |
 | `implement` | unchanged | `Implement {{topic}}` | `spec-approved` | unchanged |

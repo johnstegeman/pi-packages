@@ -53,9 +53,9 @@ what's unblocked right now):
 1. Claim it: `beads_update({ id: "<task-id>", claim: true })` (atomically sets assignee + `in_progress`).
 2. Follow the task bead's full description exactly (it holds the same bite-sized steps that used to live in a plan file — now they live in the
    task bead's description).
-3. Run verifications as specified in the description. Record each result; when a passing
-   command prints nothing, record `→ (no output)` — a finished task must not read as
-   unfinished.
+3. Run verifications as specified in the description. Record each result in the batch report
+   (Step 3) and the close reason (step 4); when a passing command prints nothing, record
+   `→ (no output)` — a finished task must not read as unfinished.
 4. Close it: `beads_close({ ids: "<task-id>", reason: "<what was done>" })` — this unblocks whatever
    depended on it; re-run `beads_mol_ready({ id: "<implement-step-id>" })` to see the next batch.
 

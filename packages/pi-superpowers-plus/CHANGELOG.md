@@ -8,6 +8,7 @@ Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ---
 
 ## [Unreleased]
+
 ### Changed
 
 - **The `brainstorming` skill is rebuilt on upstream superpowers v7.0.0's spine** (upstream PRs

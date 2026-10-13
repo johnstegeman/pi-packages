@@ -18,7 +18,7 @@ time), so ids come out `parent.1, parent.2, … ` matching Task 1..N, which is w
 RESULT = beads_create_list({
   parent: "<implement-step-id>",
   gate: {
-    description: "## Global Constraints\n<the constraints block, authored here>",
+    description: "## Global Constraints\n<the constraints block, authored here>\n\n## Review Focus\n<the five uncovered input classes / failure modes, authored here>",
     reason: "Plan approval",
   },
   tasks: [
@@ -44,15 +44,19 @@ The gate bead's `description` is the **canonical Global Constraints artifact**: 
 where the constraints block is authored (exact values, exact formats, stated component
 relationships). It stays readable after the gate is resolved/closed.
 
-Author that block to upstream's content rule: the spec's project-wide requirements — version
-floors, dependency limits, naming and copy rules, platform requirements — **one line each,
-with exact values copied verbatim from the spec.** Every task's requirements implicitly
-include this section.
+Author that block to upstream's content rule, verbatim:
 
-The same description also carries a `## Review Focus` block: the input classes or failure
-modes the spec implies but no task's tests exercise, most likely to bite a person first, one
-line each. Write the **list** here once, at plan level, with the spec in front of you — then
-put **each line's test into the owning task**, in that task's own step style.
+> The spec's project-wide requirements — version floors, dependency limits,
+> naming and copy rules, platform requirements — one line each, with exact
+> values copied verbatim from the spec. Every task's requirements implicitly
+> include this section.
+
+The same description also carries a `## Review Focus` block: the **five** input classes or
+failure modes the spec implies but no task's tests exercise, most likely to bite a person
+first, one line each. The spec is a vision document — its silence on an input is not
+permission for that input to break the program. Write the **list** here once, at plan level,
+with the spec in front of you — then put **each line's test into the owning task**, in that
+task's own step style.
 
 Each task bead's `description` is the task's **entire** breakdown — every step, every
 code block, exactly as written. This bead is what
