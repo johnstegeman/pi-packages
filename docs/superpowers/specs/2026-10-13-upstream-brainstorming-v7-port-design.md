@@ -127,9 +127,9 @@ The formula schema *does* support a `condition` field (`bd formula schema Step`)
 | `## File Structure` | adopt verbatim | unchanged | already identical, including the existing-codebase bullet |
 | `## Task Right-Sizing` | adopt verbatim | unchanged | already identical |
 | `## Step Granularity` (was `## Bite-Sized Task Granularity`; "one action with a checkable result", no "2-5 minutes") | adopt verbatim | rename local section | |
-| `## Plan Document Header` | adapt | `implement` step description | local has no plan file — see §8.3 |
-| `## Global Constraints` | adapt | `implement` step description | see §8.3 |
-| `## Review Focus` | adapt | `implement` step description | see §8.3 |
+| `## Plan Document Header` | adapt — optional | plan-approval gate bead description | no plan file to head; Goal/Architecture/Tech Stack/Spec-path are optional plan-level metadata — §8.3 finding 5 |
+| `## Global Constraints` | adapt | **plan-approval gate bead description — already implemented** | the fork already authors this block there (`reference/creating-task-beads.md`); only upstream's *content rule* needs adopting — §8.3 finding 1 |
+| `## Review Focus` | adapt | plan-approval gate bead description (new) | the list lives once at plan level; each line's **test** goes into the owning task — §8.3 finding 4 |
 | `## Task Structure` example — Step 3 becomes a signature + one line on approach | adapt | `reference/task-template.md` | local's template carries the code-block form today |
 | `## What a Step Contains` (new; replaces `## No Placeholders`) | adopt reworded | new section + `reference/red-flags.md` | **inverts** the local red-flags catalog — see §8.2 |
 | `## Self-Review` item 2 "Placeholder scan" → "Step scan" | adopt verbatim | `## Self-Review` item 2 | points at `reference/red-flags.md` |
@@ -456,13 +456,21 @@ longer than the code it describes has written the code instead.
 
 Note the flipped bullet: the current file says "code blocks required for code steps", which is now the *transcript* failure rather than the *gap* failure. The two headings exist so the inversion is visible to the next reader instead of reading as a lost rule.
 
-### 8.3 The one genuinely open adaptation — upstream's plan *document* sections
+### 8.3 Upstream's plan *document* sections — and a corrected finding
 
-v7.0.0 has `## Plan Document Header`, `## Global Constraints`, and `## Review Focus`, all of which hang off a plan *file*. Local has no plan file: "the plan output is the task beads, not a separate document." Those three sections therefore have no local home.
+v7.0.0 has `## Plan Document Header`, `## Global Constraints`, and `## Review Focus`, all of which hang off a plan *file*. Local has no plan file: "the plan output is the task beads, not a separate document."
 
-**Recommendation:** put **Global Constraints and Review Focus in the `implement` step's description** — it is already the container every task bead hangs under, and it is already what the handoff passes to execution (`beads_show({ id: "<implement-step-id>" })`). Add one line to the task-bead template's `Interfaces` block pointing there, so an implementer who sees only their own task knows the constraints exist.
+**This was flagged as an assumption during design and has now been verified by reading `executing-plans` and `subagent-driven-development`. The verification overturned the design-stage recommendation, which was to put these on the `implement` step's description. They do not go there, and doing so would create a competing second home for something the fork already has.**
 
-**Flagged, not assumed:** this only works if `executing-plans` / `subagent-driven-development` actually surface the implement step's description to each implementer. If they don't, the fallback is repeating the constraints into each task bead — exactly the duplication upstream's document avoids. Whether the downstream wiring belongs to this port is left to `/plan` (§10), which reads those two skills rather than assuming.
+The findings:
+
+1. **`## Global Constraints` is already implemented locally.** The fork authors a Global Constraints block into the **plan-approval gate bead's description** — `reference/creating-task-beads.md` calls it "the canonical Global Constraints artifact… this is where the constraints block is authored (exact values, exact formats, stated component relationships). It stays readable after the gate is resolved/closed." It is created by `beads_create_list({ parent, gate: { description: "## Global Constraints\n…" }, tasks: [...] })` and read back with `beads_show({ id: GATE_ID, full: true })`. So the disposition for upstream's `## Global Constraints` is **adapt — the home already exists; only upstream's content rule needs adopting** ("one line each, with exact values copied verbatim from the spec. Every task's requirements implicitly include this section").
+2. **`subagent-driven-development` already consumes it as the attention lens.** `scripts/wave-parallel.js`, `scripts/fix-loop.js`, and `scripts/final-review.js` all hand reviewers and implementers "Global Constraints (attention lens), from a codemode script: `beads_show({ id: "<gateBeadId>", full: true })`". SDD's Setup calls the gate bead "the single source handed to reviewers (task beads still inline the constraints for implementers)". **The SDD route needs no change.**
+3. **`executing-plans` does not read it at all** — Step 1 checks only that the *human* gate is closed (`beads_show({ id: "<plan-approval-human-gate-id>" })`), then works task beads directly. So on the executing-plans route nothing currently surfaces the plan-level constraints to whoever works a task. **This is the one real gap the verification found**, and it is a one-line addition to `executing-plans` Step 1: read the gate bead's description alongside the task beads.
+4. **`## Review Focus` has no local equivalent and belongs in the same place** — the plan-approval gate bead's description, alongside Global Constraints. It is plan-level and reviewers already read that bead. Upstream's nuance is preserved: the *list* is written once at plan level, and **each line's test goes into the owning task**, in that task's own step style.
+5. **`## Plan Document Header` has no local home and does not need one** — there is no plan document to head. Its remaining content (Goal, Architecture, Tech Stack, Spec path) is plan-level metadata; the same gate bead's description is the natural place for it, but it is a nice-to-have rather than a requirement. Recommend recording it as `adapt — optional` rather than inventing a home for it.
+
+**Net effect on scope:** §8.3 shrinks from "the one genuinely open adaptation" to one new plan-level section (Review Focus) in an existing artifact, one content-rule adoption (Global Constraints wording), and one one-line fix to `executing-plans`. No change to the `implement` step.
 
 **Drafted:** two changes to `reference/task-template.md`.
 
@@ -484,11 +492,12 @@ The `Interfaces` block, gaining a pointer to the plan-level constraints:
 - Produces: [what later tasks rely on — exact function names, parameter
   and return types. A task's implementer sees only their own task; this
   block is how they learn the names and types neighboring tasks use.]
-- Constraints: the `implement` step's description (Global Constraints,
-  Review Focus). Read it before you start.
+- Constraints: the plan-approval gate bead (`RESULT.gate`), which holds the
+  Global Constraints and Review Focus blocks. Read it before you start —
+  `beads_show({ id: "<plan-approval-gate-bead-id>", full: true })`.
 ````
 
-The third line is the §8.3 destination, and it is the line the plan must verify is actually reachable from an implementer's context.
+The third line points at the **plan-approval gate bead**, not the `implement` step (§8.3 finding 1). It is cheap insurance: on the SDD route the dispatch scripts already pass the constraints, but on the `executing-plans` route a task worker has no other pointer to them.
 
 ---
 
@@ -512,7 +521,7 @@ Deliberately not decided here:
 - **Builder-check dispatch mode** (blocking vs. background) — which determines whether upstream's "say a reviewer will read it first" sentence is droppable or necessary (§6.2).
 - **The exact wording of every new/changed `SKILL.md` section** — §4, §5, and §8 draft it; the plan makes it authoritative.
 - **Whether `size` gets its own formula step** or stays folded into `playback`'s close reason (§7).
-- **Whether §8.3's downstream wiring is in this port or a follow-up bead** — determined by reading `executing-plans` / `subagent-driven-development`, not assumed.
+- ~~Whether §8.3's downstream wiring is in this port~~ — **settled during spec review**: `subagent-driven-development` already consumes the plan-approval gate bead's Global Constraints as its attention lens and needs no change; `executing-plans` does not read it and needs a one-line addition (§8.3 findings 2–3).
 - **Whether the close-as-skipped cost is acceptable in practice**, or whether option B (new `beads_mol_bond` tool) is worth the pi-beads change (§6.1).
 
 ---
@@ -525,7 +534,7 @@ One epic plus **four** beads, grouped so each is one coherent change that leaves
 |---|---|---|---|
 | **B1 — brainstorming re-base** | upstream spine + tracking layer, the 9→7 step folds, gate collapse, size-conditional boundaries, `builder-check-prompt.md` port, and the four `reference/` re-derivations | `skills/brainstorming/*`, `formulas/superpowers-workflow.formula.toml` | — |
 | **B2 — writing-plans v7** | Overview, Step Granularity, What a Step Contains, task-template Step 3, the `red-flags.md` inversion, Self-Review items 2 and 5 | `skills/writing-plans/*` | — |
-| **B3 — plan-level constraints** | Global Constraints + Review Focus on the `implement` step description, the task-template `Interfaces` pointer, and the verification that `executing-plans` / `subagent-driven-development` surface it | `skills/writing-plans/reference/task-template.md`, `skills/executing-plans/*`, `skills/subagent-driven-development/*` | B2 (shared file) |
+| **B3 — plan-level constraints** | adopt upstream's Global Constraints *content rule* into the existing gate-bead authoring text; add Review Focus to the same bead; add the task-template `Interfaces` constraints pointer; add the one-line gate-bead read to `executing-plans` Step 1. **No change to the `implement` step, and no change to `subagent-driven-development`** (§8.3 findings 1–4) | `skills/writing-plans/reference/creating-task-beads.md`, `skills/writing-plans/reference/task-template.md`, `skills/executing-plans/SKILL.md` | B2 (shared files) |
 | **B4 — upstream one-line fixes** | the three fixes from §9.6 | three skills, one line each | — |
 
 **When:** created **with this spec, after the builder check and user approval** — so the backlog reflects the approved document rather than a draft, and so the epic stays outside the "no implementation action before approval" gate.
