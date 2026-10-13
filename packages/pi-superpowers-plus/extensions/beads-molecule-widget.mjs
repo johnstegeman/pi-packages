@@ -1,5 +1,6 @@
 import { createHash } from "node:crypto";
 import { readFileSync } from "node:fs";
+import { parseFormulaSteps } from "./formula-parse.mjs";
 
 /**
  * Pure parsing + rendering for the superpowers molecule widget.
@@ -255,12 +256,14 @@ export function pickWorkspaceMolecule(candidates) {
 // The widget and the formula ship in the same package. Steps are resolved by the
 // `step:<key>` labels stamped at pour time (spec 2026-09-03-step-labels-at-pour-design.md),
 // so renaming a step's human-readable title cannot silently detach the widget from the
-// formula. The topic is the one thing a title still carries, and even its prefix is read
-// from the shipped formula rather than restated here.
+// formula. A title still carries two things the widget matches by title, though: the topic
+// (its prefix is read from the shipped formula rather than restated here) and the implement
+// head / wrap-up step (`phaseFor` and `isWrapUpStep` below).
 
 const FORMULA_FILE = new URL("../formulas/superpowers-workflow.formula.toml", import.meta.url);
 const TOPIC_VAR = "{{topic}}";
 const CONVERSATION_KEY = "conversation";
+const LEGACY_TOPIC_PREFIX = "Explore project context: ";
 
 /** True when a step carries the `step:<key>` label stamped at pour time. */
 export function hasStepKey(step, key) {
@@ -278,24 +281,10 @@ export function stepByKey(steps, key) {
  * such step or no topic placeholder.
  */
 export function topicPrefix(formulaSource) {
-  let id = null;
-  for (const line of String(formulaSource ?? "").split("\n")) {
-    if (line.trim() === "[[steps]]" || line.startsWith("[steps.gate]")) {
-      id = null;
-      continue;
-    }
-    const stepId = line.match(/^id\s*=\s*"([^"]+)"/);
-    if (stepId) {
-      id = stepId[1];
-      continue;
-    }
-    const title = line.match(/^title\s*=\s*"([^"]*)"/);
-    if (title && id === CONVERSATION_KEY) {
-      const at = title[1].indexOf(TOPIC_VAR);
-      return at < 0 ? "" : title[1].slice(0, at);
-    }
-  }
-  return "";
+  const conversation = parseFormulaSteps(formulaSource).find((s) => s.id === CONVERSATION_KEY);
+  if (!conversation) return "";
+  const at = conversation.title.indexOf(TOPIC_VAR);
+  return at < 0 ? "" : conversation.title.slice(0, at);
 }
 
 let cachedTopicPrefix;
@@ -321,9 +310,17 @@ export function topicFor(state) {
     const t = conversation.title.slice(prefix.length).trim();
     if (t) return t;
   }
-  // No `step:conversation` label, no matching title prefix, or no readable formula:
-  // fall back to the molecule title. Molecules poured before pour-time label stamping
-  // (pre-2026-09-03) carry no labels, so they always take this branch.
+  // Formula v1 molecules carry no `step:conversation` label: the topic rode on the `explore`
+  // step's title. Read it back from there so an in-flight v1 molecule keeps its real topic
+  // rather than the formula name.
+  const legacyExplore = state.steps.find((s) => s.title?.startsWith(LEGACY_TOPIC_PREFIX));
+  if (legacyExplore) {
+    const t = legacyExplore.title.slice(LEGACY_TOPIC_PREFIX.length).trim();
+    if (t) return t;
+  }
+  // No `step:conversation` label, no legacy `explore` title, no matching title prefix, or no
+  // readable formula: fall back to the molecule title. Molecules poured before pour-time label
+  // stamping (pre-2026-09-03) carry no labels, so they always take this branch.
   return state.molecule_title ?? "";
 }
 
@@ -492,9 +489,25 @@ export function waitingReviewStep(state, chainOrder) {
 
 const MAX_LINES = 15;
 
-/** Resolve the canonical view keys against the molecule's steps (missing -> dropped). */
+// Formula v1 molecules (step ids explore/clarify/approaches/design) predate the pour-time
+// labels the views key on. When a view key resolves to nothing, fall back to the v1 step(s)
+// that folded into it, so an in-flight v1 molecule keeps its leading rows and the real
+// current step leads — instead of the first surviving row (`design-approved`) being shown
+// as the current one.
+const LEGACY_VIEW_FALLBACK = {
+  conversation: ["explore", "clarify", "approaches"],
+  playback: ["design"],
+};
+
+/** The v1 step standing in for `key`: the first present, not-done one (the live step), else the last present. */
+function legacyStepFor(steps, key) {
+  const present = (LEGACY_VIEW_FALLBACK[key] ?? []).map((k) => stepByKey(steps, k)).filter(Boolean);
+  return present.find((s) => s.step_status !== "done" && s.status !== "closed") ?? present[present.length - 1];
+}
+
+/** Resolve the canonical view keys against the molecule's steps (missing -> dropped; v1 key -> legacy step). */
 function resolveRows(steps, keys) {
-  return keys.map((key) => stepByKey(steps, key)).filter(Boolean);
+  return keys.map((key) => stepByKey(steps, key) ?? legacyStepFor(steps, key)).filter(Boolean);
 }
 
 /** Keep ≤ justUnder slots, closed rows last; tail `+N more` counts the overflow. */
@@ -594,7 +607,7 @@ export function moleculeWidgetLines(state, width, theme) {
   };
   if (gateCurrent) rows.push(awaitingLine);
 
-  const stepRow = (step, label, lead) => {
+  const stepRow = (step, lead) => {
     const active = step === awaitingStep || (lead && step === lead);
     return {
       text: assemble(
@@ -604,7 +617,7 @@ export function moleculeWidgetLines(state, width, theme) {
             paint: (t) => fg(step.status === "closed" ? "text" : "warning", t),
           },
           { text: ` ${step.id ?? ""}`, paint: (t) => fg("muted", t) },
-          { text: ` ${label ?? step.title ?? ""}`, paint: (t) => fg(step.status === "closed" ? "muted" : "text", t) },
+          { text: ` ${step.title ?? ""}`, paint: (t) => fg(step.status === "closed" ? "muted" : "text", t) },
         ],
         width,
       ).text,
@@ -616,7 +629,7 @@ export function moleculeWidgetLines(state, width, theme) {
   if (phase === "brainstorming") {
     const view = resolveRows(state.steps, BRAINSTORM_VIEW);
     const lead = leadCandidate(view);
-    for (const s of view) rows.push(stepRow(s, null, lead));
+    for (const s of view) rows.push(stepRow(s, lead));
   } else if (phase === "implementing") {
     const [impl, ...kids] = chainOrder;
     if (impl) rows.push(stepRow(impl));
@@ -648,12 +661,12 @@ export function moleculeWidgetLines(state, width, theme) {
     // as a top-level row and carries the only ◐ marker.
     const wrapUp = state.steps.find((s) => isWrapUpStep(s.title));
     if (impl.step_status === "done" && wrapUp && wrapUp.step_status !== "done") {
-      rows.push(stepRow(wrapUp, null, wrapUp));
+      rows.push(stepRow(wrapUp, wrapUp));
     }
   } else if (phase === "finishing") {
     const view = resolveRows(state.steps, FINISH_VIEW);
     const lead = leadCandidate(view);
-    for (const s of view) rows.push(stepRow(s, null, lead));
+    for (const s of view) rows.push(stepRow(s, lead));
   }
 
   // Awaiting line when nothing is in progress goes after the view rows, so the

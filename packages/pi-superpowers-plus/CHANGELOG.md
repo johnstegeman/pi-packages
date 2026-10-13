@@ -8,7 +8,47 @@ Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ---
 
 ## [Unreleased]
-_Nothing yet beyond 0.10.0 — all prior work is released._
+### Changed
+
+- **The `brainstorming` skill is rebuilt on upstream superpowers v7.0.0's spine** (upstream PRs
+  #2463/#2482/#2483). The skill draws out what the human actually wants before it proposes
+  anything, then sizes the work — quick task, small change, or project — instead of routing and
+  gating up front. The beads mechanics (molecule pour, per-step claim/close, human gates) survive
+  as an orthogonal tracking layer in `## Tracking This Session`, so `SKILL.md` stays diffable
+  against upstream. A document under `docs/superpowers/specs/` is written for a project only; a
+  small change agrees its description in chat, closes the document steps as skipped (resolving the
+  `spec-approved` gate), and is built directly in the `implement` step. Upstream's
+  visual-companion sections are dropped (no visual companion in pi).
+
+- **The workflow formula is v2: `explore`/`clarify`/`approaches` fold into one `conversation`
+  step and `design` becomes `playback`.** Nine steps become seven, matching upstream's single
+  continuous conversation phase. `formulas/superpowers-workflow.formula.toml` is updated in
+  place; molecules poured under v1 keep working (see Fixed).
+
+- **`writing-plans` picks up the v7.0.0 rework.** A new `## What a Step Contains` replaces
+  `## No Placeholders`, and `reference/red-flags.md` is rewritten around the two opposite failure
+  modes — a *gap* (a line that decides nothing) and a *transcript* (a body the signature and
+  tests already determine) — inverting the old "code blocks required" bullet. `## Overview` is
+  reworded, `## Self-Review` gains upstream's **Review Focus** item (item 4; the local
+  lifecycle-duplicate check moves to item 6).
+
+### Added
+
+- **Plan-level Global Constraints and Review Focus on the plan-approval gate bead.**
+  `writing-plans` authors both blocks into the gate bead's description; the list lives once at
+  plan level and each Review Focus line's test goes into the owning task. Reviewers and
+  implementers read the gate bead as their attention lens.
+
+### Fixed
+
+- **The molecule widget is re-keyed from step titles onto the pour-time `step:` labels**, so a
+  step rename can no longer silently detach the widget from the formula. Molecules poured under
+  formula v1 (labels `step:explore`/`step:clarify`/`step:approaches`/`step:design`) fall back to
+  those legacy keys — and to the v1 `explore` title for the topic — so an in-flight v1 molecule
+  keeps its leading rows and marks the real current step.
+- **Three upstream one-line fixes**: `executing-plans` no longer records `→ (no output)` for a
+  silently-passing command; `requesting-code-review` uses `cut -d' ' -f1` instead of
+  `awk '{print $1}'`; `systematic-debugging` reports only *whether* the identity variable is set.
 
 ---
 

@@ -6,7 +6,7 @@
 > `await searchTools("beads")`. The call shapes below are that script's arguments.
 
 Once the task breakdown is authored and has passed the
-lifecycle-duplicate check (Self-Review item 4), create the real task beads under the
+lifecycle-duplicate check (Self-Review item 6), create the real task beads under the
 `implement` step with **one `beads_create_list` call**. The `tasks` array order IS the plan
 order — `beads_create_list` creates them sequentially (one `bd create --parent` awaited at a
 time), so ids come out `parent.1, parent.2, … ` matching Task 1..N, which is what keeps

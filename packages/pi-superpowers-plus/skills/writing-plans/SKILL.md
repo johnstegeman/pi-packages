@@ -80,7 +80,7 @@ description body after the heading. Each task's Acceptance Criteria are also pas
 ## Creating Tasks as Beads
 
 Once the task breakdown is authored and has passed the lifecycle-duplicate check
-(Self-Review item 4), create the real task beads under the `implement` step with **one
+(Self-Review item 6), create the real task beads under the `implement` step with **one
 `beads_create_list` call**. The `tasks` array order IS the plan order — `beads_create_list`
 creates them sequentially, so ids come out `parent.1..N` matching Task 1..N. Never issue
 multiple create calls for the same plan.
@@ -120,14 +120,16 @@ After writing the complete plan, look at the spec with fresh eyes and check the 
 
 **3. Type consistency:** Do the types, method signatures, and property names you used in later tasks match what you defined in earlier tasks? A function called `clearLayers()` in Task 3 but `clearFullLayers()` in Task 7 is a bug.
 
-4. **Lifecycle-duplicate check:** Does any task in this plan re-implement a phase the
+**4. Review Focus:** For each input class or failure mode the spec implies, is there a task whose tests exercise it? The five uncovered ones most likely to bite a person go in the Review Focus section, and each line there gets its test added to the owning task. An empty section means you checked and found none, not that you skipped the check.
+
+**5. Proportion:** Compare the plan's length to the spec's. A plan several times longer than the spec it implements is a transcript of the program, not a plan. If code blocks are most of the document, replace bodies with signatures, test names and assertions, and check that each step is still unambiguous.
+
+6. **Lifecycle-duplicate check:** Does any task in this plan re-implement a phase the
    molecule already executes as its own formula step — e.g. a task titled "write the
    design doc," "get the spec approved," or "get the plan approved"? Those belong to
    `write-spec`/`spec-approved`/`plan-approved`, not to a task under `implement`. Any
    task that duplicates formula-owned work is a plan bug: remove it before wiring tasks
-   into beads in Step 3 below.
-
-**5. Proportion:** Compare the plan's length to the spec's. A plan several times longer than the spec it implements is a transcript of the program, not a plan. If code blocks are most of the document, replace bodies with signatures, test names and assertions, and check that each step is still unambiguous.
+   into beads in § Creating Tasks as Beads.
 
 If you find issues, fix them inline. No need to re-review — just fix and move on. If you find a spec requirement with no task, add the task.
 

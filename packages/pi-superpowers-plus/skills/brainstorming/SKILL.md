@@ -4,9 +4,9 @@ description: "You MUST use this before any creative work - creating features, bu
 disable-model-invocation: true
 ---
 
-> **Related skills:** Consider `/skill:using-git-worktrees` to set up an isolated workspace. Work
-> that sizes to a project continues in `/skill:writing-plans` (run `/plan`); a quick task or a
-> small change does not.
+> **Related skills:** Consider `/skill:using-git-worktrees` to set up an isolated workspace. Only
+> work that sizes to a project continues in `/skill:writing-plans` (run `/plan`); a quick task and
+> a small change both do not. A small change continues in the molecule's `implement` step instead.
 
 # Brainstorming
 
@@ -67,10 +67,10 @@ ids at runtime with
 | `conversation` | you have drawn out intent — questions, playback, and any recon your partner asked for are one continuous phase |
 | `playback` | your partner has corrected your playback and you agree on the description. **Record the size in the close reason** (`size: project` / `size: small change`) |
 | `design-approved` | your partner approved the full description — in chat for a small change, by reading the document for a project |
-| `write-spec` | the document is written and committed, and the four-point self-review is clean. **Project size only** — for a small change, close this and the two steps below as skipped: `"small change: description agreed in chat"` |
+| `write-spec` | the document is written and committed, and the four-point self-review is clean. **Project size only** — for a small change, close this and `spec-review` as skipped (`"small change: description agreed in chat"`) and **resolve the gate** (`beads_gate_resolve`), which closes the gated `spec-approved` step in the same call |
 | `spec-review` | the builder check returned and its questions were sorted (§ The Written Design) |
 | `spec-approved` | your partner has reviewed the document and answered the "theirs" pile |
-| `implement` | leave open — it represents the whole implementation phase |
+| `implement` | **project:** leave open — it represents the whole implementation phase, and `writing-plans` creates the task beads under it. **small change:** the work is done directly here; close it when it is done, so `wrap-up`/`verify`/`finish` can run |
 
 **When you claim step N+1, close step N in the same turn.** This applies to
 every handoff between consecutive steps, not just the pairs called out above.
@@ -86,6 +86,12 @@ ready:
   `beads_list({ label: "step:gate-design-approved", mol: "<root-id>" })`.
 - Changes requested: `beads_update({ id: "<step-id>", setMetadata: "review.verdict=iterate" })`,
   then comment a specific revision summary and loop back. Do NOT resolve the gate.
+
+**Small change:** `spec-approved` is skipped, but its gate still blocks `implement`.
+Resolve it without a verdict: close `write-spec` and `spec-review` as skipped, then
+`beads_gate_resolve({ id: "<spec-approved-gate-id>" })` — the one call resolves the gate
+and closes the gated `spec-approved` step, freeing `implement`. Find it via
+`beads_list({ label: "step:gate-spec-approved", mol: "<root-id>" })`.
 
 > **Read now:** [reference/verdict-recording.md](reference/verdict-recording.md) — resume, changes-requested, and gate-resolve edge cases.
 
@@ -106,7 +112,7 @@ Your first message is two things, in this order:
    have you just start, they can say so. If they take you up on it, this
    skill is done: state any significant how-it-gets-made choice
    (platform, language, medium) in one plain line, then do what they
-   asked through the normal workflow. This path works no tracking steps; a
+   asked through the normal workflow. This path uses no tracking steps; a
    molecule already poured is simply left where it is.
 2. One open question that gets them describing. Ask about a real moment
    or a concrete picture: "What's the moment you find yourself wishing
@@ -192,7 +198,7 @@ words. They can override it.
 | Size | The full description | Then |
 |------|----------------------|------|
 | A quick, clear task | the request itself | do it |
-| A small change | in chat | build it through the normal workflow |
+| A small change | in chat | worked directly in the `implement` step |
 | A project with a written design | a written design document | a full plan (for software: superpowers:writing-plans) |
 
 If it grows mid-task, stop, say so, and step up a size.
@@ -201,8 +207,8 @@ If this is really several independent projects, say so, agree on an
 order, and brainstorm them one at a time.
 
 **Tracking:** this is the branch that decides the molecule's fate — a small
-change closes `write-spec`, `spec-review`, and `spec-approved` as skipped, a
-project works them all. See [Tracking This Session](#tracking-this-session).
+change closes `write-spec` and `spec-review` as skipped and resolves the
+`spec-approved` gate, a project works them all. See [Tracking This Session](#tracking-this-session).
 
 ## The Written Design
 
@@ -280,12 +286,12 @@ look complete.
 | Size | Read code and docs | Write to `docs/superpowers/specs/` | Edit anything else |
 |---|---|---|---|
 | A quick, clear task | yes | no | no — do the work itself |
-| A small change | yes | no (the description lives in chat) | no — build it through the normal workflow once approved |
+| A small change | yes | no (the description lives in chat) | no — the work is done directly in the `implement` step once approved |
 | A project | yes | yes | no |
 
 ## Reference material
 
-- [reference/anti-patterns.md](reference/anti-patterns.md) — the three anti-patterns: too simple to need a document, rushing the steps, pouring before you speak.
+- [reference/anti-patterns.md](reference/anti-patterns.md) — the three anti-patterns: too simple to need a document, rushing the steps, exploring before you pour.
 - [reference/process-flow.md](reference/process-flow.md) — the brainstorming process-flow diagram and the terminal hand-off state.
 - [reference/process-guidance.md](reference/process-guidance.md) — YAGNI, working in existing codebases, design for isolation (a local addition), and the spec self-review.
 - [reference/verdict-recording.md](reference/verdict-recording.md) — design-verdict edge cases: changes requested, resume, gate-resolve, and close ordering.

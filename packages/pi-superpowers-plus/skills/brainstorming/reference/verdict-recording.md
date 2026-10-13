@@ -40,6 +40,13 @@ unblocks the dependent step and closes the gate bead itself in one call — e.g.
 `writing-plans` reveals the plan, a single `beads_gate_resolve` on the plan-approval gate
 handles both resolve and close, so no separate close is needed.
 
+On the **small-change** path the same call closes the skipped `spec-approved` step: close
+`write-spec` and `spec-review` as skipped (`"small change: description agreed in chat"`), then
+`beads_gate_resolve` on `step:gate-spec-approved` resolves the gate and closes the gated
+`spec-approved` step in one call, which is what frees `implement`. Resolving the gate is
+required — `spec-approved` cannot be closed directly while its gate is open (the
+order-enforcement above), so a small change never closes that step on its own.
+
 ## `spec-review`'s close
 
 `spec-review` is the builder check. Its close reason asserts that the check *returned* and

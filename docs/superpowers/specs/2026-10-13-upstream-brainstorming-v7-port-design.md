@@ -1,6 +1,6 @@
 # Port upstream superpowers v7.0.0 brainstorming (and writing-plans) into pi-superpowers-plus
 
-**Status:** design approved (2026-10-13), spec awaiting user review
+**Status:** approved (2026-10-13); implemented (2026-10-13)
 **Scope:** `packages/pi-superpowers-plus` — `skills/brainstorming/`, `skills/writing-plans/`, `formulas/superpowers-workflow.formula.toml`
 **Upstream:** `obra/superpowers` v7.0.0 (released 2026-10-10) — PRs #2463, #2482, #2483, plus the writing-plans rework in the same release
 
@@ -133,6 +133,7 @@ The formula schema *does* support a `condition` field (`bd formula schema Step`)
 | `## Task Structure` example — Step 3 becomes a signature + one line on approach | adapt | `reference/task-template.md` | local's template carries the code-block form today |
 | `## What a Step Contains` (new; replaces `## No Placeholders`) | adopt reworded | new section + `reference/red-flags.md` | **inverts** the local red-flags catalog — see §8.2 |
 | `## Self-Review` item 2 "Placeholder scan" → "Step scan" | adopt verbatim | `## Self-Review` item 2 | points at `reference/red-flags.md` |
+| `## Self-Review` item 4 "Review Focus" | adopt verbatim | `## Self-Review` item 4 | inserted verbatim after item 3; the local lifecycle-duplicate check is renumbered to item 6 |
 | `## Self-Review` new item 5 "Proportion" | adopt verbatim | `## Self-Review` item 5 | |
 | `skills/writing-plans/plan-document-reviewer-prompt.md` (deleted upstream) | **already absent (no-op)** | — | local never had this file |
 | `## Execution Handoff` | **drop — superseded** | local `## Execution Handoff` kept as-is | upstream's handoff assumes a plan file and an execution-choice prompt; local's is beads-based with a `plan-approved` gate. Local version wins |
@@ -398,7 +399,7 @@ These are different instruments, which is why a naive port breaks:
 
 ## 8. `writing-plans` changes
 
-Local `writing-plans` is adapted far more than `brainstorming`: its plan output is **beads, not a document**, so it has no plan file, and it carries two local additions (`## Creating Tasks as Beads`, `## Self-Review` item 4). Upstream's changes to it are smaller than brainstorming's, but one of them **inverts a local file**.
+Local `writing-plans` is adapted far more than `brainstorming`: its plan output is **beads, not a document**, so it has no plan file, and it carries two local additions (`## Creating Tasks as Beads`, `## Self-Review` item 6). Upstream's changes to it are smaller than brainstorming's, but one of them **inverts a local file**.
 
 ### 8.1 What ports cleanly
 
@@ -408,8 +409,9 @@ Local `writing-plans` is adapted far more than `brainstorming`: its plan output 
 | `## Step Granularity` (was `## Bite-Sized Task Granularity`; "one action with a checkable result") | adopt verbatim | rename local section |
 | `plan-document-reviewer-prompt.md` deleted | already absent (no-op) | — |
 | `## Self-Review` item 2 → "Step scan" | adopt verbatim | `## Self-Review` item 2, pointing at `reference/red-flags.md` |
+| `## Self-Review` item 4 "Review Focus" | adopt verbatim | `## Self-Review` item 4 |
 | `## Self-Review` new item 5 "Proportion" | adopt verbatim | `## Self-Review` item 5 |
-| local `## Self-Review` item 4 (lifecycle-duplicate check) | **keep** | mark in the doc as a local addition upstream lacks |
+| local `## Self-Review` item 6 (lifecycle-duplicate check) | **keep** | mark in the doc as a local addition upstream lacks |
 | `## Task Structure` Step 3 → signature + one line on approach | adapt | `reference/task-template.md` |
 
 ### 8.2 The inversion — `reference/red-flags.md`
@@ -533,7 +535,7 @@ One epic plus **four** beads, grouped so each is one coherent change that leaves
 | Bead | Contents | Files | Depends on |
 |---|---|---|---|
 | **B1 — brainstorming re-base** | upstream spine + tracking layer, the 9→7 step folds, gate collapse, size-conditional boundaries, `builder-check-prompt.md` port, and the four `reference/` re-derivations | `skills/brainstorming/*`, `formulas/superpowers-workflow.formula.toml` | — |
-| **B2 — writing-plans v7** | Overview, Step Granularity, What a Step Contains, task-template Step 3, the `red-flags.md` inversion, Self-Review items 2 and 5 | `skills/writing-plans/*` | — |
+| **B2 — writing-plans v7** | Overview, Step Granularity, What a Step Contains, task-template Step 3, the `red-flags.md` inversion, Self-Review items 2, 4, and 5 | `skills/writing-plans/*` | — |
 | **B3 — plan-level constraints** | adopt upstream's Global Constraints *content rule* into the existing gate-bead authoring text; add Review Focus to the same bead; add the task-template `Interfaces` constraints pointer; add the one-line gate-bead read to `executing-plans` Step 1. **No change to the `implement` step, and no change to `subagent-driven-development`** (§8.3 findings 1–4) | `skills/writing-plans/reference/creating-task-beads.md`, `skills/writing-plans/reference/task-template.md`, `skills/executing-plans/SKILL.md` | B2 (shared files) |
 | **B4 — upstream one-line fixes** | the three fixes from §9.6 | three skills, one line each | — |
 

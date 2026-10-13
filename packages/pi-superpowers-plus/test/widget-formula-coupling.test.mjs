@@ -5,7 +5,8 @@
 // formulas/superpowers-workflow.formula.toml so a step rename or removal fails loudly instead of
 // silently emptying the widget's phase view — which is exactly what the 2026-10-13 brainstorming
 // re-base did to it (explore/clarify/approaches/design -> conversation/playback) before this file
-// existed. Plain node, no dependencies.
+// existed. Plain node, no dependencies: the formula is read through the shared `parseFormulaSteps`
+// (extensions/formula-parse.mjs), the one parser for the small TOML subset the formula uses.
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import {
@@ -19,36 +20,11 @@ import {
   topicPrefix,
   waitingReviewStep,
 } from "../extensions/beads-molecule-widget.mjs";
+import { parseFormulaSteps } from "../extensions/formula-parse.mjs";
 
 const FORMULA_SRC = readFileSync(new URL("../formulas/superpowers-workflow.formula.toml", import.meta.url), "utf8");
 
-/** Parse `[[steps]]` blocks into ordered `{ id, title, gated }` (`[steps.gate]` marks the step above). */
-function parseFormula(text) {
-  const steps = [];
-  let cur = null;
-  for (const line of text.split("\n")) {
-    if (line.trim() === "[[steps]]") {
-      cur = { id: null, title: "", gated: false };
-      steps.push(cur);
-      continue;
-    }
-    if (line.startsWith("[steps.gate]")) {
-      if (cur) cur.gated = true;
-      continue;
-    }
-    if (!cur) continue;
-    const id = line.match(/^id\s*=\s*"([^"]+)"/);
-    if (id) {
-      cur.id = id[1];
-      continue;
-    }
-    const title = line.match(/^title\s*=\s*"([^"]*)"/);
-    if (title) cur.title = title[1];
-  }
-  return steps.filter((s) => s.id);
-}
-
-const FORMULA = parseFormula(FORMULA_SRC);
+const FORMULA = parseFormulaSteps(FORMULA_SRC);
 const KEYS = FORMULA.map((s) => s.id);
 const byKey = new Map(FORMULA.map((s) => [s.id, s]));
 const TOPIC = "Superpowers widget changes";
@@ -71,10 +47,21 @@ assert.deepEqual(
   "finish view = every formula step after wrap-up",
 );
 
-// The gate labels the widget keys off are the gate keys the formula implies, one per gated step.
-const gateLabels = new Set(FORMULA.filter((s) => s.gated).map((s) => `step:gate-${s.id}`));
-for (const label of Object.keys(GATE_TO_REVIEW_STEP)) {
-  assert.ok(gateLabels.has(label), `the widget keys off gate label ${label}, which the formula does not declare`);
+// The gate labels the widget keys off are exactly the formula's gated steps, and each label maps
+// to that gated step's own id. Both directions, so a newly gated formula step with no widget
+// mapping fails here, and so does a swapped value.
+const gatedSteps = FORMULA.filter((s) => s.gated);
+assert.deepEqual(
+  Object.keys(GATE_TO_REVIEW_STEP).sort(),
+  gatedSteps.map((s) => `step:gate-${s.id}`).sort(),
+  "the widget maps exactly the formula's gated steps, no more and no fewer",
+);
+for (const s of gatedSteps) {
+  assert.equal(
+    GATE_TO_REVIEW_STEP[`step:gate-${s.id}`],
+    s.id,
+    `gate label step:gate-${s.id} maps to its own review step`,
+  );
 }
 
 // ---------- a real poured-molecule shape resolves end to end ----------

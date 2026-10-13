@@ -13,6 +13,7 @@ digraph brainstorming {
     "Builder check (spec-review)" [shape=box];
     "User approves the document?" [shape=diamond];
     "Print /plan for user; user runs it" [shape=doublecircle];
+    "Build it directly in the implement step" [shape=doublecircle];
 
     "Pre-check: anything non-trivial missing?" -> "Do it; say what you did" [label="no, quick task"];
     "Pre-check: anything non-trivial missing?" -> "Pour molecule + show widget" [label="yes"];
@@ -22,7 +23,7 @@ digraph brainstorming {
     "Conversation <-> playback" -> "Size the work";
     "Size the work" -> "Approve the description in chat" [label="small change"];
     "Size the work" -> "Write the document" [label="project"];
-    "Approve the description in chat" -> "Print /plan for user; user runs it" [label="approved"];
+    "Approve the description in chat" -> "Build it directly in the implement step" [label="approved"];
     "Write the document" -> "Builder check (spec-review)";
     "Builder check (spec-review)" -> "User approves the document?";
     "User approves the document?" -> "Write the document" [label="changes requested"];
@@ -30,4 +31,9 @@ digraph brainstorming {
 }
 ```
 
-**The terminal state is handing off:** after the user approves, print **`Type /plan to continue`** — do NOT attempt to invoke writing-plans yourself; the user runs the command so the skill loads via pi expansion. Do NOT invoke frontend-design, mcp-builder, or any other implementation skill — writing-plans (via `/plan`) is the only onward step.
+**The terminal state:** a **project** hands off — after the user approves the document, print
+**`Type /plan to continue`**; do NOT attempt to invoke writing-plans yourself, the user runs the
+command so the skill loads via pi expansion. Do NOT invoke frontend-design, mcp-builder, or any
+other implementation skill — writing-plans (via `/plan`) is the only onward step. A **small
+change** does not hand off: its description is approved in chat, the document steps are resolved
+or skipped, and the work is done directly in the `implement` step (close it when done).

@@ -221,6 +221,96 @@ assert.equal(
 assert.deepEqual(moleculeWidgetLines(null, 80), []);
 assert.deepEqual(moleculeWidgetLines(parsed, 0), []);
 
+// ---------- formula v1 molecules (pre-label-rename): legacy rows still resolve ----------
+// A v1 molecule (step ids explore/clarify/approaches/design) carries none of the v2
+// `step:conversation`/`step:playback` labels. Without a legacy-key fallback its leading rows
+// drop out, `design-approved` becomes the first surviving row, and its open gate makes the
+// widget report "Waiting on you: User approves design" — marking the wrong step as current.
+const v1Step = (key, title, over = {}) => ({
+  id: `mol-v1.${key}`,
+  title,
+  labels: [`step:${key}`],
+  status: "open",
+  issue_type: "task",
+  created_at: "",
+  step_status: "pending",
+  is_current: false,
+  ...over,
+});
+const v1Gate = (label, over = {}) => ({
+  id: `mol-v1.${label}`,
+  title: "Gate: human",
+  labels: [label],
+  status: "open",
+  issue_type: "gate",
+  created_at: "",
+  step_status: "pending",
+  is_current: false,
+  ...over,
+});
+// Just poured: `explore` is ready, nothing is claimed yet.
+const v1 = {
+  molecule_id: "mol-v1",
+  molecule_title: "superpowers-workflow",
+  current_step: null,
+  next_step: null,
+  doneCount: 0,
+  total: 13,
+  steps: [
+    v1Step("explore", "Explore project context: Legacy topic", { step_status: "ready" }),
+    v1Step("clarify", "Ask clarifying questions"),
+    v1Step("approaches", "Propose approaches"),
+    v1Step("design", "Present design sections"),
+    v1Step("design-approved", "User approves design"),
+    v1Gate("step:gate-design-approved", { step_status: "ready" }),
+    v1Step("write-spec", "Write spec to docs/superpowers/specs/"),
+    v1Step("spec-review", "Spec self-review"),
+    v1Step("spec-approved", "User reviews written spec"),
+    v1Gate("step:gate-spec-approved"),
+    v1Step("implement", "Implement Legacy topic"),
+    v1Step("wrap-up", "Wrap up: disposition all parked findings"),
+    v1Step("verify", "Verify"),
+  ],
+};
+
+assert.equal(topicFor(v1), "Legacy topic", "a v1 molecule's topic resolves from the explore step title");
+const v1Lines = moleculeWidgetLines(v1, 200);
+const exploreIdx = v1Lines.findIndex((l) => l.includes("Explore project context"));
+const designApprovedIdx = v1Lines.findIndex((l) => l.includes("User approves design"));
+assert.ok(exploreIdx !== -1, `v1 explore row renders: ${v1Lines.join(" | ")}`);
+assert.ok(exploreIdx < designApprovedIdx, `v1 explore row leads, before design-approved: ${v1Lines.join(" | ")}`);
+assert.ok(v1Lines[exploreIdx].includes("\u25d0"), `v1 live step leads with the active marker: ${v1Lines[exploreIdx]}`);
+assert.ok(
+  !v1Lines[designApprovedIdx].includes("\u25d0"),
+  `v1 design-approved is not marked current: ${v1Lines[designApprovedIdx]}`,
+);
+assert.ok(
+  !v1Lines.some((l) => l.includes("Waiting on you:")),
+  `no false gate wait on a v1 molecule: ${v1Lines.join(" | ")}`,
+);
+
+// Mid-conversation: the live step is `clarify`, which the collapsed `conversation` row must follow.
+const v1Mid = {
+  ...v1,
+  current_step: { id: "mol-v1.clarify", title: "Ask clarifying questions", status: "in_progress", issue_type: "task" },
+  doneCount: 1,
+  steps: v1.steps.map((s) =>
+    s.id === "mol-v1.explore"
+      ? { ...s, status: "closed", step_status: "done" }
+      : s.id === "mol-v1.clarify"
+        ? { ...s, status: "in_progress", step_status: "current", is_current: true }
+        : s,
+  ),
+};
+const v1MidLines = moleculeWidgetLines(v1Mid, 200);
+const clarifyIdx = v1MidLines.findIndex((l) => l.includes("Ask clarifying questions"));
+assert.ok(clarifyIdx !== -1, `v1 clarify row renders: ${v1MidLines.join(" | ")}`);
+assert.ok(v1MidLines[clarifyIdx].includes("\u25d0"), `v1 live conversation step leads: ${v1MidLines[clarifyIdx]}`);
+assert.ok(
+  !v1MidLines.some((l) => l.includes("Explore project context")),
+  "the folded v1 rows collapse to the live step",
+);
+
 // ---------- full brainstorming fixture: 6 pre-impl tasks + 2 gates + implement + verify ----------
 const bstate = {
   molecule_id: "bd-mol-g0z",
