@@ -285,8 +285,6 @@ look complete.
 
 ## Reference material
 
-> **Read now:** [reference/anti-patterns.md](reference/anti-patterns.md) — the three anti-patterns: too simple to need a document, rushing the steps, pouring before you speak.
-
 - [reference/anti-patterns.md](reference/anti-patterns.md) — the three anti-patterns: too simple to need a document, rushing the steps, pouring before you speak.
 - [reference/process-flow.md](reference/process-flow.md) — the brainstorming process-flow diagram and the terminal hand-off state.
 - [reference/process-guidance.md](reference/process-guidance.md) — YAGNI, working in existing codebases, design for isolation (a local addition), and the spec self-review.

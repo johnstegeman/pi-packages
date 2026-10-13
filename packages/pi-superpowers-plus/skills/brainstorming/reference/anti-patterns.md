@@ -16,7 +16,7 @@ This produces designs nobody actually reviewed. Conversation and playback altern
 ends with one question, and each playback chunk returns to questions about the next part. Only
 advance when the user's actual words justify it, never because a step "seems small."
 
-## Anti-Pattern: "Let Me Just Peek At The Repo First"
+## Anti-Pattern: "Pour Before You Speak"
 
 Exploration ("I'll just do a quick `ls` / read a few files / check recent commits first") is
 exactly the mechanism by which the mandatory tracking setup gets silently deferred — once you

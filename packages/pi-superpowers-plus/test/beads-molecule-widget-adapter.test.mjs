@@ -9,11 +9,17 @@ const RAW = JSON.stringify([
   {
     molecule_id: "bd-mol-A",
     molecule_title: "superpowers-workflow",
-    current_step: { id: "bd-mol-A.1", title: "Ask clarifying questions", status: "in_progress", issue_type: "task" },
+    current_step: { id: "bd-mol-A.1", title: "Play back understanding", status: "in_progress", issue_type: "task" },
     next_step: null,
     steps: [
       {
-        issue: { id: "bd-mol-A.1", title: "Ask clarifying questions", issue_type: "task", status: "in_progress" },
+        issue: {
+          id: "bd-mol-A.1",
+          title: "Play back understanding",
+          labels: ["step:playback"],
+          issue_type: "task",
+          status: "in_progress",
+        },
         status: "current",
         is_current: true,
       },

@@ -321,6 +321,9 @@ export function topicFor(state) {
     const t = conversation.title.slice(prefix.length).trim();
     if (t) return t;
   }
+  // No `step:conversation` label, no matching title prefix, or no readable formula:
+  // fall back to the molecule title. Molecules poured before pour-time label stamping
+  // (pre-2026-09-03) carry no labels, so they always take this branch.
   return state.molecule_title ?? "";
 }
 

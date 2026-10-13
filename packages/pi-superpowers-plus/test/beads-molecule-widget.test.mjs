@@ -263,6 +263,7 @@ const bstate = {
     {
       id: "g1",
       title: "Gate: human",
+      issue_type: "gate",
       labels: ["step:gate-design-approved"],
       status: "open",
       created_at: "",
@@ -358,7 +359,6 @@ for (let i = 1; i < order.length; i++) {
 }
 assert.ok(headerLines[order[0]].includes("✓"), "done conversation row: ✓");
 assert.ok(headerLines[order[1]].includes("◐"), "current playback row: ◐");
-assert.ok(headerLines[order[1]].includes("◐"), "current clarify row: ◐");
 
 // ---------- gate as current => waiting line, checklist still shown ----------
 const gateCurrent = { ...bstate, current_step: { id: "gate-g", title: "Gate: human", issue_type: "gate" } };
@@ -473,8 +473,8 @@ assert.ok(
     molecule_title: "superpowers-workflow",
     current_step: null,
     next_step: { id: "g.1", title: "Gate: human", status: "open", issue_type: "gate" },
-    doneCount: 4,
-    total: 7,
+    doneCount: 2,
+    total: 5,
     steps: [
       {
         id: "t1",
@@ -490,24 +490,6 @@ assert.ok(
         id: "t2",
         title: "Play back understanding",
         labels: ["step:playback"],
-        status: "closed",
-        issue_type: "task",
-        created_at: "",
-        step_status: "done",
-        is_current: false,
-      },
-      {
-        id: "t3",
-        title: "Propose approaches",
-        status: "closed",
-        issue_type: "task",
-        created_at: "",
-        step_status: "done",
-        is_current: false,
-      },
-      {
-        id: "t4",
-        title: "Present design sections",
         status: "closed",
         issue_type: "task",
         created_at: "",
@@ -1605,36 +1587,42 @@ assert.deepEqual(nextRefreshArgs("bd-mol-abc"), ["mol", "current", "bd-mol-abc",
 // No step is_current and no awaitingStep: the DEEPEST open/ready (non-done, non-gate) step
 // in the view's render set leads, instead of nothing being marked active.
 {
-  // brainstorm: step s2 just closed, next step s3 is open+ready; s4..s8 still pending.
+  // brainstorm: s2 and s3 just closed, so s4 is the next open/ready step; s5..s8 still pending.
   const gapState = {
     ...bstate,
     current_step: null,
     next_step: null,
-    steps: bstate.steps.map((s) => ({
-      ...s,
-      is_current: false,
-      ...(s.id === "s2" ? { status: "closed", step_status: "done" } : {}),
-    })),
+    steps: bstate.steps.map((s) =>
+      s.id === "s2" || s.id === "s3"
+        ? { ...s, status: "closed", step_status: "done", is_current: false }
+        : {
+            ...s,
+            is_current: false,
+            ...(s.id === "s4" ? { step_status: "ready", status: "open" } : {}),
+          },
+    ),
   };
   const gapLines = moleculeWidgetLines(gapState, 200);
-  const approveIdx = gapLines.findIndex((l) => l.includes("User approves the full description"));
-  assert.ok(approveIdx !== -1, `next ready row rendered: ${gapLines.join(" | ")}`);
+  // no gate is open ahead of s4, so this is the fallback path, not the awaiting path.
   assert.ok(
-    gapLines[approveIdx].includes("\u25d0"),
-    `fallback step carries the active marker: ${gapLines[approveIdx]}`,
+    !gapLines.some((l) => l.includes("Waiting on you:")),
+    `no awaiting line: the deepest open/ready step leads: ${gapLines.join(" | ")}`,
   );
+  const writeIdx = gapLines.findIndex((l) => l.includes("Write spec"));
+  assert.ok(writeIdx !== -1, `next ready row rendered: ${gapLines.join(" | ")}`);
+  assert.ok(gapLines[writeIdx].includes("\u25d0"), `fallback step carries the active marker: ${gapLines[writeIdx]}`);
   const gapActive = gapLines.filter((l) => l.includes("\u25d0")).length;
   assert.equal(gapActive, 1, `exactly one active row, got ${gapActive}: ${gapLines.join(" | ")}`);
 }
 
 {
-  // deeper of two open/ready steps wins (s6 beats s4): deepest = last in render order.
+  // two open/ready steps (s4, s6); the deeper one (s6) wins, s4 is the shallower decoy.
   const deepState = {
     ...bstate,
     current_step: null,
     next_step: null,
     steps: bstate.steps.map((s) =>
-      s.id === "s2"
+      s.id === "s2" || s.id === "s3" || s.id === "s5"
         ? { ...s, status: "closed", step_status: "done", is_current: false }
         : {
             ...s,
@@ -1644,6 +1632,11 @@ assert.deepEqual(nextRefreshArgs("bd-mol-abc"), ["mol", "current", "bd-mol-abc",
     ),
   };
   const deepLines = moleculeWidgetLines(deepState, 200);
+  // g1 is a real gate, but it gates the now-closed s3: no wait, so the fallback leads.
+  assert.ok(
+    !deepLines.some((l) => l.includes("Waiting on you:")),
+    `no awaiting line: the deepest open/ready step leads: ${deepLines.join(" | ")}`,
+  );
   const s4Idx = deepLines.findIndex((l) => l.includes("Write spec"));
   const s6Idx = deepLines.findIndex((l) => l.includes("User reviews written spec"));
   assert.ok(s4Idx !== -1 && s6Idx !== -1, `deep rows rendered: ${deepLines.join(" | ")}`);
