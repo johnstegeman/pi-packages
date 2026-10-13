@@ -281,4 +281,117 @@ test("beads guardrail: no prompt source is left unguarded", () => {
   assert.deepEqual(offenders, [], "every prompt source must carry CORE — see the spec's inventory");
 });
 
+test("the brainstorming pour is unconditional", () => {
+  const skill = readFileSync(join(root, "skills", "brainstorming", "SKILL.md"), "utf8");
+  const flat = skill.replace(/^> ?/gm, "").replace(/\s+/g, " ");
+  assert.match(flat, /\*\*Pour before you speak — unconditionally\.\*\*/);
+  assert.doesNotMatch(flat, /Once the private check says something non-trivial/);
+  assert.doesNotMatch(flat, /there is no molecule, no widget, and no step/);
+  assert.match(flat, /\*\*A document is named\*\*/);
+  assert.match(flat, /the molecule stays, and its skipped steps are closed as skipped/);
+});
+
+test("the brainstorming step table carries explore and the document-coverage close", () => {
+  const skill = readFileSync(join(root, "skills", "brainstorming", "SKILL.md"), "utf8");
+  // Flatten whitespace first: these phrases live in prose wrapped at ~80 columns, so a
+  // literal-space match would pin the wrap point rather than the content (the human's ruling on
+  // Task 2's review; see the fix commit 87e7367 for the same pattern).
+  const flat = skill.replace(/^> ?/gm, "").replace(/\s+/g, " ");
+  // Scope the row check to the step table itself: a bare /\|\s*`explore`\s*\|/ would match
+  // an `explore` cell in any table in the file, not necessarily the step table.
+  const stepTableStart = flat.indexOf("| Step | Close it when |");
+  assert.notEqual(stepTableStart, -1, "the step table header must be present");
+  const stepTable = flat.slice(stepTableStart);
+  assert.match(stepTable, /\|\s*`explore`\s*\|/);
+  assert.match(stepTable, /It runs \*\*before\*\* your first message and is never skipped/);
+  assert.match(flat, /what the document `explore` read says/);
+  assert.match(flat, /the written document is approved later, at `spec-approved`/);
+  assert.doesNotMatch(flat, /by reading the document for a project/);
+  // Count, don't just match: a duplicated carve-out still satisfies a plain match.
+  assert.equal(
+    flat.split("you read as `explore`, without asking").length - 1,
+    1,
+    "the Offer recon carve-out appears exactly once",
+  );
+});
+
+test("the fast route is human-approved, with its own skip sequence", () => {
+  const skill = readFileSync(join(root, "skills", "brainstorming", "SKILL.md"), "utf8");
+  // Flatten whitespace first: these phrases live in prose wrapped at ~80 columns, so a
+  // literal-space match would pin the wrap point rather than the content (the human's ruling on
+  // Task 2's review; see the fix commit 87e7367 for the same pattern). The `release you from pouring:` assertion below
+  // deliberately tests the raw text, because the newline after the colon is the thing it pins.
+  const flat = skill.replace(/^> ?/gm, "").replace(/\s+/g, " ");
+  assert.match(flat, /A fast task \(they took the opt-out\)/);
+  assert.match(flat, /\*\*Fast task:\*\*/);
+  assert.equal(flat.split("**Fast task:**").length - 1, 1, "the Fast task paragraph appears exactly once");
+  assert.match(flat, /fast route: the opt-out is the approval/);
+  assert.match(flat, /they were considered and declined/);
+  assert.match(flat, /Only they can take it — you never take it for them/);
+  assert.match(flat, /this is the branch that decides which steps you work/);
+  assert.match(flat, /approves `design-approved` with the opt-out itself/);
+  assert.doesNotMatch(flat, /closes every pre-implement step as skipped/);
+  assert.match(flat, /\| A fast task \(they took the opt-out\) \| yes \|/);
+  assert.match(flat, /a fast task and a small change both do not/);
+  assert.match(skill, /release you from pouring:\n/);
+  assert.doesNotMatch(flat, /This path uses no tracking steps/);
+  assert.doesNotMatch(flat, /decides the molecule's fate/);
+  // Important 5: the pre-check names a fast-route *candidate*, not a decided size — the
+  // human's opt-out is what makes it a fast task. Pin the phrase so the labelling can't regress.
+  assert.match(flat, /This is a fast-route candidate:/);
+  const verdict = readFileSync(join(root, "skills", "brainstorming", "reference", "verdict-recording.md"), "utf8");
+  assert.match(verdict, /## The fast route/);
+  assert.match(verdict, /step:gate-design-approved/);
+  // The skip ORDER is the point: close order is enforced, so a reorder or a dropped
+  // gate-resolve must fail. Flatten like `skill` above, then pin every step's position.
+  // Scope to the fast-route section first: the small-change section above also names
+  // `step:gate-spec-approved`, so a whole-file indexOf would find that earlier occurrence.
+  const verdictFlat = verdict.slice(verdict.indexOf("## The fast route")).replace(/\s+/g, " ");
+  const fastRouteOrder = [
+    "<conversation-id>",
+    "<playback-id>",
+    "<design-approved-id>",
+    "step:gate-design-approved",
+    "<write-spec-id>",
+    "<spec-review-id>",
+    "step:gate-spec-approved",
+  ].map((marker) => verdictFlat.indexOf(marker));
+  assert.ok(
+    fastRouteOrder.every((at) => at >= 0),
+    `every fast-route step is present in verdict-recording.md: ${fastRouteOrder}`,
+  );
+  for (let i = 1; i < fastRouteOrder.length; i++) {
+    assert.ok(
+      fastRouteOrder[i] > fastRouteOrder[i - 1],
+      `fast-route step ${i} follows step ${i - 1}: ${fastRouteOrder}`,
+    );
+  }
+});
+
+test("the CHANGELOG's [Unreleased] formula bullet matches the shipped formula version", () => {
+  // Guard against the class of contradiction this branch shipped: prose A updated, prose B
+  // left behind. The shipped formula's `version` must be the newest formula version the
+  // [Unreleased] notes name — if someone bumps the formula and leaves the notes stale, fail.
+  // Scope the match to the bullets that state the shipped version ("The workflow formula
+  // is/went to vN"): a version named elsewhere in [Unreleased] — an older pour described in
+  // `Fixed`, or a future-looking note — must not trip the guard.
+  const formula = readFileSync(join(root, "formulas", "superpowers-workflow.formula.toml"), "utf8");
+  const version = formula.match(/^version\s*=\s*(\d+)/m)?.[1];
+  assert.ok(version, "the shipped formula declares a version");
+  const changelog = readFileSync(join(root, "CHANGELOG.md"), "utf8");
+  const start = changelog.indexOf("## [Unreleased]");
+  assert.notEqual(start, -1, "the CHANGELOG has an [Unreleased] section");
+  const rest = changelog.slice(start + "## [Unreleased]".length);
+  const next = rest.indexOf("\n## [");
+  const unreleased = next === -1 ? rest : rest.slice(0, next);
+  const named = [...unreleased.matchAll(/The workflow formula (?:is|went to) v(\d+)/g)].map((m) => Number(m[1]));
+  assert.ok(named.length > 0, "the [Unreleased] section names a formula version");
+  const newest = Math.max(...named);
+  assert.equal(
+    newest,
+    Number(version),
+    `the newest [Unreleased] formula version (v${newest}) matches the shipped formula (v${version})`,
+  );
+});
+
 run();

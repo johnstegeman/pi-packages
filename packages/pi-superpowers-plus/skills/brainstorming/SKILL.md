@@ -4,9 +4,10 @@ description: "You MUST use this before any creative work - creating features, bu
 disable-model-invocation: true
 ---
 
-> **Related skills:** Consider `/skill:using-git-worktrees` to set up an isolated workspace. Only
-> work that sizes to a project continues in `/skill:writing-plans` (run `/plan`); a quick task and
-> a small change both do not. A small change continues in the molecule's `implement` step instead.
+> **Related skills:** Consider `/skill:using-git-worktrees` to set up an isolated
+> workspace. Only work that sizes to a project continues in `/skill:writing-plans`
+> (run `/plan`); a fast task and a small change both do not. A small change
+> continues in the molecule's `implement` step instead.
 
 # Brainstorming
 
@@ -23,13 +24,15 @@ At the start of the skill, call `set_phase({ phase: "brainstorming" })`.
 
 ## Tracking This Session
 
-Work at **small change** and **project** size runs against a beads molecule,
-so the step you are on is visible in the widget and survives a resume. A
-**quick, clear task** does not: there is no molecule, no widget, and no step
-bookkeeping — do the work and say what you did.
+Every session runs against a beads molecule, so the step you are on is visible in the
+widget and survives a resume. The size of the work decides which steps you *work*, which
+you *close as skipped*, and which the opt-out *approves* — never whether the molecule
+exists.
 
-**Pour before you speak.** Once the private check says something non-trivial
-is missing, pour the workflow formula before you send your first message:
+**Pour before you speak — unconditionally.** Pour the workflow formula and put the widget
+on screen *before* you read any file, run any command, or look at the project in any way.
+This is not a judgement call and it has no exception: an existing bead or epic does not
+release you from pouring:
 
   beads_mol_pour({ proto: "superpowers-workflow", vars: "topic=<topic>" })
 
@@ -64,9 +67,10 @@ ids at runtime with
 
 | Step | Close it when |
 |---|---|
-| `conversation` | you have drawn out intent — questions, playback, and any recon your partner asked for are one continuous phase. Every line of **Ground to cover** is either what they told you or your call — name which in the close reason |
-| `playback` | your partner has corrected your playback and you agree on the description. **Record the size in the close reason** (`size: project` / `size: small change`) |
-| `design-approved` | your partner approved the full description — in chat for a small change, by reading the document for a project |
+| `explore` | you have read what the request points at — the bead, the spec, the named files — plus enough context to make your first message intelligent. Name what you read and what it told you; when there is nothing to read, close it with `"nothing to read; the request is self-contained"`. It runs **before** your first message and is never skipped |
+| `conversation` | you have drawn out intent — questions, playback, and any recon your partner asked for are one continuous phase. Every line of **Ground to cover** is either what they told you, **what the document `explore` read says**, or your call — name which in the close reason. When the document settles everything, say so and ask nothing |
+| `playback` | your partner has corrected your playback and you agree on the description. **Record the size in the close reason** (`size: project` / `size: small change`) — on the fast route there is no size to record: the opt-out *is* the size, and the close reason is the fast route's own |
+| `design-approved` | your partner approved the full description — in chat, for both sizes. For a project this is the design as played back; the written document is approved later, at `spec-approved` |
 | `write-spec` | the document is written and committed, and the four-point self-review is clean. **Project size only** — for a small change, close this and `spec-review` as skipped (`"small change: description agreed in chat"`) and **resolve the gate** (`beads_gate_resolve`), which closes the gated `spec-approved` step in the same call |
 | `spec-review` | the builder check returned and its questions were sorted (§ The Written Design) |
 | `spec-approved` | your partner has reviewed the document and answered the "theirs" pile |
@@ -93,15 +97,31 @@ Resolve it without a verdict: close `write-spec` and `spec-review` as skipped, t
 and closes the gated `spec-approved` step, freeing `implement`. Find it via
 `beads_list({ label: "step:gate-spec-approved", mol: "<root-id>" })`.
 
-> **Read now:** [reference/verdict-recording.md](reference/verdict-recording.md) — resume, changes-requested, and gate-resolve edge cases.
+**Fast task:** the human took the opt-out at your first message. The molecule
+still exists, and `explore` is already closed. Close `conversation` and
+`playback` as skipped (`"fast route: human opted out at the first message"`),
+record `review.verdict=done` on `design-approved` (the opt-out *is* the
+approval — comment `"fast route: the opt-out is the approval"` if you want it on
+the record), then resolve its gate with `beads_gate_resolve({ id: "<gate-id>" })`.
+Close `write-spec` and `spec-review` as skipped, then resolve the spec gate the
+same way — it closes the gated `spec-approved` step and frees `implement`. Find
+each gate id with the lookup above:
+`beads_list({ label: "step:gate-design-approved", mol: "<root-id>" })` and
+`beads_list({ label: "step:gate-spec-approved", mol: "<root-id>" })`.
+
+> **Read now:** [reference/verdict-recording.md](reference/verdict-recording.md) — resume, changes-requested, and gate-resolve edge cases, plus the fast route's ordered close sequence.
 
 ## First: What Do You Actually Know?
 
-Before you reply, ask yourself: what do I know about what they want, and
-why?
+You have already poured — the molecule exists either way. Before you reply, ask
+yourself: what do I know about what they want, and why?
 
 - **Everything that matters is in the request** ("make the icon cornflower
-  blue"). This is a quick, clear task. Do it, and say what you did.
+  blue"). This is a fast-route candidate: your first message may lead with the
+  offer to skip the questions.
+- **A document is named** — a bead, a spec, an issue, a file. That is not a
+  self-contained request and it is not a fast task. Read it first: that is what
+  `explore` is for.
 - **Something non-trivial is missing.** Start the conversation.
 
 ## Your First Message
@@ -109,11 +129,11 @@ why?
 Your first message is two things, in this order:
 
 1. One line letting them know that if they'd rather skip the questions and
-   have you just start, they can say so. If they take you up on it, this
-   skill is done: state any significant how-it-gets-made choice
-   (platform, language, medium) in one plain line, then do what they
-   asked through the normal workflow. This path uses no tracking steps; a
-   molecule already poured is simply left where it is.
+   have you just start, they can say so. Only they can take it — you never
+   take it for them, and a documented intent is not an opt-out. If they do,
+   state any significant how-it-gets-made choice (platform, language, medium)
+   in one plain line, close the steps you skipped, and do what they asked in
+   the `implement` step.
 2. One open question that gets them describing. Ask about a real moment
    or a concrete picture: "What's the moment you find yourself wishing
    this existed?" or "Tell me about the people who'll be in the room."
@@ -162,7 +182,8 @@ often more than one, and for a request that already states every decision that m
 ("make the icon cornflower blue") none at all. The test is coverage, not count: a
 decision is load-bearing when a wrong guess changes what gets built. Walk the **Ground
 to cover** list before you size the work, and be able to say of each line either what
-they told you or that it's your call — and say it out loud when it's your call. *(A
+they told you, **what the document `explore` read says**, or that it's your call —
+and say it out loud when it's your call. *(A
 local addition: upstream leaves the question count to the model's judgement.)*
 
 **Questions that work** anchor in specifics: "Walk me through the last
@@ -173,6 +194,9 @@ guessing this is because X keeps biting you?") often beats a question.
 **Offer recon.** Once you have a bit of grounding and looking would help,
 offer to go look: their codebase or project, their own files and data,
 or the web. Say what you'd look for. They decide whether you go.
+This is about investigation beyond the request's own referents: what the
+request *names* — the bead, the spec, the file — you read as `explore`, without
+asking.
 
 **Think wide privately.** Before you propose anything, come up with
 several ideas and drop the weak ones, including any that fight what
@@ -205,7 +229,7 @@ words. They can override it.
 
 | Size | The full description | Then |
 |------|----------------------|------|
-| A quick, clear task | the request itself | do it |
+| A fast task (they took the opt-out) | the request itself | close the steps you skipped, then work it in the `implement` step |
 | A small change | in chat | worked directly in the `implement` step |
 | A project with a written design | a written design document | a full plan (for software: superpowers:writing-plans) |
 
@@ -214,9 +238,13 @@ If it grows mid-task, stop, say so, and step up a size.
 If this is really several independent projects, say so, agree on an
 order, and brainstorm them one at a time.
 
-**Tracking:** this is the branch that decides the molecule's fate — a small
-change closes `write-spec` and `spec-review` as skipped and resolves the
-`spec-approved` gate, a project works them all. See [Tracking This Session](#tracking-this-session).
+**Tracking:** this is the branch that decides which steps you work — the
+molecule exists either way. A fast task closes `conversation`, `playback`,
+`write-spec`, and `spec-review` as skipped, approves `design-approved` with
+the opt-out itself, and then closes `spec-approved` by resolving its gate; a
+small change closes `write-spec`, `spec-review`, and `spec-approved` as
+skipped, and a project works them all. See
+[Tracking This Session](#tracking-this-session).
 
 ## The Written Design
 
@@ -253,14 +281,16 @@ document as that builder yourself.
 
 <HARD-GATE>
 Nothing gets built until your human partner approves the full
-description: in chat for a small change, the document for a project.
+description — in chat, for both sizes. For a project that is the design as played
+back; the written document is approved later, at `spec-approved`.
 Building includes writing product code, scaffolding, installing
 dependencies, creating projects, and invoking an implementation skill.
 Reading and exploring are fine. This applies to EVERY project regardless
 of perceived simplicity.
 
-Two exceptions. If they opted out of the questions, the skill is done and
-the gate goes with it. A spike they said yes to may be built; it stays
+Two exceptions. If they opted out of the questions, the gate goes with it —
+the molecule stays, and its skipped steps are closed as skipped (see
+`## Tracking This Session`). A spike they said yes to may be built; it stays
 labeled throwaway, and keeping what it produced is a new request that
 comes back through this gate.
 
@@ -276,7 +306,9 @@ is real work: claim it when you begin, close it when its output actually
 exists in the conversation. Never close several in a row within one turn,
 and never treat a step as done because the checklist "looks" finished.
 The failure this guards against is batching step closes to make the widget
-look complete.
+look complete. One exception: on a **fast route** the human has just
+approved, the skipped steps may be closed in a single turn — they were
+considered and declined, and the close reason is what records that.
 </HARD-GATE>
 
 ## Red Flags
@@ -295,13 +327,13 @@ look complete.
 
 | Size | Read code and docs | Write to `docs/superpowers/specs/` | Edit anything else |
 |---|---|---|---|
-| A quick, clear task | yes | no | no — do the work itself |
+| A fast task (they took the opt-out) | yes | no | no — the work is done in the `implement` step |
 | A small change | yes | no (the description lives in chat) | no — the work is done directly in the `implement` step once approved |
 | A project | yes | yes | no |
 
 ## Reference material
 
-- [reference/anti-patterns.md](reference/anti-patterns.md) — the three anti-patterns: too simple to need a document, rushing the steps, exploring before you pour.
+- [reference/anti-patterns.md](reference/anti-patterns.md) — the four anti-patterns: too simple to need a document, rushing the steps, one question then sizing, exploring before you pour.
 - [reference/process-flow.md](reference/process-flow.md) — the brainstorming process-flow diagram and the terminal hand-off state.
 - [reference/process-guidance.md](reference/process-guidance.md) — YAGNI, working in existing codebases, design for isolation (a local addition), and the spec self-review.
-- [reference/verdict-recording.md](reference/verdict-recording.md) — design-verdict edge cases: changes requested, resume, gate-resolve, and close ordering.
+- [reference/verdict-recording.md](reference/verdict-recording.md) — design-verdict edge cases: changes requested, resume, gate-resolve, close ordering, and the fast route's ordered close sequence.

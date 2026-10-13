@@ -13,7 +13,7 @@ Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 - **The `brainstorming` skill is rebuilt on upstream superpowers v7.0.0's spine** (upstream PRs
   #2463/#2482/#2483). The skill draws out what the human actually wants before it proposes
-  anything, then sizes the work — quick task, small change, or project — instead of routing and
+  anything, then sizes the work — fast task, small change, or project — instead of routing and
   gating up front. The beads mechanics (molecule pour, per-step claim/close, human gates) survive
   as an orthogonal tracking layer in `## Tracking This Session`, so `SKILL.md` stays diffable
   against upstream. A document under `docs/superpowers/specs/` is written for a project only; a
@@ -22,9 +22,10 @@ Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   visual-companion sections are dropped (no visual companion in pi).
 
 - **The rebuilt `brainstorming` skill makes decision coverage explicit, not question count.**
-  The `conversation` step now closes only when every line of **Ground to cover** is either
-  something the human said or a call the skill names in its close reason, so scope and the
-  other load-bearing decisions are settled before the work is sized — while a request that
+  The `conversation` step now closes only when every line of **Ground to cover** is accounted
+  for — something the human said, a call the skill names in its close reason, and (from the
+  v3 entry below) what the document `explore` read says, so scope and other load-bearing
+  decisions are settled before the work is sized — while a request that
   already states every decision that matters ("make the icon cornflower blue") still needs
   no questions at all. A local addition: upstream leaves the count to the model's
   judgement, and its "propose 2-3 approaches" round stays dropped (measured upstream as
@@ -32,8 +33,23 @@ Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 - **The workflow formula is v2: `explore`/`clarify`/`approaches` fold into one `conversation`
   step and `design` becomes `playback`.** Nine steps become seven, matching upstream's single
-  continuous conversation phase. `formulas/superpowers-workflow.formula.toml` is updated in
-  place; molecules poured under v1 keep working (see Fixed).
+  continuous conversation phase. *(Superseded by the v3 entry below — the shipped formula is
+  v3, with `explore` back as step 1.)* `formulas/superpowers-workflow.formula.toml` is updated
+  in place; molecules poured under v1 keep working (see Fixed).
+
+- **The workflow formula went to v3: the molecule pour is unconditional again, and `explore`
+  returns as formula step 1.** The v7.0.0 re-base had made the pour conditional on the agent's own
+  private pre-check and folded
+  `explore` into `conversation`. A request that *pointed at* a document — "the intent is fully
+  documented in the bead" — then read as self-contained, so the agent skipped the molecule entirely
+  and edited files unapproved. Now the pour happens before anything is read, `explore` reads what
+  the request points at before the agent's first message, and the pre-check keeps a pointer out of
+  the self-contained branch. The fast route survives, but only on explicit human approval: its
+  skipped steps are closed as skipped and both human gates are resolved. `conversation`'s close
+  condition also gains a third coverage source — what the document `explore` read says — so a
+  documented intent is confirmed rather than re-litigated. The `quick task` size is renamed
+  **fast task**, and it is taken only when the human says so. Supersedes §6.1 and §7 of the
+  v7.0.0 port spec.
 
 - **`writing-plans` picks up the v7.0.0 rework.** A new `## What a Step Contains` replaces
   `## No Placeholders`, and `reference/red-flags.md` is rewritten around the two opposite failure
