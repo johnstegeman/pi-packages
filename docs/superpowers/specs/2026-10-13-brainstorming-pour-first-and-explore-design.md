@@ -83,6 +83,8 @@ explore "Explore project context" → conversation → playback → design-appro
 ```
 
 - `explore` runs **before the first message** (human decision, this session).
+- **It is therefore always worked — never skipped, on any size.** The reading happens before the
+  human can opt out; the opt-out governs the steps *after* it (D4).
 - **Scope is narrow:** read what the request *points at* — the bead, the spec, the named files —
   plus enough project context to make the first message intelligent. Not repo archaeology. This is
   the reading that makes a pointer evaluable, and the step that forces the molecule to exist before
@@ -90,7 +92,8 @@ explore "Explore project context" → conversation → playback → design-appro
 - The title keeps the v1 wording `Explore project context` and carries **no** `{{topic}}`: the topic
   stays on `conversation`, where the widget's `topicFor` reads it.
 - `needs`: none. `conversation` gains `needs = ["explore"]`.
-- Close reason: what you read, and what it told you.
+- Close reason: what you read, and what it told you. When there is nothing to read (a self-contained
+  request), say so — *"nothing to read; the request is self-contained"*.
 
 ### D3 — The pre-check survives, re-pointed
 
@@ -103,13 +106,17 @@ Keep upstream's section; change its consequence:
 
 ### D4 — Three sizes, one molecule
 
-Every session pours; the size decides which steps are *worked* and which are *closed as skipped*.
+Every session pours; the size decides which steps are *worked*, *approved*, and *closed as skipped*.
 
-| size | worked | closed as skipped | gates resolved |
+| size | worked | approved at a gate | closed as skipped |
 |---|---|---|---|
-| fast task (human opted out at the first message) | `implement` | `explore`, `conversation`, `playback`, `design-approved`, `write-spec`, `spec-review` | **both** (`design-approved`, `spec-approved`) |
-| small change | `explore` → … → `implement` | `write-spec`, `spec-review` | `spec-approved` |
-| project | all | — | — |
+| fast task (human opted out at the first message) | `explore`, `implement` | `design-approved` (the opt-out **is** the approval, D7), `spec-approved` (resolved by the same call that closes it, D6) | `conversation`, `playback`, `write-spec`, `spec-review` |
+| small change | `explore` → … → `implement` | `design-approved` | `write-spec`, `spec-review` (and the `spec-approved` gate is resolved to free `implement`) |
+| project | all | `design-approved`, `spec-approved` | — |
+
+`explore` appears in the *worked* column for every size (D2). `design-approved` is never *skipped*:
+it is either approved in chat or approved by the opt-out — in both cases the step carries
+`review.verdict=done` and its gate is resolved.
 
 ### D5 — The fast route requires explicit human approval
 
@@ -124,7 +131,8 @@ Every session pours; the size decides which steps are *worked* and which are *cl
 `reference/verdict-recording.md` already documents that `beads_close` fails while a prerequisite or
 an open gate blocks the step. The fast route therefore proceeds in order:
 
-1. Close `explore`, then `conversation`, then `playback` as skipped — each becomes ready in turn.
+1. Close `conversation`, then `playback` as skipped — each becomes ready in turn. (`explore` is
+   already closed, worked, from before the first message.)
 2. Record `review.verdict=done` on `design-approved` — *"just do it"* **is** the human approving the
    request as the description — then `beads_gate_resolve` on `step:gate-design-approved`, which
    resolves the gate and closes the gated step in one call.
@@ -132,7 +140,8 @@ an open gate blocks the step. The fast route therefore proceeds in order:
 4. `beads_gate_resolve` on `step:gate-spec-approved` — resolves the gate and closes `spec-approved`,
    freeing `implement`.
 
-Reason strings: `"fast route: human opted out at the first message"`.
+Reason strings: `"fast route: human opted out at the first message"` for the skipped closes;
+`"fast route: the opt-out is the approval"` for the verdict.
 
 ### D7 — `design-approved` is the chat approval, not the document review
 
@@ -146,18 +155,54 @@ project cannot be approved by document at that step. Corrected semantics:
 
 The table row is reworded accordingly.
 
+### D8 — The batch-close HARD-GATE gets a fast-route carve-out
+
+The second `<HARD-GATE>` forbids closing several steps in one turn, because batching closes is how
+the widget gets made to look complete without the work existing. The fast route closes four steps
+and resolves two gates in a single turn, so the gate needs an explicit exception, or the shipped
+skill forbids its own fast route.
+
+The carve-out is narrow and names its condition: **on a fast route the human has just approved, the
+skipped steps may be closed in one turn** — they were *considered and declined*, which is what the
+close reason records. The gate's substance is unchanged everywhere else.
+
+### D9 — `conversation` on a documented intent is a confirmation pass
+
+The Goal says a documented intent is not re-litigated; D5 says a documented intent is not itself an
+opt-out. So after `explore` has read a bead or spec that settles everything, the agent still sends
+the first message, and absent an opt-out still works `conversation`. What that step does changes:
+
+- It is a **confirmation pass**, not an interrogation: play back what the document already settles,
+  name what it does not, and ask only about genuine gaps.
+- Its close condition extends `8c33e25`'s coverage rule by one source: every line of **Ground to
+  cover** is either what they told you, **what the referenced document says**, or your call — and
+  the close reason names which. A document that answers a line satisfies it exactly as the human's
+  own words would.
+- When the document leaves nothing open, the close reason says so and no question is asked.
+
+### D10 — The boundary between `explore`'s automatic read and "Offer recon"
+
+`explore` reads the request's **referents** without asking: the bead, spec, issue, or file the
+request names, plus the immediately adjacent context needed to understand them. Broader
+investigation — the codebase at large, other files, the web — keeps the existing rule: offer it, and
+the human decides whether you go. `## The Conversation` → **Offer recon** gains that carve-out so
+the two do not contradict each other.
+
 ## Widget and test consequences
 
 - `BRAINSTORM_VIEW` gains `explore` at its head. The coupling test derives the view from the shipped
   formula (`BRAINSTORM_VIEW == KEYS.slice(0, KEYS.indexOf("implement"))`), so the omission fails
   loudly rather than silently emptying the view.
-- **v1 de-dup bug.** With `explore` in the view, a v1 molecule resolves `explore` directly *and*
-  `conversation` through `LEGACY_VIEW_FALLBACK` (whose first candidate is `explore`), rendering the
-  same step twice. `resolveRows` must drop a legacy step already resolved as a real key.
+- **v1 contract is unchanged: the folded phase stays one row.** A v1 molecule (one carrying
+  `step:clarify`/`step:approaches`) renders its explore/clarify/approaches phase as a *single* row
+  that follows the live step; the new `explore` key must not add a second row for it. Concretely,
+  `resolveRows` must not render a step twice — a legacy candidate already emitted as a real key is
+  skipped, and for a v1 molecule the folded group resolves as one row. The existing
+  `v1Mid` assertion (*"the folded v1 rows collapse to the live step"*) stays true and is kept.
 - `topicFor` is unchanged (the topic still resolves from `conversation`); the
   `Explore project context: ` fallback stays for in-flight v1 molecules.
-- `test/beads-molecule-widget.test.mjs`'s v1 fixture gains an assertion that the explore row appears
-  exactly once.
+- `test/beads-molecule-widget.test.mjs`'s fresh-v1 fixture gains an assertion that the explore row
+  appears exactly once.
 - `test/workflow-formula.test.mjs` gains: `explore` exists, precedes `conversation`, and
   `conversation` needs it.
 
@@ -166,11 +211,11 @@ The table row is reworded accordingly.
 | File | Change |
 |---|---|
 | `formulas/superpowers-workflow.formula.toml` | v3 — add `explore`; `conversation` needs it |
-| `skills/brainstorming/SKILL.md` | unconditional pour gate; re-pointed pre-check + pointer rule; `explore` row; fast-route row; `design-approved` row wording |
+| `skills/brainstorming/SKILL.md` | unconditional pour gate; re-pointed pre-check + pointer rule; `explore` row; fast-route row; `design-approved` row wording; batch-close carve-out (D8); confirmation-pass close condition (D9); "Offer recon" carve-out (D10) |
 | `skills/brainstorming/reference/process-flow.md` | dot graph — pour unconditional, `explore` step, fast-route terminal |
 | `skills/brainstorming/reference/anti-patterns.md` | "Too Simple" gains the fast route; "Exploring Before You Pour" keeps its rule |
 | `skills/brainstorming/reference/verdict-recording.md` | fast-route skip sequence and gate order |
-| `extensions/beads-molecule-widget.mjs` | `BRAINSTORM_VIEW` + v1 de-dup |
+| `extensions/beads-molecule-widget.mjs` | `BRAINSTORM_VIEW` + v1 single-row resolution |
 | `test/beads-molecule-widget.test.mjs`, `test/widget-formula-coupling.test.mjs`, `test/workflow-formula.test.mjs` | as above |
 | `CHANGELOG.md` | `[Unreleased]` entry |
 | `docs/superpowers/specs/2026-10-13-upstream-brainstorming-v7-port-design.md` | mark §6.1/§7 superseded |
@@ -182,21 +227,25 @@ The table row is reworded accordingly.
 - [ ] `SKILL.md` no longer conditions the pour on the pre-check; the pour gate is unconditional and
       precedes any exploration.
 - [ ] The pre-check carries the pointer rule.
-- [ ] The fast route is documented as human-approved only, with the exact skip and gate sequence.
+- [ ] The fast route is documented as human-approved only, with the exact skip and gate sequence,
+      and `explore` is never among its skipped steps.
+- [ ] The batch-close HARD-GATE names its fast-route exception.
+- [ ] `conversation`'s close condition admits the referenced document as a source of coverage.
 - [ ] The `design-approved` table row matches the formula's ordering.
-- [ ] `npm test` in `packages/pi-superpowers-plus` passes, including the new coupling and v1 de-dup
-      assertions.
-- [ ] A v1 molecule renders exactly one `explore` row.
+- [ ] `npm test` in `packages/pi-superpowers-plus` passes, including the new coupling assertion, the
+      fresh-v1 "exactly once" assertion, and the unchanged `v1Mid` collapse assertion.
+- [ ] A v1 molecule renders exactly one row for its folded explore/clarify/approaches phase.
 
 ## Risks
 
-- **Bookkeeping weight on the fast route.** Six closed-as-skipped steps plus two gate resolves for a
+- **Bookkeeping weight on the fast route.** Four closed-as-skipped steps plus two gate resolves for a
   cornflower-blue task. Accepted by the human (D4). The escape hatch if it proves noisy is a bonded
   two-formula design, which needs new `beads_mol_*` work in pi-beads.
 - **Upstream drift.** D1–D3 deliberately diverge from v7.0.0's §6.1/§7. The next upstream sync must
   re-read those two sections rather than diff-copy them; recorded in the v7 port spec.
 - **`explore` before the first message** reintroduces the "repo archaeology first" risk the upstream
-  rewrite removed. D2's narrow scope is the mitigation, and it is unverified in the field.
+  rewrite removed. D2's narrow scope and D10's boundary are the mitigation, and they are unverified
+  in the field.
 
 ## Out of scope
 
