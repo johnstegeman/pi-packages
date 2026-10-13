@@ -7,11 +7,11 @@ propagation. Run once to see WHERE it breaks, then investigate that component.
 ```bash
 # Layer 1: Workflow
 echo "=== Secrets available: ==="
-echo "IDENTITY: ${IDENTITY:+SET}${IDENTITY:-UNSET}"
+echo "IDENTITY: $([ -n "${IDENTITY:-}" ] && echo SET || echo UNSET)"
 
 # Layer 2: Build script
 echo "=== Env vars in build script: ==="
-env | grep IDENTITY || echo "IDENTITY not in environment"
+printenv IDENTITY >/dev/null 2>&1 && echo "IDENTITY in environment" || echo "IDENTITY not in environment"
 
 # Layer 3: Signing
 echo "=== Keychain state: ==="
