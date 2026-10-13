@@ -35,6 +35,16 @@ Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   continuous conversation phase. `formulas/superpowers-workflow.formula.toml` is updated in
   place; molecules poured under v1 keep working (see Fixed).
 
+- **The molecule pour is unconditional again, and `explore` returns as formula step 1 (formula v3).**
+  The v7.0.0 re-base had made the pour conditional on the agent's own private pre-check and folded
+  `explore` into `conversation`. A request that *pointed at* a document — "the intent is fully
+  documented in the bead" — then read as self-contained, so the agent skipped the molecule entirely
+  and edited files unapproved. Now the pour happens before anything is read, `explore` reads what
+  the request points at before the agent's first message, and the pre-check keeps a pointer out of
+  the self-contained branch. The fast route survives, but only on explicit human approval: its
+  skipped steps are closed as skipped and both human gates are resolved. Supersedes §6.1 and §7 of
+  the v7.0.0 port spec.
+
 - **`writing-plans` picks up the v7.0.0 rework.** A new `## What a Step Contains` replaces
   `## No Placeholders`, and `reference/red-flags.md` is rewritten around the two opposite failure
   modes — a *gap* (a line that decides nothing) and a *transcript* (a body the signature and

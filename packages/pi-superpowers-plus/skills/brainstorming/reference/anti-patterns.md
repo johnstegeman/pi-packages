@@ -3,8 +3,10 @@
 ## Anti-Pattern: "This Is Too Simple To Need A Document"
 
 Simple work is where unexamined assumptions cost the most, so "simple" changes the paperwork —
-never the approval. A quick, clear task, whose every choice is already in the request, is done and
-reported. A small change skips the document — its full description lives in chat — but not the
+never the approval.
+A fast task, whose every choice is already in the request, still pours a molecule; if the human
+takes the opt-out, its skipped steps are closed as skipped and the work is done in the `implement`
+step. A small change skips the document — its full description lives in chat — but not the
 approval. A project gets the document. "This is simple" is a reason to write less, never a reason
 to skip getting the description approved.
 
@@ -23,15 +25,15 @@ understand the request, and move to sizing. The count was never the test — cov
 For "make the icon cornflower blue" the request settles every load-bearing line and a
 second question would be padding; for "add a settings page" it rarely does, and sizing
 after one answer means scope, non-goals, and success were never actually discussed.
-Walk the **Ground to cover** list and say, for each line, what they told you or that
-it's your call. A line you can say neither of those about is a decision you're making
-invisibly.
+Walk the **Ground to cover** list and say, for each line, what they told you, what the
+document `explore` read says, or that it's your call. A line you can say none of those
+about is a decision you're making invisibly.
 
 ## Anti-Pattern: Exploring Before You Pour
 
 Exploration ("I'll just do a quick `ls` / read a few files / check recent commits first") is
 exactly the mechanism by which the mandatory tracking setup gets silently deferred — once you
-start reading the project it feels productive and the pour never happens. This skill has no
-exploration before your first message, so the rule is the stronger one: **pour before you speak.**
-Once the private check says something non-trivial is missing, pour the workflow formula and show
-the widget before you send anything.
+start reading the project it feels productive and the pour never happens.
+The rule is therefore absolute: **pour before you speak.** Pour the workflow formula and show the
+widget before you read anything at all. The one reading that comes next is `explore`, and it has
+its own step — so it is tracked rather than smuggled in ahead of the molecule.
