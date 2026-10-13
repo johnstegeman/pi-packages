@@ -16,6 +16,17 @@ This produces designs nobody actually reviewed. Conversation and playback altern
 ends with one question, and each playback chunk returns to questions about the next part. Only
 advance when the user's actual words justify it, never because a step "seems small."
 
+## Anti-Pattern: One Question, Then Sizing
+
+Subtler than fast-forwarding: ask one good question, get a good answer, feel that you
+understand the request, and move to sizing. The count was never the test — coverage is.
+For "make the icon cornflower blue" the request settles every load-bearing line and a
+second question would be padding; for "add a settings page" it rarely does, and sizing
+after one answer means scope, non-goals, and success were never actually discussed.
+Walk the **Ground to cover** list and say, for each line, what they told you or that
+it's your call. A line you can say neither of those about is a decision you're making
+invisibly.
+
 ## Anti-Pattern: Exploring Before You Pour
 
 Exploration ("I'll just do a quick `ls` / read a few files / check recent commits first") is
