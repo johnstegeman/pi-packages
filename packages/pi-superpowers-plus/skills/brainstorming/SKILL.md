@@ -234,9 +234,10 @@ If this is really several independent projects, say so, agree on an
 order, and brainstorm them one at a time.
 
 **Tracking:** this is the branch that decides which steps you work — the
-molecule exists either way. A fast task closes every pre-implement step as
-skipped, a small change closes `write-spec`, `spec-review`, and `spec-approved`
-as skipped, and a project works them all. See
+molecule exists either way. A fast task closes `conversation`, `playback`,
+`write-spec`, and `spec-review` as skipped and approves `design-approved` with
+the opt-out itself, a small change closes `write-spec`, `spec-review`, and
+`spec-approved` as skipped, and a project works them all. See
 [Tracking This Session](#tracking-this-session).
 
 ## The Written Design

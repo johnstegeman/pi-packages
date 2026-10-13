@@ -328,6 +328,8 @@ test("the fast route is human-approved, with its own skip sequence", () => {
   assert.match(flat, /they were considered and declined/);
   assert.match(flat, /Only they can take it — you never take it for them/);
   assert.match(flat, /this is the branch that decides which steps you work/);
+  assert.match(flat, /approves `design-approved` with the opt-out itself/);
+  assert.doesNotMatch(flat, /closes every pre-implement step as skipped/);
   assert.match(flat, /\| A fast task \(they took the opt-out\) \| yes \|/);
   assert.match(flat, /a fast task and a small change both do not/);
   assert.match(skill, /release you from pouring:\n/);
