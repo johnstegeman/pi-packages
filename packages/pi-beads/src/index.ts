@@ -288,18 +288,18 @@ export default function piBeadsLean(pi: any) {
   }
 
   // ---- pour guard: refuse a second molecule for a workspace that already has one ----
-  // A molecule root is closed when its last step closes, and `bd list` excludes closed
-  // issues, so every root this probe returns is still unfinished. A FAILED probe is not
-  // an empty one: an unreadable answer reports `failed` so the caller pours anyway with a
-  // loud note instead of stalling the whole workflow (the guard has no override).
+  // `bd list --json` answers as a bare array or an `{issues:[...]}` envelope; anything
+  // else is unreadable. A FAILED probe is not an empty one: an unreadable answer reports
+  // `failed` so the caller pours anyway with a loud note instead of stalling the whole
+  // workflow (the guard has no override).
+  const rowsOrNull = (o: any) => (Array.isArray(o) ? o : o?.issues);
   async function probeWorkspaceMolecules(
     wsKey: string,
     repoDir: string,
   ): Promise<{ molecules: { id: string; beadId: string | null }[]; failed: boolean }> {
     const r = await bd(["list", "--type", "molecule", "--label", `ws:${wsKey}`, "--json"], repoDir);
     if (!r.ok) return { molecules: [], failed: true };
-    const o = jparse(r.out);
-    const rows = Array.isArray(o) ? o : o?.issues;
+    const rows = rowsOrNull(jparse(r.out));
     if (!Array.isArray(rows)) return { molecules: [], failed: true }; // unrecognized != empty
     const molecules: { id: string; beadId: string | null }[] = [];
     for (const row of rows as any[]) {
@@ -322,8 +322,7 @@ export default function piBeadsLean(pi: any) {
   ): Promise<string> {
     const head = `${m.id}${m.beadId ? ` (bead ${m.beadId})` : " (no linked bead)"}`;
     const r = await bd(["list", "--parent", m.id, "--all", "--json"], repoDir);
-    const o = r.ok ? jparse(r.out) : null;
-    const rows = Array.isArray(o) ? o : o?.issues;
+    const rows = r.ok ? rowsOrNull(jparse(r.out)) : null;
     if (!Array.isArray(rows)) {
       const why = r.ok ? "unrecognized bd output" : firstLine(r.err) || "bd list failed";
       return `${head} \u2014 progress unknown (could not read its steps: ${why})`;
@@ -340,14 +339,17 @@ export default function piBeadsLean(pi: any) {
     return [`${head} \u2014 ${done}/${rows.length} steps done`, ...steps].join("\n");
   }
 
-  function workspaceMoleculeRefusal(details: string[]): string {
+  function workspaceMoleculeRefusal(details: string[], rootIds: string[]): string {
+    const clears = rootIds.map((r) => `      bd delete ${r} --cascade --force`).join("\n");
     return [
       "bd mol pour refused: this workspace already has a molecule in flight.",
       ...details,
       "",
       "Nothing was poured. Ask the user which way to go:",
       "  - carry on with it: use the root id above and resume at the first step that is not closed;",
-      "  - clear it and pour fresh: bd delete <root> --cascade --force \u2014 removes the molecule, its steps, and the beads created under them.",
+      "  - clear it and pour fresh:",
+      clears,
+      "    \u2014 removes the molecule, its steps, and the beads created under them.",
     ].join("\n");
   }
 
@@ -1999,11 +2001,15 @@ export default function piBeadsLean(pi: any) {
       if (!probe.failed && probe.molecules.length > 0) {
         const refusal = workspaceMoleculeRefusal(
           await Promise.all(probe.molecules.map((m) => describeWorkspaceMolecule(m, repoDir))),
+          probe.molecules.map((m) => m.id),
         );
         // The stop must be user-visible even if the model fails to relay it.
         ctx?.ui?.notify?.(refusal, "warning");
         return textResult(refusal);
       }
+      const guardNote = probe.failed
+        ? "\nworkspace molecule check failed — poured without the duplicate guard"
+        : "";
       const varPairs = String(params.vars ?? "")
         .split(",").map((s: string) => s.trim()).filter(Boolean);
       const args = ["mol", "pour", String(params.proto)];
@@ -2014,26 +2020,25 @@ export default function piBeadsLean(pi: any) {
       const rootMatch = r.out.match(/Root issue:\s*(\S+)/);
       if (!rootMatch)
         return textResult(
-          `bd mol pour created ${String(params.proto)} but could not determine the molecule root — pour is UNLABELED; do not use`,
+          `bd mol pour created ${String(params.proto)} but could not determine the molecule root — pour is UNLABELED; do not use` +
+            guardNote,
         );
       const root = rootMatch[1];
       const map = await molKeyToId(String(params.proto), varPairs, root, repoDir);
       if (!map)
         return textResult(
-          `bd mol pour created ${String(params.proto)} but could not stamp step labels (dry-run/map incomplete) — root ${root} is UNLABELED; do not use`,
+          `bd mol pour created ${String(params.proto)} but could not stamp step labels (dry-run/map incomplete) — root ${root} is UNLABELED; do not use` +
+            guardNote,
         );
       for (const [key, id] of map) {
         const u = await bd(["update", id, "--add-label", `step:${key}`], repoDir);
         if (!u.ok)
-          return textResult(`bd mol pour failed: step:${key} on ${id}: ${u.err}`);
+          return textResult(`bd mol pour failed: step:${key} on ${id}: ${u.err}` + guardNote);
       }
       const ws = await bd(["update", root, "--add-label", `ws:${wsKey}`], repoDir);
       const wsNote = ws.ok
         ? ""
         : `\nws label: FAILED (ws:${wsKey}) — widget will fall back to single-molecule inference`;
-      const guardNote = probe.failed
-        ? "\nworkspace molecule check failed — poured without the duplicate guard"
-        : "";
       await afterWrite(repoDir);
       return textResult((r.out.trim() || "poured") + wsNote + guardNote);
     },

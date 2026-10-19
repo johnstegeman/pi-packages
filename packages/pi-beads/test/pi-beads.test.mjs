@@ -1749,6 +1749,7 @@ test("single-repo: beads_mol_pour stamps step:<key> on every step and gate", asy
   const r = await s.byName.get("beads_mol_pour").execute("c", { proto: "superpowers-workflow", vars: "topic=whatever" });
   assert.ok(okResult(r), JSON.stringify(r));
   assert.match(r.content[0].text, /Root issue: proj-m1/);
+  assert.doesNotMatch(r.content[0].text, /workspace molecule check failed/);
   const expect = [
     ["proj-xpl", "step:explore"],
     ["proj-clr", "step:clarify"],
@@ -1812,7 +1813,7 @@ test("single-repo: beads_mol_pour refuses when the workspace already has a molec
     assert.match(text, /1\/2/, text);
     assert.match(text, /bd delete/, text);
     assert.match(text, /--cascade/, text);
-    assertNoInvocation(["mol", "pour", "superpowers-workflow"]);
+    assertNoInvocation(["mol", "pour", "superpowers-workflow", "--var", "topic=x"]);
     // A second pour in the same session is the same refusal: the guard is stateless.
     const again = await s.byName.get("beads_mol_pour").execute("c", { proto: "superpowers-workflow" });
     assert.match(again.content[0].text, /proj-m9/, again.content[0].text);
@@ -1844,7 +1845,7 @@ test("single-repo: the pour guard reads the {issues:[...]} envelope as a molecul
     assert.match(text, /proj-m9/, text);
     assert.match(text, /proj-1a2/, text);
     assert.match(text, /1\/2/, text);
-    assertNoInvocation(["mol", "pour", "superpowers-workflow"]);
+    assertNoInvocation(["mol", "pour", "superpowers-workflow", "--var", "topic=x"]);
   } finally {
     delete process.env.FAKE_BD_WS_MOLECULES;
   }
