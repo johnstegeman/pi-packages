@@ -238,6 +238,22 @@ case "$1" in
       exit 0
     fi
     if [ "$2" = "current" ]; then
+      # the pour guard's resume probe (bd mol current <root> --json) — keyed on the
+      # root id so a refusal test can drive each shape bd can answer with.
+      case "\${FAKE_BD_MOL_CURRENT:-ok}" in
+        fail)    echo "boom" >&2; exit 1 ;;
+        garbage) echo "not json"; exit 0 ;;
+      esac
+      case "$3" in
+        *cur-step*)
+          # a current step WITHOUT labels: the step label must come from the listing row
+          printf '%s\n' '[{"molecule_id":"'"$3"'","molecule_title":"superpowers-workflow","current_step":{"id":"proj-m2-imp","title":"Implement T2","status":"in_progress","issue_type":"task"},"next_step":{"id":"proj-m2-ver","title":"Verify","issue_type":"task","labels":["step:verify"]},"steps":[]}]'
+          exit 0 ;;
+        *next-step*)
+          # no current step: the next_step is the resume point, labels and all
+          printf '%s\n' '[{"molecule_id":"'"$3"'","molecule_title":"superpowers-workflow","current_step":null,"next_step":{"id":"proj-m2-ver","title":"Verify","status":"open","issue_type":"task","labels":["step:verify"]},"steps":[]}]'
+          exit 0 ;;
+      esac
       # real bd returns a top-level ARRAY (len=1) for mol current
       printf '%s\n' '[{"molecule_id":"proj-m0","molecule_title":"Demo Mol","ready_steps":2,"total_steps":4,"steps":[{"issue":{"id":"proj-t1","priority":1,"status":"open","title":"Task one"}}]}]'
       exit 0
@@ -264,6 +280,11 @@ case "$1" in
     done
     if [ -n "$P" ]; then
       case "$P" in
+        *garbage*) printf 'not json\n' ;;
+        *statuses*)
+          # every raw bd status the refusal must print verbatim (Finding: no
+          # collapse into open/closed)
+          printf '{"issues":[{"id":"proj-s1","title":"Explore","status":"closed","labels":["step:explore"]},{"id":"proj-s2","title":"Implement","status":"in_progress","labels":["step:implement"]},{"id":"proj-s3","title":"Verify","status":"blocked","labels":["step:verify"]},{"id":"proj-s4","title":"Finish","status":"deferred","labels":["step:finish"]}],"meta":{"count":4}}' ;;
         *2*) printf '{"issues":[{"id":"proj-m2-imp","title":"Implement T2","status":"open","priority":2,"labels":["step:implement"]}],"meta":{"count":1}}' ;;
         *)   printf '{"issues":[{"id":"proj-m1-imp","title":"Implement T1","status":"open","priority":2,"labels":["step:implement"]},{"id":"proj-m1-done","title":"Explore done","status":"closed","priority":2,"labels":["step:implement"]}],"meta":{"count":2}}' ;;
       esac
@@ -1813,10 +1834,159 @@ test("single-repo: beads_mol_pour refuses when the workspace already has a molec
     assert.match(text, /1\/2/, text);
     assert.match(text, /bd delete/, text);
     assert.match(text, /--cascade/, text);
+    // the resume point is bd's to name, and this molecule has no current or next step —
+    // so the refusal falls back to the listing, and says that is what it did
+    assert.match(text, /resume here: step:implement — Implement T1 \(proj-m1-imp\)/, text);
+    assert.match(text, /the listing's order, not the workflow's/, text);
     assertNoInvocation(["mol", "pour", "superpowers-workflow", "--var", "topic=x"]);
     // A second pour in the same session is the same refusal: the guard is stateless.
     const again = await s.byName.get("beads_mol_pour").execute("c", { proto: "superpowers-workflow" });
     assert.match(again.content[0].text, /proj-m9/, again.content[0].text);
+    assertNoInvocation(["mol", "pour", "superpowers-workflow"]);
+  } finally {
+    delete process.env.FAKE_BD_WS_MOLECULES;
+  }
+});
+
+test("single-repo: the refusal names bd's current step as the resume point", async () => {
+  const s = await openSession("single", repoDir);
+  process.env.FAKE_BD_WS_MOLECULES = JSON.stringify([
+    { id: "proj-m2-cur-step", status: "open", issue_type: "molecule" },
+  ]);
+  try {
+    resetLog();
+    const r = await s.byName.get("beads_mol_pour").execute("c", { proto: "superpowers-workflow" });
+    assert.ok(okResult(r), JSON.stringify(r));
+    const text = r.content[0].text;
+    findInvocation(["mol", "current", "proj-m2-cur-step", "--json"]);
+    // the listing is bead-id order, so only bd may name the resume point
+    assert.match(text, /resume here: step:implement — Implement T2 \(proj-m2-imp\)/, text);
+    assert.doesNotMatch(text, /listing's order/, text);
+    assertNoInvocation(["mol", "pour", "superpowers-workflow"]);
+  } finally {
+    delete process.env.FAKE_BD_WS_MOLECULES;
+  }
+});
+
+test("single-repo: with no current step the refusal resumes at bd's next step", async () => {
+  const s = await openSession("single", repoDir);
+  process.env.FAKE_BD_WS_MOLECULES = JSON.stringify([
+    { id: "proj-m2-next-step", status: "open", issue_type: "molecule" },
+  ]);
+  try {
+    resetLog();
+    const r = await s.byName.get("beads_mol_pour").execute("c", { proto: "superpowers-workflow" });
+    assert.ok(okResult(r), JSON.stringify(r));
+    const text = r.content[0].text;
+    assert.match(text, /resume here: step:verify — Verify \(proj-m2-ver\)/, text);
+    assert.doesNotMatch(text, /listing's order/, text);
+    assertNoInvocation(["mol", "pour", "superpowers-workflow"]);
+  } finally {
+    delete process.env.FAKE_BD_WS_MOLECULES;
+  }
+});
+
+test("single-repo: a failing or unreadable resume probe still refuses, falling back to the listing", async () => {
+  const s = await openSession("single", repoDir);
+  process.env.FAKE_BD_WS_MOLECULES = JSON.stringify([
+    { id: "proj-m9", status: "open", issue_type: "molecule" },
+  ]);
+  try {
+    // bd fails outright
+    process.env.FAKE_BD_MOL_CURRENT = "fail";
+    resetLog();
+    let r = await s.byName.get("beads_mol_pour").execute("c", { proto: "superpowers-workflow" });
+    assert.ok(okResult(r), JSON.stringify(r));
+    // the refusal survives the failed probe: it degrades to the listing, and says so
+    assert.match(r.content[0].text, /resume here: step:implement — Implement T1 \(proj-m1-imp\)/, r.content[0].text);
+    assert.match(r.content[0].text, /bd mol current failed/, r.content[0].text);
+    assert.match(r.content[0].text, /the listing's order, not the workflow's/, r.content[0].text);
+    // ... and bd answers something we cannot read at all
+    process.env.FAKE_BD_MOL_CURRENT = "garbage";
+    resetLog();
+    r = await s.byName.get("beads_mol_pour").execute("c", { proto: "superpowers-workflow" });
+    assert.ok(okResult(r), JSON.stringify(r));
+    assert.match(r.content[0].text, /bd mol current output was unreadable/, r.content[0].text);
+    assert.match(r.content[0].text, /resume here: step:implement — Implement T1 \(proj-m1-imp\)/, r.content[0].text);
+    assertNoInvocation(["mol", "pour", "superpowers-workflow"]);
+  } finally {
+    delete process.env.FAKE_BD_WS_MOLECULES;
+    delete process.env.FAKE_BD_MOL_CURRENT;
+  }
+});
+
+test("single-repo: the refusal prints each step's raw bd status", async () => {
+  const s = await openSession("single", repoDir);
+  process.env.FAKE_BD_WS_MOLECULES = JSON.stringify([
+    { id: "proj-statuses-mol", status: "open", issue_type: "molecule" },
+  ]);
+  try {
+    resetLog();
+    const r = await s.byName.get("beads_mol_pour").execute("c", { proto: "superpowers-workflow" });
+    assert.ok(okResult(r), JSON.stringify(r));
+    const text = r.content[0].text;
+    assert.match(text, /1\/4/, text);
+    assert.match(text, /\[closed\]/, text);
+    assert.match(text, /\[in_progress\]/, text);
+    assert.match(text, /\[blocked\]/, text);
+    assert.match(text, /\[deferred\]/, text);
+    // in_progress/blocked/deferred are not collapsed into `open`
+    assert.doesNotMatch(text, /\[open\]/, text);
+  } finally {
+    delete process.env.FAKE_BD_WS_MOLECULES;
+  }
+});
+
+test("single-repo: an unreadable step listing still names the resume point", async () => {
+  const s = await openSession("single", repoDir);
+  process.env.FAKE_BD_WS_MOLECULES = JSON.stringify([
+    { id: "proj-garbage-mol", status: "open", issue_type: "molecule" },
+  ]);
+  try {
+    resetLog();
+    const r = await s.byName.get("beads_mol_pour").execute("c", { proto: "superpowers-workflow" });
+    assert.ok(okResult(r), JSON.stringify(r));
+    const text = r.content[0].text;
+    // progress is unknown, but the resume line is still there — and honest about it
+    assert.match(text, /progress unknown \(could not read its steps: unrecognized bd output\)/, text);
+    assert.match(text, /resume here: unknown — bd names no current or next step/, text);
+    assertNoInvocation(["mol", "pour", "superpowers-workflow"]);
+  } finally {
+    delete process.env.FAKE_BD_WS_MOLECULES;
+  }
+});
+
+test("single-repo: a closed workspace molecule never refuses a pour", async () => {
+  const s = await openSession("single", repoDir);
+  // bd excludes closed issues today; the guard must not depend on that default
+  process.env.FAKE_BD_WS_MOLECULES = JSON.stringify([
+    { id: "proj-m9", title: "superpowers-workflow", status: "closed", issue_type: "molecule" },
+  ]);
+  try {
+    resetLog();
+    const r = await s.byName.get("beads_mol_pour").execute("c", { proto: "superpowers-workflow", vars: "topic=x" });
+    assert.ok(okResult(r), JSON.stringify(r));
+    findInvocation(["mol", "pour", "superpowers-workflow", "--var", "topic=x"]);
+    assert.doesNotMatch(r.content[0].text, /refused/, r.content[0].text);
+    assert.doesNotMatch(r.content[0].text, /proj-m9/, r.content[0].text);
+    assert.doesNotMatch(r.content[0].text, /bd delete/, r.content[0].text);
+  } finally {
+    delete process.env.FAKE_BD_WS_MOLECULES;
+  }
+});
+
+test("single-repo: a closed molecule beside an open one still refuses", async () => {
+  const s = await openSession("single", repoDir);
+  process.env.FAKE_BD_WS_MOLECULES = JSON.stringify([
+    { id: "proj-mold", status: "closed", issue_type: "molecule" },
+    { id: "proj-m9", status: "open", issue_type: "molecule" },
+  ]);
+  try {
+    resetLog();
+    const r = await s.byName.get("beads_mol_pour").execute("c", { proto: "superpowers-workflow" });
+    assert.ok(okResult(r), JSON.stringify(r));
+    assert.match(r.content[0].text, /proj-m9/, r.content[0].text);
+    assert.doesNotMatch(r.content[0].text, /proj-mold/, r.content[0].text);
     assertNoInvocation(["mol", "pour", "superpowers-workflow"]);
   } finally {
     delete process.env.FAKE_BD_WS_MOLECULES;

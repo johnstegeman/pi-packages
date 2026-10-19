@@ -303,6 +303,10 @@ export default function piBeadsLean(pi: any) {
     if (!Array.isArray(rows)) return { molecules: [], failed: true }; // unrecognized != empty
     const molecules: { id: string; beadId: string | null }[] = [];
     for (const row of rows as any[]) {
+      // A finished molecule must never refuse a pour. bd excludes closed issues from
+      // `bd list` today, so a closed root cannot reach us — but the guard states the
+      // invariant itself instead of depending on that default.
+      if (row?.status === "closed") continue;
       if (typeof row?.id !== "string" || !row.id) return { molecules: [], failed: true };
       const beadId =
         (Array.isArray(row.dependencies) ? row.dependencies : [])
@@ -313,9 +317,70 @@ export default function piBeadsLean(pi: any) {
     return { molecules, failed: false };
   }
 
+  const stepLabelOf = (s: any) =>
+    (Array.isArray(s?.labels) ? s.labels : []).find(
+      (l: any) => typeof l === "string" && l.startsWith("step:"),
+    ) ?? "step:?";
+
+  // `bd mol current <root> --json` answers as an array of molecule frames (bd may also
+  // hand back a bare object); the first frame is the one for the root we asked about.
+  function molCurrentFrame(o: any): any {
+    const first = Array.isArray(o) ? o[0] : o;
+    return first && typeof first === "object" ? first : null;
+  }
+
+  // Render one step bd named (a `current_step` or a `next_step`) as
+  // `step:<key> \u2014 <title> (<id>)`. The `step:` label comes from the step itself when bd
+  // stamps it, else from the listing row with the same id — steps are resolved by that
+  // label, never by title.
+  function namedStepRef(s: any, rows: any[] | null): string | null {
+    if (!s || typeof s !== "object") return null;
+    const id = typeof s.id === "string" ? s.id : "";
+    const title = typeof s.title === "string" ? s.title : "";
+    if (!id && !title) return null;
+    let labels: any[] = Array.isArray(s.labels) ? s.labels : [];
+    if (labels.length === 0) {
+      const row = (rows ?? []).find((x: any) => !!id && x?.id === id);
+      labels = Array.isArray(row?.labels) ? row.labels : [];
+    }
+    const label = labels.find((l: any) => typeof l === "string" && l.startsWith("step:"));
+    const name = [label, title].filter(Boolean).join(" \u2014 ");
+    return id ? `${name} (${id})` : name;
+  }
+
+  // The resume point is bd's to name, not the listing's: `bd list --parent <root> --all`
+  // answers in bead-id order, which is NOT workflow order (a real molecule lists
+  // `step:verify` before `step:implement`), so "the first row that is not closed" is only
+  // a fallback — and it says so when it is used.
+  async function describeResumePoint(
+    root: string,
+    rows: any[] | null,
+    repoDir: string,
+  ): Promise<string> {
+    const r = await bd(["mol", "current", root, "--json"], repoDir);
+    const frame = r.ok ? molCurrentFrame(jparse(r.out)) : null;
+    const named =
+      namedStepRef(frame?.current_step, rows) ?? namedStepRef(frame?.next_step, rows);
+    if (named) return `    resume here: ${named}`;
+    const why = !r.ok
+      ? `bd mol current failed: ${firstLine(r.err) || "unknown error"}`
+      : frame
+        ? "bd names no current or next step"
+        : "bd mol current output was unreadable";
+    const first = (rows ?? []).find((s: any) => s?.status !== "closed");
+    if (!first)
+      return rows
+        ? `    resume here: none \u2014 every step in the listing above is closed (${why})`
+        : `    resume here: unknown \u2014 ${why}`;
+    return (
+      `    resume here: ${stepLabelOf(first)} \u2014 ${trunc(String(first?.title ?? first?.id ?? ""), 60)} (${first?.id})\n` +
+      `      (${why}; this is the first unclosed row in the listing above \u2014 the listing's order, not the workflow's)`
+    );
+  }
+
   // One refusal detail per unfinished molecule: root id, the bead it is linked to,
-  // done/total, and every step's `step:<key>` label + status — so the reader can see the
-  // first step that is not closed (the resume point) without re-deriving step keys here.
+  // done/total, every step's `step:<key>` label + raw bd status, and the resume point bd
+  // names \u2014 so the reader never has to re-derive step keys or trust listing order.
   async function describeWorkspaceMolecule(
     m: { id: string; beadId: string | null },
     repoDir: string,
@@ -323,20 +388,22 @@ export default function piBeadsLean(pi: any) {
     const head = `${m.id}${m.beadId ? ` (bead ${m.beadId})` : " (no linked bead)"}`;
     const r = await bd(["list", "--parent", m.id, "--all", "--json"], repoDir);
     const rows = r.ok ? rowsOrNull(jparse(r.out)) : null;
-    if (!Array.isArray(rows)) {
+    const list = Array.isArray(rows) ? rows : null;
+    const resume = await describeResumePoint(m.id, list, repoDir);
+    if (!list) {
       const why = r.ok ? "unrecognized bd output" : firstLine(r.err) || "bd list failed";
-      return `${head} \u2014 progress unknown (could not read its steps: ${why})`;
+      return [
+        `${head} \u2014 progress unknown (could not read its steps: ${why})`,
+        resume,
+      ].join("\n");
     }
-    const done = rows.filter((s: any) => s?.status === "closed").length;
-    const steps = rows.map((s: any) => {
-      const label =
-        (Array.isArray(s?.labels) ? s.labels : []).find(
-          (l: any) => typeof l === "string" && l.startsWith("step:"),
-        ) ?? "step:?";
-      const state = s?.status === "closed" ? "closed" : "open";
-      return `    - ${label} [${state}] ${trunc(String(s?.title ?? s?.id ?? ""), 60)}`;
+    const done = list.filter((s: any) => s?.status === "closed").length;
+    const steps = list.map((s: any) => {
+      // the RAW bd status: in_progress/blocked/deferred say where work stopped
+      const status = typeof s?.status === "string" && s.status ? s.status : "unknown";
+      return `    - ${stepLabelOf(s)} [${status}] ${trunc(String(s?.title ?? s?.id ?? ""), 60)}`;
     });
-    return [`${head} \u2014 ${done}/${rows.length} steps done`, ...steps].join("\n");
+    return [`${head} \u2014 ${done}/${list.length} steps done`, ...steps, resume].join("\n");
   }
 
   function workspaceMoleculeRefusal(details: string[], rootIds: string[]): string {
@@ -346,7 +413,7 @@ export default function piBeadsLean(pi: any) {
       ...details,
       "",
       "Nothing was poured. Ask the user which way to go:",
-      "  - carry on with it: use the root id above and resume at the first step that is not closed;",
+      "  - carry on with it: use the root id above and resume at the step the 'resume here' line names;",
       "  - clear it and pour fresh:",
       clears,
       "    \u2014 removes the molecule, its steps, and the beads created under them.",
