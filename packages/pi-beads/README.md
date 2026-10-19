@@ -141,7 +141,7 @@ MCP transport, and what comes back is a digest rather than raw JSON.
 | `beads_comments` | Read the comments on one issue (`bd comments <id> --json`) — read-back for `beads_comment` |
 | `beads_gate_create` | Open an async gate (`human\|timer\|gh:run\|gh:pr`) blocking an issue until resolved |
 | `beads_gate_resolve` | Resolve a gate and close the gated step(s) it was blocking in one call (see below) |
-| `beads_mol_pour` | Instantiate a proto formula as a persistent molecule (`bd mol pour`) |
+| `beads_mol_pour` | Instantiate a proto formula as a persistent molecule (`bd mol pour`); **refuses** when the workspace already has an unfinished molecule, reporting its root id, linked bead, and progress so the human can choose: carry on with it, or clear it with `bd delete <root> --cascade --force` |
 | `beads_mol_show` | Show a molecule/proto structure (`bd mol show ... --json`), read-only |
 | `beads_mol_current` | Show the current position in a molecule's workflow (`bd mol current ... --json`), read-only |
 | `beads_mol_ready` | Show the ready frontier of one molecule's steps (`bd ready --mol <id>`); accepts a molecule or a step id, read-only; aggregate-aware |

@@ -245,6 +245,17 @@ case "$1" in
     echo "ok"; exit 0
     ;;
   list)
+    # the pour guard's workspace probe (bd list --type molecule --label ws:<key> --json)
+    # answers from FAKE_BD_WS_MOLECULES (default: empty) so the pre-guard pour tests
+    # still pour; it must come before the --parent handling below.
+    for a in "$@"; do
+      case "$a" in
+        ws:*)
+          if [ "\${FAKE_BD_WS_MOLECULES_FAIL:-0}" = "1" ]; then echo "boom" >&2; exit 1; fi
+          printf '%s\\n' "\${FAKE_BD_WS_MOLECULES:-[]}"
+          exit 0 ;;
+      esac
+    done
     P=""
     prev=""
     for a in "$@"; do
@@ -1779,6 +1790,111 @@ test("single-repo: beads_mol_pour hard-fails on an ambiguous step title (no part
   assert.equal(invocations().filter((inv) => inv[0] === "update").length, 0);
 });
 
+test("single-repo: beads_mol_pour refuses when the workspace already has a molecule", async () => {
+  const s = await openSession("single", repoDir);
+  process.env.FAKE_BD_WS_MOLECULES = JSON.stringify([
+    {
+      id: "proj-m9",
+      title: "superpowers-workflow",
+      status: "open",
+      issue_type: "molecule",
+      updated_at: "2026-10-19T11:13:02Z",
+      dependencies: [{ issue_id: "proj-m9", depends_on_id: "proj-1a2", type: "discovered-from" }],
+    },
+  ]);
+  try {
+    resetLog();
+    const r = await s.byName.get("beads_mol_pour").execute("c", { proto: "superpowers-workflow", vars: "topic=x" });
+    assert.ok(okResult(r), JSON.stringify(r));
+    const text = r.content[0].text;
+    assert.match(text, /proj-m9/, text);
+    assert.match(text, /proj-1a2/, text);
+    assert.match(text, /1\/2/, text);
+    assert.match(text, /bd delete/, text);
+    assert.match(text, /--cascade/, text);
+    assertNoInvocation(["mol", "pour", "superpowers-workflow"]);
+    // A second pour in the same session is the same refusal: the guard is stateless.
+    const again = await s.byName.get("beads_mol_pour").execute("c", { proto: "superpowers-workflow" });
+    assert.match(again.content[0].text, /proj-m9/, again.content[0].text);
+    assertNoInvocation(["mol", "pour", "superpowers-workflow"]);
+  } finally {
+    delete process.env.FAKE_BD_WS_MOLECULES;
+  }
+});
+
+test("single-repo: the pour guard reads the {issues:[...]} envelope as a molecule found", async () => {
+  const s = await openSession("single", repoDir);
+  process.env.FAKE_BD_WS_MOLECULES = JSON.stringify({
+    issues: [
+      {
+        id: "proj-m9",
+        title: "superpowers-workflow",
+        status: "open",
+        issue_type: "molecule",
+        dependencies: [{ issue_id: "proj-m9", depends_on_id: "proj-1a2", type: "discovered-from" }],
+      },
+    ],
+  });
+  try {
+    resetLog();
+    const r = await s.byName.get("beads_mol_pour").execute("c", { proto: "superpowers-workflow", vars: "topic=x" });
+    assert.ok(okResult(r), JSON.stringify(r));
+    const text = r.content[0].text;
+    // an envelope is a molecule FOUND, not an unreadable shape
+    assert.match(text, /proj-m9/, text);
+    assert.match(text, /proj-1a2/, text);
+    assert.match(text, /1\/2/, text);
+    assertNoInvocation(["mol", "pour", "superpowers-workflow"]);
+  } finally {
+    delete process.env.FAKE_BD_WS_MOLECULES;
+  }
+});
+
+test("single-repo: an unreadable workspace probe pours, with the check-failed note", async () => {
+  const s = await openSession("single", repoDir);
+  process.env.FAKE_BD_WS_MOLECULES = "not json";
+  try {
+    resetLog();
+    const r = await s.byName.get("beads_mol_pour").execute("c", { proto: "superpowers-workflow", vars: "topic=x" });
+    assert.ok(okResult(r), JSON.stringify(r));
+    findInvocation(["mol", "pour", "superpowers-workflow", "--var", "topic=x"]);
+    assert.match(r.content[0].text, /workspace molecule check failed/);
+  } finally {
+    delete process.env.FAKE_BD_WS_MOLECULES;
+  }
+});
+
+test("single-repo: a failing workspace probe pours, with the check-failed note", async () => {
+  const s = await openSession("single", repoDir);
+  process.env.FAKE_BD_WS_MOLECULES_FAIL = "1";
+  try {
+    resetLog();
+    const r = await s.byName.get("beads_mol_pour").execute("c", { proto: "superpowers-workflow", vars: "topic=x" });
+    assert.ok(okResult(r), JSON.stringify(r));
+    findInvocation(["mol", "pour", "superpowers-workflow", "--var", "topic=x"]);
+    assert.match(r.content[0].text, /workspace molecule check failed/);
+  } finally {
+    delete process.env.FAKE_BD_WS_MOLECULES_FAIL;
+  }
+});
+
+test("single-repo: the pour refusal notifies the ui when a ctx is present", async () => {
+  const s = await openSession("single", repoDir);
+  process.env.FAKE_BD_WS_MOLECULES = JSON.stringify([{ id: "proj-m9", status: "open", issue_type: "molecule" }]);
+  const notes = [];
+  try {
+    const r = await s.byName.get("beads_mol_pour").execute("c", { proto: "superpowers-workflow" }, undefined, undefined, {
+      ui: { notify: (m, level) => notes.push([m, level]) },
+    });
+    assert.equal(notes.length, 1);
+    assert.equal(notes[0][1], "warning");
+    assert.match(notes[0][0], /proj-m9/);
+    assert.match(r.content[0].text, /proj-m9/);
+  } finally {
+    delete process.env.FAKE_BD_WS_MOLECULES;
+  }
+});
+
 test("single-repo: read tools never emit beads:changed", async () => {
   const s = await openSession("single", repoDir);
   const reads = [
@@ -2213,8 +2329,12 @@ test("single-repo: beads_mol_pour stamps ws:<key> on the root only", async () =>
   assert.ok(okResult(r), JSON.stringify(r));
   findInvocation(["update", "proj-m1", "--add-label", `ws:${workspaceKey(workspace)}`]);
   assertNoInvocation(["update", "proj-m1", "--add-label", `ws:${workspaceKey(repoDir)}`]);
-  // ws: appears exactly once, and never on a step id
-  assert.equal(invocations().filter((inv) => inv.some((a) => a.startsWith("ws:"))).length, 1);
+  // ws: is WRITTEN exactly once, and never on a step id. (The pour guard also READS a
+  // ws:<key> label via `bd list --type molecule --label ws:...`, so count updates only.)
+  assert.equal(
+    invocations().filter((inv) => inv[0] === "update" && inv.some((a) => a.startsWith("ws:"))).length,
+    1,
+  );
   assert.equal(invocations().filter((inv) => inv[0] === "update").length, 16);
 });
 
