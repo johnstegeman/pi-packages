@@ -4,6 +4,7 @@ import {
   createChangeCoalescer,
   hasLockedMolecule,
   isCleanNotFound,
+  moleculeScore,
   moleculeWidgetLines,
   nextRefreshArgs,
   parseMoleculeCurrent,
@@ -146,7 +147,7 @@ export function createMoleculeWidgetController({
     lockedMoleculeId = null;
   }
 
-  async function refreshWorkspace(gen, grantForce) {
+  async function refreshWorkspace(gen, grantForce, { preferId = null, additive = false } = {}) {
     const listR = await safeExec(["list", "--type", "molecule", "--label", `ws:${activeWorkspaceKey}`, "--json"], gen, {
       force: grantForce(),
     });
@@ -156,8 +157,10 @@ export function createMoleculeWidgetController({
     // prior frame is kept.
     if (!listR) return;
     if (listR.code !== 0) {
-      if (isCleanNotFound(listR)) clearFrame();
-      else
+      if (isCleanNotFound(listR)) {
+        // Additive mode holds a molecule that is simply absent here; never blank it.
+        if (!additive) clearFrame();
+      } else
         warn(
           "[pi-superpowers-plus] molecule workspace query error:",
           listR.code,
@@ -167,6 +170,11 @@ export function createMoleculeWidgetController({
     }
     const found = parseMoleculeRoots(listR.stdout);
     if (found.length === 0) {
+      // Additive mode: the locked molecule carries no ws: label for this workspace, so
+      // it is not in this probe at all — keep it. The multi-worktree guard and the
+      // unscoped global fallback exist to *fill* an empty widget; never run them to
+      // replace a frame the lock is still holding.
+      if (additive) return;
       // Multi-worktree guard: if any ws:-stamped open molecule exists and none is
       // ours (found.length === 0), another worktree owns an active cycle — never
       // adopt an unscoped global candidate in that case.
@@ -220,11 +228,12 @@ export function createMoleculeWidgetController({
       const frame = parseMoleculeCurrent(r.stdout);
       if (frame) candidates.push({ frame, updatedAt: root.updated_at });
     }
-    const chosen = pickWorkspaceMolecule(candidates);
+    const chosen = pickWorkspaceMolecule(candidates, { preferId });
     if (chosen) adoptFrame(chosen, true);
     else if (sawError) {
       // transient per-root failure: keep the prior frame
-    } else clearFrame();
+    } else if (!additive) clearFrame();
+    // Additive mode with no strictly-better candidate: keep the locked frame as-is.
   }
 
   async function refresh({ force = false } = {}) {
@@ -245,6 +254,19 @@ export function createMoleculeWidgetController({
       const r = await safeExec(nextRefreshArgs(lockedMoleculeId), gen, { force: grantForce() });
       if (gen !== refreshGen) return;
       applySingleResult(r, true);
+      // An idle locked molecule (no current step, not finished) may have been superseded
+      // by a live one in this workspace: re-score additively. A locked molecule with a
+      // current step stays on the single cheap by-id query — no workspace probe.
+      // Defence in depth: preferId must be a usable lock too, else the selector would fall
+      // through to no-preference and could adopt an equal-scoring molecule.
+      if (
+        !activeWorkspaceKey ||
+        !activeMolecule ||
+        moleculeScore(activeMolecule) !== 1 ||
+        !hasLockedMolecule(lockedMoleculeId)
+      )
+        return;
+      await refreshWorkspace(gen, grantForce, { preferId: lockedMoleculeId, additive: true });
       return;
     }
 

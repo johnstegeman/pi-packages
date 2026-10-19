@@ -67,6 +67,15 @@ Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Fixed
 
+- **The molecule pour now refuses — and reports — when the workspace already has an unfinished
+  molecule**, so a session never silently creates a second one. The refusal names the existing
+  molecule's root id, the bead it is linked to, and how far along it is, then offers both ways
+  forward: carry on with it (the refusal's `resume here` line names the step to resume at), or
+  clear it with `bd delete <root> --cascade --force` and pour a fresh one. When the existence
+  check itself fails, the pour proceeds with a warning note instead.
+- **The molecule widget follows the live molecule** instead of staying pinned to the first one it
+  ever saw, so an idle molecule left over from an earlier session no longer hides the one you are
+  working on.
 - **The molecule widget is re-keyed from step titles onto the pour-time `step:` labels**, so a
   step rename can no longer silently detach the widget from the formula. Molecules poured under
   formula v1 (labels `step:explore`/`step:clarify`/`step:approaches`/`step:design`) fall back to

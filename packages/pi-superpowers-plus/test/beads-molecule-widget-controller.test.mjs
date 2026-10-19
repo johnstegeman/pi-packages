@@ -51,6 +51,31 @@ const raw = (id, current, impl) =>
 const RAW_A = raw("bd-mol-A", "Play back understanding", "Implement A");
 const RAW_B = raw("bd-mol-B", "User approves the full description", "Implement B");
 
+// An idle molecule: no current step, not finished (its one step is still open), so the
+// widget holds a lock on it but its score is 1 — the re-score trigger.
+const RAW_IDLE = (id) =>
+  JSON.stringify([
+    {
+      molecule_id: id,
+      molecule_title: "superpowers-workflow",
+      current_step: null,
+      next_step: null,
+      steps: [
+        {
+          issue: {
+            id: `${id}.1`,
+            title: "Draw out intent: something",
+            labels: ["step:conversation"],
+            issue_type: "task",
+            status: "open",
+          },
+          status: "ready",
+          is_current: false,
+        },
+      ],
+    },
+  ]);
+
 function makeFakeUi() {
   const calls = [];
   const ui = {
@@ -1208,6 +1233,190 @@ const immediateTimers = {
   assert.ok(
     ui.lastLines()?.some((l) => l.includes("finished")),
     `prior frame kept through the forced-probe refresh: ${ui.lastLines()}`,
+  );
+}
+
+// ---------- locked idle molecule: re-scores into an active workspace candidate ----------
+{
+  const ui = makeFakeUi();
+  const calls = [];
+  let phase = "seed";
+  const controller = createMoleculeWidgetController({
+    exec: async (cmd, args) => {
+      calls.push([cmd, ...args]);
+      if (args[0] === "list")
+        return {
+          code: 0,
+          stdout:
+            phase === "seed"
+              ? roots([{ id: "bd-mol-A", updated_at: "2026-01-01" }])
+              : roots([
+                  { id: "bd-mol-A", updated_at: "2026-01-01" },
+                  { id: "bd-mol-B", updated_at: "2026-02-01" },
+                ]),
+          stderr: "",
+        };
+      if (args[2] === "bd-mol-A") return { code: 0, stdout: RAW_IDLE("bd-mol-A"), stderr: "" };
+      return { code: 0, stdout: RAW_B, stderr: "" };
+    },
+    subscribeChanges: () => () => {},
+    timers: immediateTimers,
+  });
+  controller.bindSession({ ui, cwd: "/repo", workspaceKey: "k1" });
+  await tick();
+  assert.ok(
+    ui.lastLines()?.some((l) => l.includes("Draw out intent: something")),
+    `idle molecule locked: ${ui.lastLines()}`,
+  );
+
+  phase = "probe";
+  calls.length = 0;
+  await controller.refresh();
+  controller.render();
+  assert.deepEqual(calls[0], ["bd", "mol", "current", "bd-mol-A", "--json"], "the by-id query leads");
+  assert.deepEqual(
+    calls[1],
+    ["bd", "list", "--type", "molecule", "--label", "ws:k1", "--json"],
+    "an idle lock issues the workspace probe",
+  );
+  assert.deepEqual(
+    calls.at(-1),
+    ["bd", "mol", "current", "bd-mol-B", "--json"],
+    "the probe queries the workspace candidate",
+  );
+  assert.ok(
+    ui.lastLines()?.some((l) => l.includes("User approves the full description")),
+    `an active candidate wins the re-score: ${ui.lastLines()}`,
+  );
+}
+
+// ---------- locked active molecule: no workspace probe ----------
+{
+  const ui = makeFakeUi();
+  const calls = [];
+  const controller = createMoleculeWidgetController({
+    exec: async (cmd, args) => {
+      calls.push([cmd, ...args]);
+      if (args[0] === "list")
+        return { code: 0, stdout: roots([{ id: "bd-mol-A", updated_at: "2026-01-01" }]), stderr: "" };
+      return { code: 0, stdout: RAW_A, stderr: "" };
+    },
+    subscribeChanges: () => () => {},
+    timers: immediateTimers,
+  });
+  controller.bindSession({ ui, cwd: "/repo", workspaceKey: "k1" });
+  await tick();
+  calls.length = 0;
+  await controller.refresh();
+  controller.render();
+  assert.ok(
+    calls.every((c) => !(c[1] === "list" && c[3] === "molecule")),
+    `an active lock never probes the workspace: ${JSON.stringify(calls)}`,
+  );
+  assert.ok(
+    ui.lastLines()?.some((l) => l.includes("Play back understanding")),
+    `active lock keeps the single cheap query: ${ui.lastLines()}`,
+  );
+}
+
+// ---------- locked idle molecule + empty probe: the widget must not blank ----------
+{
+  const ui = makeFakeUi();
+  const calls = [];
+  let phase = "seed";
+  const controller = createMoleculeWidgetController({
+    exec: async (cmd, args) => {
+      calls.push([cmd, ...args]);
+      if (args[0] === "list")
+        return {
+          code: 0,
+          stdout: phase === "seed" ? roots([{ id: "bd-mol-A", updated_at: "2026-01-01" }]) : "[]",
+          stderr: "",
+        };
+      return { code: 0, stdout: RAW_IDLE("bd-mol-A"), stderr: "" };
+    },
+    subscribeChanges: () => () => {},
+    timers: immediateTimers,
+  });
+  controller.bindSession({ ui, cwd: "/repo", workspaceKey: "k1" });
+  await tick();
+  phase = "probe";
+  calls.length = 0;
+  await controller.refresh();
+  controller.render();
+  // the additive probe really ran (and answered []): distinguish that from no probe at all
+  assert.ok(
+    calls.some((c) => c[1] === "list" && c[3] === "molecule" && c[5] === "ws:k1"),
+    `the ws:k1 probe was issued: ${JSON.stringify(calls)}`,
+  );
+  assert.ok(
+    ui.lastLines()?.some((l) => l.includes("Draw out intent: something")),
+    `an empty probe keeps the locked molecule: ${ui.lastLines()}`,
+  );
+}
+
+// ---------- locked idle molecule absent from the probe: the widget keeps showing it ----------
+{
+  const ui = makeFakeUi();
+  let phase = "seed";
+  const controller = createMoleculeWidgetController({
+    exec: async (cmd, args) => {
+      if (args[0] === "list")
+        return {
+          code: 0,
+          stdout:
+            phase === "seed"
+              ? roots([{ id: "bd-mol-A", updated_at: "2026-01-01" }])
+              : roots([{ id: "bd-mol-B", updated_at: "2026-02-01" }]),
+          stderr: "",
+        };
+      if (args[2] === "bd-mol-A") return { code: 0, stdout: RAW_IDLE("bd-mol-A"), stderr: "" };
+      return { code: 0, stdout: RAW_B, stderr: "" };
+    },
+    subscribeChanges: () => () => {},
+    timers: immediateTimers,
+  });
+  controller.bindSession({ ui, cwd: "/repo", workspaceKey: "k1" });
+  await tick();
+  phase = "probe";
+  await controller.refresh();
+  controller.render();
+  assert.ok(
+    ui.lastLines()?.some((l) => l.includes("Draw out intent: something")),
+    `an absent lock keeps its own molecule: ${ui.lastLines()}`,
+  );
+  assert.ok(
+    !ui.lastLines()?.some((l) => l.includes("User approves the full description")),
+    `an absent lock never adopts another molecule: ${ui.lastLines()}`,
+  );
+}
+
+// ---------- locked idle molecule with no workspace key: no additive probe ----------
+{
+  const ui = makeFakeUi();
+  const calls = [];
+  const controller = createMoleculeWidgetController({
+    exec: async (cmd, args) => {
+      calls.push([cmd, ...args]);
+      return { code: 0, stdout: RAW_IDLE("bd-mol-A"), stderr: "" };
+    },
+    subscribeChanges: () => () => {},
+    timers: immediateTimers,
+  });
+  controller.bindSession({ ui, cwd: "/repo" });
+  await tick();
+  calls.length = 0;
+  await controller.refresh();
+  controller.render();
+  // the !activeWorkspaceKey half of the re-score guard: no workspace key, no probe
+  assert.deepEqual(
+    calls,
+    [["bd", "mol", "current", "bd-mol-A", "--json"]],
+    "no workspace key: the idle lock never issues the workspace probe",
+  );
+  assert.ok(
+    ui.lastLines()?.some((l) => l.includes("Draw out intent: something")),
+    `an unscoped idle lock keeps its molecule: ${ui.lastLines()}`,
   );
 }
 

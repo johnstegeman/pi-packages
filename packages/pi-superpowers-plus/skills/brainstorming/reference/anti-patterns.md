@@ -3,8 +3,8 @@
 ## Anti-Pattern: "This Is Too Simple To Need A Document"
 
 Simple work is where unexamined assumptions cost the most, so "simple" changes the
-paperwork — never the approval. A fast task, whose every choice is already in the request,
-still pours a molecule; if the human takes the opt-out, its skipped steps are closed as skipped
+paperwork — never the approval. A fast task, whose every choice is already in the request, is still
+a task the workflow sizes; if the human takes the opt-out, its skipped steps are closed as skipped
 and the work is done in the `implement` step. A small change skips the document — its full
 description lives in chat — but not the approval. A project gets the document. "This is simple"
 is a reason to write less, never a reason to skip getting the description approved.
@@ -35,4 +35,6 @@ exactly the mechanism by which the mandatory tracking setup gets silently deferr
 start reading the project it feels productive and the pour never happens.
 The rule is therefore absolute: **pour before you speak.** Pour the workflow formula and show the
 widget before you read anything at all. The one reading that comes next is `explore`, and it has
-its own step — so it is tracked rather than smuggled in ahead of the molecule.
+its own step — so it is tracked rather than smuggled in ahead of the molecule. The pour is still
+first, and a refusal is not permission to skip the molecule — you stop and ask which molecule to
+carry on with.

@@ -2,7 +2,7 @@
 
 ```dot
 digraph brainstorming {
-    "Pour molecule + show widget (unconditional)" [shape=box];
+    "Pour molecule + show widget (may refuse — stop and ask)" [shape=box];
     "Explore: read what the request points at (step 1)" [shape=box];
     "First message (opt-out offer + one question)" [shape=box];
     "Conversation <-> playback" [shape=box];
@@ -14,7 +14,7 @@ digraph brainstorming {
     "User approves the document?" [shape=diamond];
     "Print /plan for user; user runs it" [shape=doublecircle];
 
-    "Pour molecule + show widget (unconditional)" -> "Explore: read what the request points at (step 1)";
+    "Pour molecule + show widget (may refuse — stop and ask)" -> "Explore: read what the request points at (step 1)";
     "Explore: read what the request points at (step 1)" -> "First message (opt-out offer + one question)";
     "First message (opt-out offer + one question)" -> "Conversation <-> playback" [label="opt-out not taken"];
     "First message (opt-out offer + one question)" -> "Close the skipped steps; work it in the implement step" [label="fast task: opt-out taken"];

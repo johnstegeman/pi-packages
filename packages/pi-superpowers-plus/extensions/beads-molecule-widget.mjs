@@ -177,7 +177,9 @@ export function nextRefreshArgs(lockedMoleculeId) {
  */
 export function applyMoleculeFrame(prevActiveMolecule, prevLockedId, parsed, queriedById) {
   if (parsed) {
-    const finished = parsed.doneCount === parsed.total && !parsed.current_step;
+    // moleculeScore owns the finished rule; 0 means finished, so the widget keeps the
+    // finished frame for display but drops the lock.
+    const finished = moleculeScore(parsed) === 0;
     return finished
       ? { activeMolecule: parsed, lockedMoleculeId: null }
       : { activeMolecule: parsed, lockedMoleculeId: parsed.molecule_id };
@@ -227,23 +229,52 @@ function isNewerCandidate(a, b) {
 }
 
 /**
- * Choose the molecule to display for a workspace: active (2) > started (1) >
+ * The selection weight of a molecule frame: 0 = finished, 1 = idle, 2 = active.
+ * Finished means every step is done and nothing is current; a frame with a
+ * current step is active; anything else is idle. Callers guard for a null frame.
+ */
+export function moleculeScore(frame) {
+  const finished = frame.doneCount === frame.total && !frame.current_step;
+  if (finished) return 0;
+  return frame.current_step ? 2 : 1;
+}
+
+/**
+ * Choose the molecule to display for a workspace: active (2) > idle (1) >
  * finished (0), ties broken by newest updatedAt then smallest molecule_id.
  * Candidates need NOT be pre-sorted; the selector compares every pair (via
  * isNewerCandidate) so input order only matters as a final determinism guard.
+ *
+ * With `options.preferId`, the named molecule is a floor, not a filter: it is
+ * returned unless another candidate scores strictly greater (equal scores never
+ * switch). When no candidate carries that id the result is null. Without
+ * `preferId` the behaviour is unchanged.
  */
-export function pickWorkspaceMolecule(candidates) {
+export function pickWorkspaceMolecule(candidates, options = {}) {
   if (!Array.isArray(candidates) || candidates.length === 0) return null;
-  const score = (frame) => {
-    const finished = frame.doneCount === frame.total && !frame.current_step;
-    if (finished) return 0;
-    return frame.current_step ? 2 : 1;
-  };
+  const preferId = options?.preferId;
+  if (preferId) {
+    const preferred = candidates.find((c) => c?.frame?.molecule_id === preferId);
+    if (!preferred) return null;
+    const floor = moleculeScore(preferred.frame);
+    let best = preferred;
+    let bestScore = floor;
+    for (const c of candidates) {
+      if (!c?.frame) continue;
+      const s = moleculeScore(c.frame);
+      if (s <= floor) continue;
+      if (s > bestScore || (s === bestScore && isNewerCandidate(c, best))) {
+        best = c;
+        bestScore = s;
+      }
+    }
+    return best.frame;
+  }
   let best = null;
   let bestScore = -1;
   for (const c of candidates) {
     if (!c?.frame) continue;
-    const s = score(c.frame);
+    const s = moleculeScore(c.frame);
     if (best === null || s > bestScore || (s === bestScore && isNewerCandidate(c, best))) {
       best = c;
       bestScore = s;
