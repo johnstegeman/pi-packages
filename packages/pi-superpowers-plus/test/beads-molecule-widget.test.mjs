@@ -8,6 +8,7 @@ import {
   displayWidth,
   hasLockedMolecule,
   isCleanNotFound,
+  moleculeScore,
   moleculeWidgetLines,
   nextRefreshArgs,
   parseMoleculeCurrent,
@@ -93,6 +94,33 @@ assert.equal(
   "finished-only workspace shows the newest finished",
 );
 assert.equal(pickWorkspaceMolecule([]), null);
+
+// ---------- moleculeScore + preferId ----------
+assert.equal(moleculeScore(frame("fin", null, 3, 3)), 0, "finished scores 0");
+assert.equal(moleculeScore(frame("idle", null, 0, 3)), 1, "idle scores 1");
+assert.equal(moleculeScore(frame("act", { id: "a.1" }, 1, 3)), 2, "active scores 2");
+const idle = { frame: frame("lock", null, 0, 3), updatedAt: "2026-01-01" };
+const active = { frame: frame("live", { id: "l.1" }, 1, 3), updatedAt: "2025-01-01" };
+const newerIdle = { frame: frame("other", null, 0, 3), updatedAt: "2026-09-01" };
+assert.equal(
+  pickWorkspaceMolecule([idle, active], { preferId: "lock" }).molecule_id,
+  "live",
+  "a strictly better candidate wins",
+);
+assert.equal(
+  pickWorkspaceMolecule([idle, newerIdle], { preferId: "lock" }).molecule_id,
+  "lock",
+  "an equal score never switches",
+);
+assert.equal(pickWorkspaceMolecule([idle, newerIdle], { preferId: "gone" }), null, "an absent preference returns null");
+// Review Focus 4: two equal-scoring molecules, both active — no switch either.
+const activeOld = { frame: frame("lock2", { id: "x.1" }, 1, 3), updatedAt: "2026-01-01" };
+const activeNew = { frame: frame("live2", { id: "y.1" }, 1, 3), updatedAt: "2026-09-01" };
+assert.equal(
+  pickWorkspaceMolecule([activeOld, activeNew], { preferId: "lock2" }).molecule_id,
+  "lock2",
+  "an equal active score never switches",
+);
 
 // ---------- parser: malformed input never throws ----------
 assert.deepEqual(parseMoleculeCurrent(""), null);
