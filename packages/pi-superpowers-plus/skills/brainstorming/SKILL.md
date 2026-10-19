@@ -29,16 +29,23 @@ widget and survives a resume. The size of the work decides which steps you *work
 you *close as skipped*, and which the opt-out *approves* — never whether the molecule
 exists.
 
-**Pour before you speak — unconditionally.** Pour the workflow formula and put the widget
+**Pour before you speak — and stop if it refuses.** Pour the workflow formula and put the widget
 on screen *before* you read any file, run any command, or look at the project in any way.
 This is not a judgement call and it has no exception: an existing bead or epic does not
 release you from pouring:
 
   beads_mol_pour({ proto: "superpowers-workflow", vars: "topic=<topic>" })
 
+**If the pour refuses**, nothing was poured: this workspace already has a molecule, and the refusal
+names it — its root id, the bead it is linked to, and how far along it is. Stop, bring the refusal
+to your human partner verbatim, and ask which they want: carry on with the molecule that already
+exists (resuming at the first step that is not closed), or clear it and pour a fresh one. Do not
+pour again until they decide.
+
 Note the root issue id from the `Root issue:` line — it is the molecule you
 work against for the rest of this skill and for `writing-plans` /
-`executing-plans` afterward. Then show the widget immediately:
+`executing-plans` afterward. On a refusal there is no `Root issue:` line: the root is the
+one the refusal names. Then show the widget immediately:
 
   beads_mol_current({ id: "<root-id>" })
   beads_mol_ready({ id: "<root-id>" })
@@ -113,8 +120,8 @@ each gate id with the lookup above:
 
 ## First: What Do You Actually Know?
 
-You have already poured — the molecule exists either way. Before you reply, ask
-yourself: what do I know about what they want, and why?
+You have a molecule by now — the one you poured, or the one a refusal pointed you at. Before
+you reply, ask yourself: what do I know about what they want, and why?
 
 - **Everything that matters is in the request** ("make the icon cornflower
   blue"). This is a fast-route candidate: your first message may lead with the

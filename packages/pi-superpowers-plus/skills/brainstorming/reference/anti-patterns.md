@@ -35,4 +35,6 @@ exactly the mechanism by which the mandatory tracking setup gets silently deferr
 start reading the project it feels productive and the pour never happens.
 The rule is therefore absolute: **pour before you speak.** Pour the workflow formula and show the
 widget before you read anything at all. The one reading that comes next is `explore`, and it has
-its own step — so it is tracked rather than smuggled in ahead of the molecule.
+its own step — so it is tracked rather than smuggled in ahead of the molecule. The pour is still
+first, and a refusal is not permission to skip the molecule — you stop and ask which molecule to
+carry on with.
