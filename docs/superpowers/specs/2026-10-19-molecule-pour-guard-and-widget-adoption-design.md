@@ -102,6 +102,8 @@ Both come from queries the refusal path can afford:
   link to `pi-packages-rsb9s` — so the bead costs nothing extra;
 - one `bd list --parent <root> --all --json` yields progress, every step's status, and the step
   titles, including the `step:conversation` step, whose title reads `Draw out intent: <topic>`.
+  (As shipped, this query gained `--include-gates`, so gate steps appear in the listing and its
+  done/total count too.)
   Print it verbatim:
   pi-beads must **not** re-implement the widget's `topicFor`, which resolves the formula's prefix
   from the shipped formula file.

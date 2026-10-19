@@ -345,29 +345,40 @@ export default function piBeadsLean(pi: any) {
     }
     const label = labels.find((l: any) => typeof l === "string" && l.startsWith("step:"));
     const name = [label, title].filter(Boolean).join(" \u2014 ");
+    // A named step with an id but neither a `step:` label nor a title has only the id
+    // to name it by: print that alone, never a bare " (id)" with a stray leading space.
+    if (!name) return id ? `(${id})` : null;
     return id ? `${name} (${id})` : name;
   }
 
-  // The resume point is bd's to name, not the listing's: `bd list --parent <root> --all`
-  // answers in bead-id order, which is NOT workflow order (a real molecule lists
-  // `step:verify` before `step:implement`), so "the first row that is not closed" is only
-  // a fallback — and it says so when it is used.
+  // The resume point is bd's to name, not the listing's: `bd list --parent <root> --all
+  // --include-gates` answers in bead-id order, which is NOT workflow order (a real molecule
+  // lists `step:verify` before `step:implement`), so "the first row that is not closed" is
+  // only a fallback — and it says so when it is used.
   async function describeResumePoint(
     root: string,
     rows: any[] | null,
     repoDir: string,
   ): Promise<string> {
     const r = await bd(["mol", "current", root, "--json"], repoDir);
-    const frame = r.ok ? molCurrentFrame(jparse(r.out)) : null;
+    const answer = r.ok ? jparse(r.out) : null;
+    const frame = r.ok ? molCurrentFrame(answer) : null;
     const named =
       namedStepRef(frame?.current_step, rows) ?? namedStepRef(frame?.next_step, rows);
     if (named) return `    resume here: ${named}`;
+    // bd answered with a readable empty frame list (`[]`) names no current or next step —
+    // that is NOT output we could not read, so the two must not share a label.
+    const namedNothing = !!frame || (Array.isArray(answer) && answer.length === 0);
     const why = !r.ok
       ? `bd mol current failed: ${firstLine(r.err) || "unknown error"}`
-      : frame
+      : namedNothing
         ? "bd names no current or next step"
         : "bd mol current output was unreadable";
-    const first = (rows ?? []).find((s: any) => s?.status !== "closed");
+    // a gate is resolved, not worked: the fallback names the first unclosed row that is
+    // not a gate, since the listing now includes gate rows (`--include-gates`).
+    const first = (rows ?? []).find(
+      (s: any) => s?.status !== "closed" && s?.issue_type !== "gate",
+    );
     if (!first)
       return rows
         ? `    resume here: none \u2014 every step in the listing above is closed (${why})`
@@ -386,7 +397,7 @@ export default function piBeadsLean(pi: any) {
     repoDir: string,
   ): Promise<string> {
     const head = `${m.id}${m.beadId ? ` (bead ${m.beadId})` : " (no linked bead)"}`;
-    const r = await bd(["list", "--parent", m.id, "--all", "--json"], repoDir);
+    const r = await bd(["list", "--parent", m.id, "--all", "--include-gates", "--json"], repoDir);
     const rows = r.ok ? rowsOrNull(jparse(r.out)) : null;
     const list = Array.isArray(rows) ? rows : null;
     const resume = await describeResumePoint(m.id, list, repoDir);

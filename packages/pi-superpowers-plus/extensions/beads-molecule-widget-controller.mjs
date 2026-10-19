@@ -257,7 +257,15 @@ export function createMoleculeWidgetController({
       // An idle locked molecule (no current step, not finished) may have been superseded
       // by a live one in this workspace: re-score additively. A locked molecule with a
       // current step stays on the single cheap by-id query — no workspace probe.
-      if (!activeWorkspaceKey || !activeMolecule || moleculeScore(activeMolecule) !== 1) return;
+      // Defence in depth: preferId must be a usable lock too, else the selector would fall
+      // through to no-preference and could adopt an equal-scoring molecule.
+      if (
+        !activeWorkspaceKey ||
+        !activeMolecule ||
+        moleculeScore(activeMolecule) !== 1 ||
+        !hasLockedMolecule(lockedMoleculeId)
+      )
+        return;
       await refreshWorkspace(gen, grantForce, { preferId: lockedMoleculeId, additive: true });
       return;
     }

@@ -121,6 +121,21 @@ assert.equal(
   "lock2",
   "an equal active score never switches",
 );
+// The floor holds against a LOWER-scoring candidate too: a finished molecule never
+// displaces an idle lock (only a strictly greater score may).
+const finished = { frame: frame("fin", null, 3, 3), updatedAt: "2026-09-01" };
+assert.equal(
+  pickWorkspaceMolecule([idle, finished], { preferId: "lock" }).molecule_id,
+  "lock",
+  "a below-floor candidate never displaces the lock",
+);
+// A blank preference is NO preference (a blank id is never a query target): the
+// selector falls through to the normal score/tiebreak path.
+assert.equal(
+  pickWorkspaceMolecule([idle, newerIdle], { preferId: "" }).molecule_id,
+  "other",
+  "a blank preference is no preference",
+);
 
 // ---------- parser: malformed input never throws ----------
 assert.deepEqual(parseMoleculeCurrent(""), null);

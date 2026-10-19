@@ -286,6 +286,8 @@ test("the brainstorming pour runs first and can refuse", () => {
   const flat = skill.replace(/^> ?/gm, "").replace(/\s+/g, " ");
   assert.match(flat, /\*\*Pour before you speak — and stop if it refuses\.\*\*/);
   assert.match(flat, /If the pour refuses/);
+  // The resume point comes from the refusal's explicit line, not from reading its listing's order.
+  assert.match(flat, /the refusal's `resume here` line names the step to resume at/);
   assert.doesNotMatch(flat, /Once the private check says something non-trivial/);
   assert.doesNotMatch(flat, /there is no molecule, no widget, and no step/);
   assert.match(flat, /\*\*A document is named\*\*/);

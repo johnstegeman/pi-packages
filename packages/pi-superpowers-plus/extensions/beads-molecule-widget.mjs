@@ -177,7 +177,9 @@ export function nextRefreshArgs(lockedMoleculeId) {
  */
 export function applyMoleculeFrame(prevActiveMolecule, prevLockedId, parsed, queriedById) {
   if (parsed) {
-    const finished = parsed.doneCount === parsed.total && !parsed.current_step;
+    // moleculeScore owns the finished rule; 0 means finished, so the widget keeps the
+    // finished frame for display but drops the lock.
+    const finished = moleculeScore(parsed) === 0;
     return finished
       ? { activeMolecule: parsed, lockedMoleculeId: null }
       : { activeMolecule: parsed, lockedMoleculeId: parsed.molecule_id };

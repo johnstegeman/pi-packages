@@ -39,8 +39,11 @@ release you from pouring:
 **If the pour refuses**, nothing was poured: this workspace already has a molecule, and the refusal
 names it — its root id, the bead it is linked to, and how far along it is. Stop, bring the refusal
 to your human partner verbatim, and ask which they want: carry on with the molecule that already
-exists (resuming at the first step that is not closed), or clear it and pour a fresh one. Do not
-pour again until they decide.
+exists (the refusal's `resume here` line names the step to resume at), or clear it and pour a fresh
+one. Do not pour again until they decide.
+
+**If the workspace check itself could not run**, the pour proceeds anyway and its result carries a
+warning note — read the note, then carry on.
 
 Note the root issue id from the `Root issue:` line — it is the molecule you
 work against for the rest of this skill and for `writing-plans` /

@@ -243,6 +243,7 @@ case "$1" in
       case "\${FAKE_BD_MOL_CURRENT:-ok}" in
         fail)    echo "boom" >&2; exit 1 ;;
         garbage) echo "not json"; exit 0 ;;
+        empty)   printf '[]\n'; exit 0 ;;
       esac
       case "$3" in
         *cur-step*)
@@ -252,6 +253,11 @@ case "$1" in
         *next-step*)
           # no current step: the next_step is the resume point, labels and all
           printf '%s\n' '[{"molecule_id":"'"$3"'","molecule_title":"superpowers-workflow","current_step":null,"next_step":{"id":"proj-m2-ver","title":"Verify","status":"open","issue_type":"task","labels":["step:verify"]},"steps":[]}]'
+          exit 0 ;;
+        *nameless*)
+          # a named step with an id but neither a step: label nor a title: only the id
+          # may be printed (never a bare " (id)" with a stray leading space).
+          printf '%s\n' '[{"molecule_id":"'"$3"'","molecule_title":"x","current_step":{"id":"proj-m3-x","status":"in_progress"},"next_step":null,"steps":[]}]'
           exit 0 ;;
       esac
       # real bd returns a top-level ARRAY (len=1) for mol current
@@ -273,9 +279,11 @@ case "$1" in
       esac
     done
     P=""
+    INC=""
     prev=""
     for a in "$@"; do
       [ "$prev" = "--parent" ] && P="$a"
+      [ "$a" = "--include-gates" ] && INC="1"
       prev="$a"
     done
     if [ -n "$P" ]; then
@@ -286,7 +294,12 @@ case "$1" in
           # collapse into open/closed)
           printf '{"issues":[{"id":"proj-s1","title":"Explore","status":"closed","labels":["step:explore"]},{"id":"proj-s2","title":"Implement","status":"in_progress","labels":["step:implement"]},{"id":"proj-s3","title":"Verify","status":"blocked","labels":["step:verify"]},{"id":"proj-s4","title":"Finish","status":"deferred","labels":["step:finish"]}],"meta":{"count":4}}' ;;
         *2*) printf '{"issues":[{"id":"proj-m2-imp","title":"Implement T2","status":"open","priority":2,"labels":["step:implement"]}],"meta":{"count":1}}' ;;
-        *)   printf '{"issues":[{"id":"proj-m1-imp","title":"Implement T1","status":"open","priority":2,"labels":["step:implement"]},{"id":"proj-m1-done","title":"Explore done","status":"closed","priority":2,"labels":["step:implement"]}],"meta":{"count":2}}' ;;
+        *)   if [ "$INC" = "1" ]; then
+               # gate rows only appear when the caller asked for them (real bd semantics)
+               printf '{"issues":[{"id":"proj-m1-gate","title":"Gate: human","status":"open","priority":2,"issue_type":"gate","labels":["step:gate-design-approved"]},{"id":"proj-m1-imp","title":"Implement T1","status":"open","priority":2,"labels":["step:implement"]},{"id":"proj-m1-done","title":"Explore done","status":"closed","priority":2,"labels":["step:implement"]}],"meta":{"count":3}}'
+             else
+               printf '{"issues":[{"id":"proj-m1-imp","title":"Implement T1","status":"open","priority":2,"labels":["step:implement"]},{"id":"proj-m1-done","title":"Explore done","status":"closed","priority":2,"labels":["step:implement"]}],"meta":{"count":2}}'
+             fi ;;
       esac
     elif [ "$MODE" = "umbrella" ] || [ "$MODE" = "umbrella-dashed" ] || [ "$MODE" = "umbrella-collision" ]; then
       if [ "$CWD" = ${shellQuote(backendDir)} ]; then
@@ -1831,7 +1844,9 @@ test("single-repo: beads_mol_pour refuses when the workspace already has a molec
     const text = r.content[0].text;
     assert.match(text, /proj-m9/, text);
     assert.match(text, /proj-1a2/, text);
-    assert.match(text, /1\/2/, text);
+    // the listing now includes gate rows (`--include-gates`), so they count too
+    assert.match(text, /1\/3/, text);
+    assert.match(text, /- step:gate-design-approved \[open\] Gate: human/, text);
     assert.match(text, /bd delete/, text);
     assert.match(text, /--cascade/, text);
     // the resume point is bd's to name, and this molecule has no current or next step —
@@ -1912,6 +1927,45 @@ test("single-repo: a failing or unreadable resume probe still refuses, falling b
   } finally {
     delete process.env.FAKE_BD_WS_MOLECULES;
     delete process.env.FAKE_BD_MOL_CURRENT;
+  }
+});
+
+test("single-repo: a readable but empty resume probe is not reported as unreadable", async () => {
+  const s = await openSession("single", repoDir);
+  process.env.FAKE_BD_WS_MOLECULES = JSON.stringify([
+    { id: "proj-m9", status: "open", issue_type: "molecule" },
+  ]);
+  try {
+    process.env.FAKE_BD_MOL_CURRENT = "empty";
+    resetLog();
+    const r = await s.byName.get("beads_mol_pour").execute("c", { proto: "superpowers-workflow" });
+    assert.ok(okResult(r), JSON.stringify(r));
+    const text = r.content[0].text;
+    // bd answered `[]`: it names no current or next step — that is NOT unreadable output
+    assert.match(text, /bd names no current or next step/, text);
+    assert.doesNotMatch(text, /unreadable/, text);
+    assert.match(text, /resume here: step:implement — Implement T1 \(proj-m1-imp\)/, text);
+  } finally {
+    delete process.env.FAKE_BD_WS_MOLECULES;
+    delete process.env.FAKE_BD_MOL_CURRENT;
+  }
+});
+
+test("single-repo: a named step with only an id is named by its id alone", async () => {
+  const s = await openSession("single", repoDir);
+  process.env.FAKE_BD_WS_MOLECULES = JSON.stringify([
+    { id: "proj-m3-nameless", status: "open", issue_type: "molecule" },
+  ]);
+  try {
+    resetLog();
+    const r = await s.byName.get("beads_mol_pour").execute("c", { proto: "superpowers-workflow" });
+    assert.ok(okResult(r), JSON.stringify(r));
+    const text = r.content[0].text;
+    // neither a `step:` label nor a title: the id alone names it (no stray leading space)
+    assert.match(text, /resume here: \(proj-m3-x\)/, text);
+    assert.doesNotMatch(text, /resume here: {2}/, text);
+  } finally {
+    delete process.env.FAKE_BD_WS_MOLECULES;
   }
 });
 
@@ -2014,7 +2068,7 @@ test("single-repo: the pour guard reads the {issues:[...]} envelope as a molecul
     // an envelope is a molecule FOUND, not an unreadable shape
     assert.match(text, /proj-m9/, text);
     assert.match(text, /proj-1a2/, text);
-    assert.match(text, /1\/2/, text);
+    assert.match(text, /1\/3/, text);
     assertNoInvocation(["mol", "pour", "superpowers-workflow", "--var", "topic=x"]);
   } finally {
     delete process.env.FAKE_BD_WS_MOLECULES;
