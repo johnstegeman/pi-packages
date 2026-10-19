@@ -69,6 +69,13 @@ bd list --type molecule --label ws:<wsKey> --json
 
 Non-empty → return the refusal; `bd mol pour` is never invoked.
 
+**A check that fails is not an empty check.** If the list query exits non-zero after bd's own retries,
+or returns a shape the guard cannot read, the pour **proceeds**, with a loud warning appended to its
+result (the existing `ws label: FAILED …` note is the precedent). Refusing would stall the whole
+brainstorming skill with no molecule and no escape — the guard is stateless, so there is no override —
+and D5 is now the backstop for exactly that case. The guard must therefore distinguish *empty* from
+*unreadable*: an unrecognized shape is a failed check, never "no molecule here".
+
 **One query is enough, and this was verified rather than assumed.** A molecule root is closed when
 its last step closes: `pi-packages-mol-9o057` has `closed_at` 19:52:00Z against its
 `Finish development branch` step at 19:51:56Z, and all 52 completed molecules in the `pmm-iris`
@@ -86,14 +93,16 @@ Required in the message:
 
 - the existing molecule's **root id**;
 - the **bead** it is linked to, if it has one;
-- how far along it is (**done/total**), plus its step titles, so the user can tell whose molecule it is.
+- how far along it is (**done/total**), plus every step's title **and status**, so the user can tell
+  whose molecule it is and where a resume would land.
 
 Both come from queries the refusal path can afford:
 
 - `bd list … --json` returns `dependencies` inline — our own molecule returns its `discovered-from`
   link to `pi-packages-rsb9s` — so the bead costs nothing extra;
-- one `bd list --parent <root> --all --json` yields progress and the step titles, including the
-  `step:conversation` step, whose title reads `Draw out intent: <topic>`. Print it verbatim:
+- one `bd list --parent <root> --all --json` yields progress, every step's status, and the step
+  titles, including the `step:conversation` step, whose title reads `Draw out intent: <topic>`.
+  Print it verbatim:
   pi-beads must **not** re-implement the widget's `topicFor`, which resolves the formula's prefix
   from the shipped formula file.
 
@@ -108,11 +117,17 @@ if the model fails to relay it. `beads_mol_pour`'s `execute` currently drops `ct
 Neither branch is the agent's to pick. The refusal names the root and the command, and stops.
 
 - **Carry on with the existing molecule.** The root id from the refusal becomes the session's
-  molecule for the rest of the run. Nothing new is needed: every tracking call already resolves steps
-  by `step:<key>` label under `mol: <root>`. **No `adopt` parameter is added to the tool.**
-- **Delete the leftover and pour fresh.** The session runs
+  molecule for the rest of the run, and the session **resumes at the first step that is not closed** —
+  it never re-claims a closed step, and never starts the workflow over. That is why the refusal report
+  carries every step's status (D2): the resume point is read from it, not guessed. Nothing new is
+  needed in the API — every tracking call already resolves steps by `step:<key>` label under
+  `mol: <root>`. **No `adopt` parameter is added to the tool.**
+- **Clear the leftover and pour fresh.** The session runs
   `bd delete <root> --cascade --force` (verified: `--cascade` recursively deletes the steps, which
-  are the root's dependents) and pours again. The refusal message states that command.
+  are the root's dependents) and pours again. The refusal message names that command **and what it
+  takes with it** — the molecule, its steps, and the beads created under them, since the implement
+  step's task beads are the root's dependents too — and the agent must not run it until the user
+  says so.
 
 **Invariant:** every path out of the refusal ends with a root id — the existing one, or a fresh pour
 after the delete. The skill's step tracking has nothing to work with until then, which is why the
@@ -139,6 +154,11 @@ gains an optional `preferId`:
 
 > a candidate replaces the preferred molecule only when its score is **strictly greater** (2 > 1).
 > Equal scores never switch.
+
+**The idle-lock probe is additive only.** It never clears the widget and never adopts an equal-scoring
+molecule: when the probe returns nothing, or the locked molecule is not among the candidates (a
+molecule with no `ws:` label, say), the locked frame stays exactly as it is. The probe is a wrapper
+around `refreshWorkspace`, not a call that inherits its clear-on-empty behaviour.
 
 That is the no-flicker rule: two molecules both being worked (2 and 2) never trade the display, and
 two idle molecules (1 and 1) keep the current one rather than jumping to whichever was touched last.
@@ -185,10 +205,10 @@ before you speak", stated as absolute) move with it, as does the pinned string i
 | `packages/pi-beads/test/pi-beads.test.mjs` | refusal / proceed cases |
 | `packages/pi-beads/README.md` | the `beads_mol_pour` row gains the refusal |
 | `packages/pi-superpowers-plus/extensions/beads-molecule-widget.mjs` | `pickWorkspaceMolecule` gains `preferId` |
-| `packages/pi-superpowers-plus/extensions/beads-molecule-widget-controller.mjs` | re-score while locked, when the locked molecule is idle |
+| `packages/pi-superpowers-plus/extensions/beads-molecule-widget-controller.mjs` | re-score while locked, when the locked molecule is idle — additive only (never clears, never adopts an equal score) |
 | `packages/pi-superpowers-plus/test/beads-molecule-widget.test.mjs` | the two selection cases |
 | `packages/pi-superpowers-plus/test/beads-molecule-widget-controller.test.mjs` | probe-on-idle-lock |
-| `packages/pi-superpowers-plus/skills/brainstorming/SKILL.md` | conditional pour; refusal branch; adopted root |
+| `packages/pi-superpowers-plus/skills/brainstorming/SKILL.md` | conditional pour; refusal branch; adopted root; resume at the first unclosed step |
 | `packages/pi-superpowers-plus/skills/brainstorming/reference/{process-flow,anti-patterns}.md` | wording |
 | `packages/pi-superpowers-plus/test/skills-contract.test.mjs` | the pinned pour string moves |
 | `packages/pi-superpowers-plus/CHANGELOG.md` | `[Unreleased]` entry |
@@ -197,9 +217,12 @@ before you speak", stated as absolute) move with it, as does the pinned string i
 
 - [ ] A pour into a workspace that already has an unfinished molecule creates **nothing** and returns
       a refusal naming the root, the linked bead, and the progress.
-- [ ] The refusal names `bd delete <root> --cascade --force`; running it lets the next pour succeed.
+- [ ] The refusal names `bd delete <root> --cascade --force`, states what it removes, and the agent
+      does not run it without the user's say-so; after it, the next pour succeeds.
 - [ ] Carrying on with the existing molecule needs no new tool argument — the refusal's root id is
-      the session's molecule.
+      the session's molecule — and a partway molecule resumes at the first step that is not closed,
+      with no closed step re-claimed and no restart from step 1.
+- [ ] A failed or unreadable existence check does not block the pour; it proceeds with a warning.
 - [ ] A workspace whose only molecules are finished pours normally.
 - [ ] A second pour in the same session hits the same refusal.
 - [ ] Widget: idle lock + active candidate → the active molecule is displayed; two active → no
@@ -217,6 +240,9 @@ before you speak", stated as absolute) move with it, as does the pinned string i
   spot; closing it is not in scope here.
 - **Ping-pong between two live molecules.** Prevented by the strictly-greater rule, and made rarer by
   the guard itself: two live molecules in one workspace now require a deliberate user override.
+- **A failed check lets a second molecule through.** Accepted: the failure is loud, the widget fix
+  covers the display, and the alternative stalls the skill. This is the one place the guard is
+  deliberately not absolute.
 - **One extra `bd` query per pour**, on the refusal path only.
 - **Fork drift.** The guard is a local divergence in pi-beads (a fork of `abix5/pi-beads`), like the
   existing `ephemeral` support. pi-beads has no divergence record file — `docs/pi-subagents-local-patch.md`
