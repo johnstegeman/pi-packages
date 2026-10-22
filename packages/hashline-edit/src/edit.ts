@@ -222,6 +222,8 @@ const OP_KEYS = ["replace", "append", "prepend", "replace_text"] as const;
 function expandMultiOpEntry(entry: Record<string, unknown>): Record<string, unknown>[] {
 	const present = OP_KEYS.filter((key) => entry[key] != null);
 	if (present.length <= 1) return [entry];
+	// The op keys are the only fields the entry schema declares, so each split entry keeps
+	// everything that can reach `resolveEntry`; anything else was going to be ignored anyway.
 	return present.map((key) => ({ [key]: entry[key] }));
 }
 
@@ -269,7 +271,11 @@ function looksLikePastedAnchorOutput(text: string): boolean {
 
 function resolveAnchorToIndex(anchor: string, lines: string[], hashes: string[]): number {
 	const parsed = parseAnchor(anchor);
-	if (!parsed) throw badRefError(anchor, "does not parse as LINE#HASH");
+	if (!parsed)
+		throw badRefError(
+			anchor,
+			'does not parse as LINE#HASH (a line number, "#", and a three-character hash, e.g. 42#TmR)',
+		);
 	const index = parsed.line - 1;
 	if (index < 0 || index >= lines.length) {
 		throw staleAnchorError(

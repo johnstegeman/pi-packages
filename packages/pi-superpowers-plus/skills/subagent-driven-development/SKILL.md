@@ -277,9 +277,11 @@ disposition policy, recorded on the ledger's `wrap-up` list the same way
   `scripts/review-package <implement-step-id> BASE HEAD` and pass the reviewer the file path
   it prints (or, without bash: `git log --oneline`, `git diff --stat`,
   and `git diff -U10` for the range, redirected to one uniquely named
-  file). The output never enters your own context, and the reviewer sees
-  the commit list, stat summary, and full diff with context in one Read
-  call. Use the BASE you recorded before dispatching the implementer —
+  file). The output never enters your own context, and the reviewer works
+  from that file — the commit list, the stat summary, then the diff in
+  ~400-line slices (the prompts bound it; a 700 KB package must never
+  arrive as one Read result). Use the BASE you recorded before dispatching
+  the implementer —
   never `HEAD~1`, which silently truncates multi-commit tasks. Never
   dispatch a task reviewer without a diff file.
 > **Read now:** [reference/task-review.md](reference/task-review.md) — reviewer inputs, the Global Constraints lens, anti-pre-judging directives, and the cannot-verify rule. Read before dispatching a task reviewer.

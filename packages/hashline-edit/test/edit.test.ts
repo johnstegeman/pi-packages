@@ -699,7 +699,7 @@ test("a multi-op batch with a line-count shift returns anchors matching the fina
 	);
 });
 
-test("an edit entry with two ops applies both, in entry order", async () => {
+test("an edit entry with two ops applies both", async () => {
 	// Was a rejection until 2026-10-22: the tool description invited combining replace_text with
 	// other edits, and 63 real sessions packed two ops into one entry. Splitting is lossless -
 	// every op resolves against the same pre-edit snapshot - so the entry is split instead.
@@ -725,6 +725,24 @@ test("an edit entry with two ops applies both, in entry order", async () => {
 	);
 	assert.equal(readFileSync(filePath, "utf-8"), "ONE\ntwo new\nthree");
 	assert.match(textOf(result), /Successfully applied 2 edit\(s\)/);
+});
+
+test("prepareArguments splits a two-op entry before schema validation", async () => {
+	// The framework calls this before validation; every other test drives `execute` directly, so
+	// this is the only guard on the path the model's arguments actually take.
+	const tool = createHashlineEditTool(defaultConfig);
+	const prepared = tool.prepareArguments?.({
+		path: "/tmp/x.ts",
+		edits: [
+			{ replace: { pos: "1#AAA", lines: ["a"] }, replace_text: { oldText: "b", newText: "c" } },
+		],
+	}) as { edits: Record<string, unknown>[] } | undefined;
+	assert.ok(prepared, "prepareArguments must return the argument object");
+	assert.equal(prepared.edits.length, 2);
+	assert.deepEqual(
+		prepared.edits.map((e) => Object.keys(e)),
+		[["replace"], ["replace_text"]],
+	);
 });
 
 test("an edit entry with two ops whose ranges overlap still conflicts, with no write", async () => {

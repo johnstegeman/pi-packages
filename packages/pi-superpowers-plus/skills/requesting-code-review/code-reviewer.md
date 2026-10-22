@@ -34,7 +34,7 @@ Dispatch a subagent with this prompt:
 
     ```bash
     git diff --stat [BASE_SHA]..[HEAD_SHA]
-    git diff [BASE_SHA]..[HEAD_SHA] -- <one file at a time>
+    git diff [BASE_SHA]..[HEAD_SHA] -- "src/the-one-file.ts"   # one path per call
     ```
 
     ## Read-Only Review
