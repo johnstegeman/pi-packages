@@ -38,7 +38,8 @@ Dispatch a subagent with this prompt:
     ## Your Job
 
     Once you're clear on requirements:
-    1. call set_phase({ phase: "development" }).
+    1. **Direct tool call, not part of the codemode script:** call
+       set_phase({ phase: "development" }) as its own call.
     2. Implement exactly what the task specifies
     3. Write tests (following TDD if task says to)
     4. Verify implementation works

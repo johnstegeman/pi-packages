@@ -11,6 +11,21 @@ Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Changed
 
+- **`set_phase` is a direct tool call, never part of a codemode script.** The three SDD prompt
+  templates introduced it in prose and switched to "from a codemode script" in the next line, so
+  models merged the call into the script and pi answered `ReferenceError: set_phase is not
+  defined` — 54 times in a 21-day session sweep, 39 of them in task-reviewers. Every template now
+  marks it as its own call, and `agent-templates/verifier.md` and `code-reviewer.md` gain the
+  "reaching the beads tools" note the prompt templates already carried (verifiers resolved 90
+  `bd` calls through bash rather than the compact tools).
+
+- **Review prompts bound how much diff they read at once.** The prompts said "read the diff file
+  once … the full diff with surrounding context", and reads of `.superpowers/sdd/**` reached
+  710 KB in a single result (~177k tokens), with 87 results over 60k chars carrying 45% of that
+  flow. The three workflow scripts' prompts and the three templates now say: check the line count
+  first, and past 600 lines read the stat summary and then 400-line slices, never re-reading a
+  slice. The `git diff` fallbacks are bounded the same way.
+
 - **The `brainstorming` skill is rebuilt on upstream superpowers v7.0.0's spine** (upstream PRs
   #2463/#2482/#2483). The skill draws out what the human actually wants before it proposes
   anything, then sizes the work — fast task, small change, or project — instead of routing and

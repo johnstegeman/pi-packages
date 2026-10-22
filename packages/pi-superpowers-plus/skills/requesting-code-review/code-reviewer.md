@@ -7,7 +7,7 @@ Use this template when dispatching a code reviewer subagent.
 ````
 Dispatch a subagent with this prompt:
   Agent({ subagent_type: "code-reviewer", prompt: `
-    Your role, bounded-lookup policy, and required output format are defined in [`../../agent-templates/code-reviewer.md`](../../agent-templates/code-reviewer.md).
+    Your role, bounded-lookup policy, and required output format are defined in [`../../agent-templates/code-reviewer.md`](../../agent-templates/code-reviewer.md) — that is `packages/pi-superpowers-plus/agent-templates/`, at the package root, NOT under `skills/`.
 
     ## What Was Implemented
 
@@ -25,12 +25,16 @@ Dispatch a subagent with this prompt:
 
     If a diff file is provided, read it once — it contains the commit list,
     a stat summary, and the full diff with surrounding context, and it is your
-    view of the change. Do not re-run git commands. If no diff file is
-    provided, fetch the diff yourself:
+    view of the change. Do not re-run git commands.
+    The package can be big: check its line count first (wc -l), and when it exceeds 600 lines,
+    read the stat summary before the diff and then the diff in 400-line slices (read with
+    offset/limit), never re-reading a slice you already have. One huge Read result is the
+    failure to avoid here.
+    If no diff file is provided, fetch the diff yourself, bounded the same way:
 
     ```bash
     git diff --stat [BASE_SHA]..[HEAD_SHA]
-    git diff [BASE_SHA]..[HEAD_SHA]
+    git diff [BASE_SHA]..[HEAD_SHA] -- <one file at a time>
     ```
 
     ## Read-Only Review

@@ -1,6 +1,6 @@
 # Task Reviewer Prompt Template
 
-The reviewer's identity and output contract are defined in [`../../agent-templates/task-reviewer.md`](../../agent-templates/task-reviewer.md). This template supplies the task context.
+The reviewer's identity and output contract are defined in [`../../agent-templates/task-reviewer.md`](../../agent-templates/task-reviewer.md) — that is `packages/pi-superpowers-plus/agent-templates/`, at the package root, NOT under `skills/` (`skills/agent-templates/` does not exist). This template supplies the task context.
 
 Use this template when dispatching a task reviewer subagent. The reviewer
 reads the task's diff once and returns two verdicts: spec compliance and
@@ -19,8 +19,9 @@ Dispatch a subagent with this prompt:
 
     ## What Was Requested
 
+    First, **as a direct tool call** — not inside the codemode script below:
     call set_phase({ phase: "development" }).
-    Read your task bead, from a codemode script:
+    Then read your task bead, from a codemode script:
     `return await tools.beads_show({ id: "<TASK_ID>", full: true });`
     It contains the exact, full text of the task. (The beads_* tools have
     code-mode exposure, so they are not in your declared tool list — reach
@@ -48,8 +49,13 @@ Dispatch a subagent with this prompt:
     change. The diff's context lines ARE the changed files: do not Read a
     changed file separately unless a hunk you must judge is cut off
     mid-function — and say so in your report. Do not re-run git commands.
-    If the diff file is missing, fetch the diff yourself:
-    git diff --stat [BASE_SHA]..[HEAD_SHA] and git diff [BASE_SHA]..[HEAD_SHA].
+    The package can be big: check its line count first (wc -l), and when it exceeds 600 lines,
+    read the stat summary before the diff and then the diff in 400-line slices (read with
+    offset/limit), never re-reading a slice you already have. One huge Read result is the
+    failure to avoid here.
+    If the diff file is missing, fetch the diff yourself — bounded the same
+    way: git diff --stat [BASE_SHA]..[HEAD_SHA] first, then a per-file
+    git diff for each file you must judge.
     Do not crawl the broader codebase. Inspect code outside the diff only
     to evaluate a concrete risk you can name — one focused check per named
     risk, and name both the risk and what you checked in your report.
