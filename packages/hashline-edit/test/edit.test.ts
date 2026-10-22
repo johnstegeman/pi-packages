@@ -699,11 +699,39 @@ test("a multi-op batch with a line-count shift returns anchors matching the fina
 	);
 });
 
-test("an edit entry with multiple op fields set is rejected with no partial write", async () => {
+test("an edit entry with two ops applies both, in entry order", async () => {
+	// Was a rejection until 2026-10-22: the tool description invited combining replace_text with
+	// other edits, and 63 real sessions packed two ops into one entry. Splitting is lossless -
+	// every op resolves against the same pre-edit snapshot - so the entry is split instead.
 	const filePath = join(dir, "t.ts");
-	const original = "one\ntwo\nthree";
+	const original = "one\ntwo target\nthree";
 	writeFileSync(filePath, original);
 	const anchor = anchorFor(original, 1);
+	const tool = createHashlineEditTool(defaultConfig);
+	const result = await tool.execute(
+		"call-1",
+		{
+			path: filePath,
+			edits: [
+				{
+					replace: { pos: anchor, lines: ["ONE"] },
+					replace_text: { oldText: "target", newText: "new" },
+				},
+			],
+		},
+		undefined,
+		undefined,
+		{ cwd: dir } as never,
+	);
+	assert.equal(readFileSync(filePath, "utf-8"), "ONE\ntwo new\nthree");
+	assert.match(textOf(result), /Successfully applied 2 edit\(s\)/);
+});
+
+test("an edit entry with two ops whose ranges overlap still conflicts, with no write", async () => {
+	const filePath = join(dir, "t2.ts");
+	const original = "one\ntwo\nthree";
+	writeFileSync(filePath, original);
+	const anchor = anchorFor(original, 2);
 	const tool = createHashlineEditTool(defaultConfig);
 	await assert.rejects(
 		() =>
@@ -713,8 +741,8 @@ test("an edit entry with multiple op fields set is rejected with no partial writ
 					path: filePath,
 					edits: [
 						{
-							replace: { pos: anchor, lines: ["ONE"] },
-							append: { pos: anchor, lines: ["INSERTED"] },
+							replace: { pos: anchor, lines: ["TWO"] },
+							replace_text: { oldText: "two", newText: "deux" },
 						},
 					],
 				},
@@ -722,7 +750,63 @@ test("an edit entry with multiple op fields set is rejected with no partial writ
 				undefined,
 				{ cwd: dir } as never,
 			),
-		/exactly one/i,
+		/E_EDIT_CONFLICT/,
+	);
+	assert.equal(readFileSync(filePath, "utf-8"), original);
+});
+
+test("a padded anchor copied from read output applies", async () => {
+	// read pads line numbers to the width of the last line shown, so line 1 of a 12-line file is
+	// emitted as " 1#HASH:". Observed in the wild as " 49 #Oau".
+	const original = `${Array.from({ length: 12 }, (_, i) => `line ${i + 1}`).join("\n")}`;
+	const filePath = join(dir, "padded.ts");
+	writeFileSync(filePath, original);
+	const tool = createHashlineEditTool(defaultConfig);
+	await tool.execute(
+		"call-1",
+		{
+			path: filePath,
+			edits: [{ replace: { pos: ` ${anchorFor(original, 1)}`, lines: ["LINE ONE"] } }],
+		},
+		undefined,
+		undefined,
+		{ cwd: dir } as never,
+	);
+	assert.equal(readFileSync(filePath, "utf-8").split("\n")[0], "LINE ONE");
+});
+
+test("a colon-suffixed anchor copied from read output applies", async () => {
+	const original = "one\ntwo\nthree";
+	const filePath = join(dir, "colon.ts");
+	writeFileSync(filePath, original);
+	const tool = createHashlineEditTool(defaultConfig);
+	await tool.execute(
+		"call-1",
+		{ path: filePath, edits: [{ replace: { pos: `${anchorFor(original, 2)}:`, lines: ["TWO"] } }] },
+		undefined,
+		undefined,
+		{ cwd: dir } as never,
+	);
+	assert.equal(readFileSync(filePath, "utf-8"), "one\nTWO\nthree");
+});
+
+test("a repaired anchor whose hash is wrong is still stale, with no write", async () => {
+	// The repair strips noise only; the hash comparison is what keeps an edit from landing on
+	// content the model never saw.
+	const original = "one\ntwo\nthree";
+	const filePath = join(dir, "padded-stale.ts");
+	writeFileSync(filePath, original);
+	const tool = createHashlineEditTool(defaultConfig);
+	await assert.rejects(
+		() =>
+			tool.execute(
+				"call-1",
+				{ path: filePath, edits: [{ replace: { pos: ` 1#HKy:`, lines: ["ONE"] } }] },
+				undefined,
+				undefined,
+				{ cwd: dir } as never,
+			),
+		/E_STALE_ANCHOR/,
 	);
 	assert.equal(readFileSync(filePath, "utf-8"), original);
 });

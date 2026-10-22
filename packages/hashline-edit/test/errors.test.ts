@@ -47,11 +47,12 @@ test("noMatchError carries E_NO_MATCH code", () => {
 	assert.match(err.message, /^\[E_NO_MATCH\]/);
 });
 
-test("multipleMatchesError carries E_MULTIPLE_MATCHES code and count", () => {
+test("multipleMatchesError carries E_MULTIPLE_MATCHES code and count, and names the fix", () => {
 	const err = multipleMatchesError("needle", 3);
 	assert.equal(err.code, "E_MULTIPLE_MATCHES");
 	assert.match(err.message, /^\[E_MULTIPLE_MATCHES\]/);
 	assert.match(err.message, /3/);
+	assert.match(err.message, /more surrounding lines/i);
 });
 
 test("invalidArgumentError carries E_INVALID_ARGUMENT code", () => {

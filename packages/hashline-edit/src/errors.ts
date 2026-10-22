@@ -57,6 +57,6 @@ export function noMatchError(oldText: string): HashlineError {
 export function multipleMatchesError(oldText: string, count: number): HashlineError {
 	return new HashlineError(
 		"E_MULTIPLE_MATCHES",
-		`oldText ${JSON.stringify(oldText)} matched ${count} times; it must match exactly once.`,
+		`oldText ${JSON.stringify(oldText)} matched ${count} times; it must match exactly once. Include more surrounding lines to make it unique.`,
 	);
 }
