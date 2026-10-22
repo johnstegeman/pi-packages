@@ -141,11 +141,20 @@ both instruct "read the diff file once … the full diff with surrounding contex
 60k chars**, holding 3.07M of those tokens; the largest single result was **709,822 chars (~177k
 tokens)**. (Exact duplicate re-reads measured 0 — those are *paged* reads of one large file.)
 
-**After:** the three templates say: check the package's line count first; when it exceeds 600 lines,
-read the stat summary and then 400-line slices, and never re-read a slice. Total diff volume is unchanged —
-the win is that no single result blows the context window, and the stat summary is seen first.
+**After:** every prompt source that says "read the diff once" carries the same bound — check the
+package's line count first; when it exceeds 600 lines, read the stat summary and then 400-line
+slices, and never re-read a slice. That is six sources, not three: the three markdown templates
+**and** the three SubagentWorkflow prompts that SDD actually runs on
+(`scripts/wave-parallel.js:118`, `scripts/fix-loop.js:139`, `scripts/final-review.js:147`).
+The `git diff` fallback gets the same bound, because an unbounded instruction on the fallback path
+reproduces exactly the failure being measured. Total diff volume is unchanged — the win is that no
+single result blows the context window, and that the stat summary is seen first.
 
-**Tests:** contract suite stays green; the instruction is prose, not code.
+**Tests:** the contract suite stays green (the `.js` prompts are prompt sources under
+`skills-contract.test.mjs:265-274`, so their wording is constrained); the instruction is prose.
+
+*(Builder check, Q1 — settled here: the scope is every prompt source, scripts and fallback
+included, so the bound cannot be bypassed by the path SDD actually takes.)*
 
 ### F — a close refusal states what is legal (`pi-beads`)
 
@@ -164,14 +173,30 @@ tool cannot pass. 83 refusals; what agents did next:
 dependents' later `beads_close` never fails with 'blocked by open issues'") — the remedy exists, it
 is just not named where the refusal lands.
 
-**After:** `beads_close` recognises the blocked-close case and answers with the blocker ids plus the
+**After:** `beads_close` recognises the blocked-close case, answers with the blocker ids plus the
 legal moves — close or `beads_undep` the blocker when the dependency was wrong, `beads_gate_resolve`
-when the blocker is a gate — and drops the `--force` hint it cannot honour. **No `force` parameter
-is added**: force-closing a molecule step breaks the gate chain the workflow depends on, and four
-agents already tried it blind.
+when the blocker is a gate, `beads_deps({ ids: "<blocker>" })` to tell which — and drops the
+`--force` hint it cannot honour. The moves are worded generically rather than resolved by a lookup:
+a `bd dep list`/`bd show` inside the failure path would add a bd round-trip and a new failure branch
+to a path that already fired 83 times, to save the agent one call it can make itself.
 
-**Tests:** a close of a bead blocked by an open bead returns the blocker id and the three moves, and
-contains no `--force`; an unblocked close is unchanged.
+**A partial batch must stay truthful.** bd closes what it can and exits non-zero for the rest: one
+closed plus one blocked id prints `✓ Closed <id>` on stdout and the refusal on stderr, and today's
+loop treats the whole repo as failed (`src/index.ts:1679-1687`), discarding the stdout half. A
+rewritten message that dropped it would tell the agent a close failed that partly succeeded — the
+same defect F exists to fix. So the per-repo close parses the ids bd reports as closed from stdout
+and reports both halves: `closed a, b; blocked c (blockers: d e — …)`.
+
+**No `force` parameter is added**: force-closing a molecule step breaks the gate chain the workflow
+depends on, and four agents already tried it blind.
+
+**Tests:** a close of a bead blocked by an open bead returns the blocker id, the moves, and no
+`--force`; a mixed batch (one closable, one blocked) reports the closed id *and* the blocked one with
+its blockers; an all-blocked batch reports every id; an unblocked close is unchanged.
+
+*(Builder check, Q2 settled as (a) generic wording plus a `beads_deps` pointer rather than (b) a
+blocker-kind lookup; Q3 settled by adding per-id outcome reporting — without it the rewrite would
+introduce the lie it is meant to remove.)*
 
 ### G — `E_MULTIPLE_MATCHES` names the fix (`hashline-edit`)
 
@@ -179,6 +204,16 @@ contains no `--force`; an unblocked close is unchanged.
 
 **After:** the message adds "include more surrounding lines to make it unique".
 
+## Builder check
+
+A fresh general-purpose subagent planned from the committed document and raised three questions;
+all three are settled above and in the units, none deferred:
+
+| # | question | resolution |
+|---|---|---|
+| 1 | E names three templates, but the same unbounded "read the diff once" lives in the three workflow scripts SDD actually runs (and in the `git diff` fallback) | E covers all six prompt sources plus the fallback |
+| 2 | F: word the moves generically, or look up each blocker to name the exact gate? | generic wording plus a `beads_deps` pointer — no bd round-trip in a path that fired 83 times |
+| 3 | F: bd partly succeeds on a mixed batch and today's loop discards the stdout successes | per-id outcome reporting added to F, with a mixed-batch test |
 ## Verification
 
 - `npm test` at the repo root (the package gate: `hashline-edit`, `pi-beads`, `pi-superpowers-plus`).
