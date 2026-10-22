@@ -653,6 +653,44 @@ export default function piBeadsLean(pi: any) {
     );
   }
   const errText = (r: { err?: string | null }) => (r?.err ?? "").trim() || "unknown error";
+
+  // ---- blocked-close refusals ------------------------------------------------
+  // `bd close` refuses to close an issue whose blockers are open:
+  //   cannot close blocked issue: X is blocked by [Y Z] (use --force to override)
+  // Relayed verbatim, that message advertises `--force`, which this tool cannot pass (there is no
+  // force parameter, deliberately: force-closing a molecule step breaks the gate chain), so 83
+  // refusals in a 21-day sweep left the caller with an instruction it could not follow — 11
+  // retried the same close and 4 shelled out to `bd close --force`. The refusal now names the
+  // blockers and the moves that actually work, and the `--force` hint is stripped everywhere.
+  const BLOCKED_CLOSE_LINE = /cannot close blocked issue:\s*(\S+)\s+is blocked by\s*\[([^\]]*)\]/;
+  const CLOSED_LINE = /\u2713\s*Closed\s+(\S+)/;
+
+  const stripForceHint = (text: string) =>
+    text.replace(/\s*\(use --force to override\)/gi, "").trim();
+
+  const parseBlockedRefusals = (err: string) => {
+    const out: { id: string; blockers: string[] }[] = [];
+    for (const line of stripForceHint(err).split("\n")) {
+      const m = BLOCKED_CLOSE_LINE.exec(line);
+      if (m) out.push({ id: m[1], blockers: m[2].split(/\s+/).filter(Boolean) });
+    }
+    return out;
+  };
+
+  // bd closes what it can and exits non-zero for the rest, printing the successes on stdout.
+  // The per-repo loop used to discard that half, so a mixed batch reported a total failure.
+  const parseClosedIds = (out: string) => {
+    const ids: string[] = [];
+    for (const line of out.split("\n")) {
+      const m = CLOSED_LINE.exec(line);
+      if (m) ids.push(m[1]);
+    }
+    return ids;
+  };
+
+  const blockedRemedy =
+    "Close or beads_undep the blocker if the dependency is wrong; if the blocker is a gate, " +
+    'close the gated step with beads_gate_resolve. beads_deps({ ids: "<blocker>" }) tells you which.';
   function resolveCreateTarget(repoParam?: string, verb = "create"): { dir: string } | { error: string } {
     const supplied = repoParam !== undefined && repoParam !== null && String(repoParam).trim() !== "";
     if (!supplied) {
@@ -702,6 +740,21 @@ export default function piBeadsLean(pi: any) {
     if (Array.isArray(p)) return p;
     return Array.isArray(p?.issues) ? p.issues : [];
   };
+
+  // Index view of a listing: the same rows with each issue's body dropped.
+  //
+  // A `bd ... --json` row carries the full `description` — measured on four ready issues, the
+  // structured payload was 9,460 chars against 446 for the `fmtRows` digest (21×), with the body
+  // 80% of it. The digest is the *text* half of `jsonResult`; codemode resolves `tools.beads_*`
+  // to the structured half, and every beads tool has codemode/deferred exposure only, so the
+  // compact form was unreachable and 45 list reads came back truncated (largest 49k tokens).
+  // A listing is an index: `beads_show` is the one tool that returns a body.
+  const indexArray = (json: string) =>
+    issueArray(json).map((issue: any) => {
+      if (!issue || typeof issue !== "object" || !("description" in issue)) return issue;
+      const { description: _body, ...index } = issue;
+      return index;
+    });
 
   // Select-and-claim core shared by `beads_ready` and `beads_close`'s claimNext.
   // `filtered` is already-template-stripped `bd ready --json`. It does NOT emit —
@@ -1075,7 +1128,7 @@ export default function piBeadsLean(pi: any) {
     outputSchema: READ_SCHEMAS.issues,
     label: "Beads ready",
     description:
-      "List beads issues that are ready to work (open, unblocked) across ALL repos, newest-priority first. Compact output; id prefix shows the owning project.",
+      "List beads issues that are ready to work (open, unblocked) across ALL repos, newest-priority first. An index, not a body: each row carries no description — call beads_show for one issue's text. Compact digest as text; id prefix shows the owning project.",
     parameters: {
       type: "object",
       properties: {
@@ -1127,7 +1180,7 @@ export default function piBeadsLean(pi: any) {
       // parseable non-array payload would otherwise land an object under an
       // `issues` key that READ_SCHEMAS declares as an array. Same helper (and
       // same double-parse saving) as the other structured reads.
-      const structured = { issues: issueArray(filtered) };
+      const structured = { issues: indexArray(filtered) };
       if (!claim) return jsonResult(fmtRows(filtered), structured);
       // Select client-side so a template head can never be claimed. The owning-repo
       // `bd update <id> --claim` is the sole durable claim path (it also emits
@@ -1145,7 +1198,7 @@ export default function piBeadsLean(pi: any) {
     outputSchema: READ_SCHEMAS.issues,
     label: "Beads list",
     description:
-      "List beads issues across ALL repos, optionally filtered by status (open,in_progress,blocked,deferred,closed). Compact output; id prefix shows the owning project.",
+      "List beads issues across ALL repos, optionally filtered by status (open,in_progress,blocked,deferred,closed). An index, not a body: each row carries no description — call beads_show for one issue's text. Compact digest as text; id prefix shows the owning project.",
     parameters: {
       type: "object",
       properties: {
@@ -1194,7 +1247,7 @@ export default function piBeadsLean(pi: any) {
         const msg = `bd list failed: ${r.err}`;
         return jsonResult(msg, { error: msg });
       }
-      return jsonResult(fmtRows(r.out), { issues: issueArray(r.out) });
+      return jsonResult(fmtRows(r.out), { issues: indexArray(r.out) });
     },
   });
 
@@ -1251,7 +1304,7 @@ export default function piBeadsLean(pi: any) {
     outputSchema: READ_SCHEMAS.deps,
     label: "Beads dependencies",
     description:
-      "Inspect dependencies across ALL repos: blockers (what must finish first) or dependents (what this blocks). Pass ONE id to get the blocker/dependent tree; pass SEVERAL ids to get one compact line each (ideal for triaging a set of epics). Read-only.",
+      "Inspect dependencies across ALL repos: blockers (what must finish first) or dependents (what this blocks). Pass ONE id to get the blocker/dependent tree; pass SEVERAL ids to get one compact line each (ideal for triaging a set of epics). An index, not a body: no description per node — call beads_show for one issue. Read-only.",
     parameters: {
       type: "object",
       properties: {
@@ -1303,7 +1356,10 @@ export default function piBeadsLean(pi: any) {
         const blocked =
           dir === "down" &&
           arr.some((n: any) => (n.depth || 0) > 0 && n.status !== "closed");
-        return jsonResult((blocked ? "BLOCKED\n" : "") + body, { blocked, nodes: arr });
+        return jsonResult((blocked ? "BLOCKED\n" : "") + body, {
+          blocked,
+          nodes: indexArray(JSON.stringify(arr)),
+        });
       }
       const lines: string[] = [];
       const by_id: Record<string, unknown> = {};
@@ -1314,7 +1370,7 @@ export default function piBeadsLean(pi: any) {
         );
         const arr = jparse(r.out);
         const items = Array.isArray(arr) ? arr : [];
-        by_id[id] = items;
+        by_id[id] = indexArray(JSON.stringify(items));
         lines.push(
           `${id} ${label}: ${items.length ? items.map((x: any) => `${x.id}[${x.status}]`).join(", ") : "(none)"}`,
         );
@@ -1678,7 +1734,18 @@ export default function piBeadsLean(pi: any) {
         if (params?.noAuto === true || params?.noAuto === "true") args.push("--no-auto");
         const r = await bd(args, dir);
         if (!r.ok) {
-          const msg = `bd close failed for ${rids.join(", ")}: ${errText(r)}`;
+          const blocked = parseBlockedRefusals(r.err);
+          // Whatever bd did close stays closed; report it instead of calling the batch a failure.
+          for (const id of parseClosedIds(r.out)) {
+            if (!closedIds.includes(id)) closedIds.push(id);
+            changed = true;
+          }
+          const msg = blocked.length
+            ? `blocked: ${blocked.map((b) => `${b.id} by ${b.blockers.join(", ")}`).join("; ")}. ${blockedRemedy}`
+            : (() => {
+                const rest = stripForceHint(errText(r));
+                return `bd close failed for ${rids.join(", ")}: ${rest}`;
+              })();
           failure = failure ? `${failure}; ${msg}` : msg;
           // each repo's close is independent: keep going so later repos are
           // neither silently skipped nor omitted from the accumulated failure.
@@ -1879,7 +1946,7 @@ export default function piBeadsLean(pi: any) {
     outputSchema: READ_SCHEMAS.issues,
     label: "Beads stale",
     description:
-      "List stale issues (not updated recently) across ALL repos — abandoned in_progress work is visible at session start.",
+      "List stale issues (not updated recently) across ALL repos — abandoned in_progress work is visible at session start. An index, not a body: no description per row — call beads_show for one issue.",
     parameters: {
       type: "object",
       properties: {
@@ -1906,7 +1973,7 @@ export default function piBeadsLean(pi: any) {
         const msg = `bd stale failed: ${r.err}`;
         return jsonResult(msg, { error: msg });
       }
-      return jsonResult(fmtRows(r.out), { issues: issueArray(r.out) });
+      return jsonResult(fmtRows(r.out), { issues: indexArray(r.out) });
     },
   });
 

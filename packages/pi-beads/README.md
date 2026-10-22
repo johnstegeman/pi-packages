@@ -122,10 +122,19 @@ Commands are run by a person and their output never reaches the model's context.
 The agent gets twenty-three tools. All of them are direct in-process `bd` calls with no
 MCP transport, and what comes back is a digest rather than raw JSON.
 
+**Reads are an index; `beads_show` is the body.** Every `beads_*` tool has
+`codemode`/`deferred` exposure, so the only surface a model sees is the codemode one — and
+codemode resolves `tools.beads_list(...)` to the *structured* payload, not the digest text.
+A raw `bd ... --json` row carries the whole `description`; measured on four ready issues that
+was 9,460 chars against 446 for the digest (21×), with the body 80% of it, and list reads that
+big came back truncated. So the listing tools (`beads_ready`, `beads_list`, `beads_deps`,
+`beads_stale`) omit `description` from their payloads and `beads_show` is the one tool that
+returns one. Read the body with `beads_show({ id, full: true })`.
+
 | Tool | What it does |
 |---|---|
 | `beads_ready` | Issues ready to work (open and unblocked) across all repositories; **template protos are excluded**; `claim: true` claims the first non-template match (not bd-atomic), read-only when omitted |
-| `beads_list` | A list filtered by status (`open,in_progress,blocked,deferred,closed`) |
+| `beads_list` | A list filtered by status (`open,in_progress,blocked,deferred,closed`) — an index: no `description`, use `beads_show` for the body |
 | `beads_show` | The essential fields of one issue: status, priority, type, dependencies; `full: true` includes the whole description body |
 | `beads_deps` | Blockers or dependents: a tree for one id, compact lines for several |
 | `beads_stale` | Stale issues (not updated recently); surfaces abandoned work; optional `days`, `status` (`open\|in_progress\|blocked\|deferred`), `limit` |

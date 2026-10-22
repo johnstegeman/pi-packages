@@ -33,12 +33,17 @@ High-frequency subset — see the pi-beads README for the full reference (all 23
 > **Reaching these tools:** every `beads_*` tool has `codemode`/`deferred` exposure, so it is
 > **not** in your tool list. Call them from a `codemode` script — `await tools.beads_ready({ ... })` —
 > and find the deferred ones with `await searchTools("beads")` or by filtering `ALL_TOOLS`.
+>
+> **Reads are an index; `beads_show` is the body.** Inside a codemode script `tools.beads_list(...)`
+> resolves to the structured payload, and the listing tools (`beads_ready`, `beads_list`, `beads_deps`,
+> `beads_stale`) omit each issue's `description` so a list stays cheap. When you need the text of an
+> issue, call `beads_show({ id, full: true })` — do not expect a body in a list row.
 
 ### Read — always span ALL repos (from the aggregate by default)
 | tool | use |
 |---|---|
 | `beads_ready({ limit?, repo?, label?, labelAny?, claim? })` | ready issues (open + unblocked, **wisps/ephemeral included** so a brainstorming batch stays visible; **template protos are excluded**). Optional `repo` narrows to one project; `label` / `labelAny` filter by labels; `claim: true` claims the first non-template match |
-| `beads_list({ status?, limit?, repo?, label?, labelAny? })` | list issues across every repo; `status` = `open,in_progress,blocked,deferred,closed`; optional project/label filters |
+| `beads_list({ status?, limit?, repo?, label?, labelAny? })` | list issues across every repo; `status` = `open,in_progress,blocked,deferred,closed`; optional project/label filters — an index: no `description` per row |
 | `beads_show({ id })` | full details of one issue: status, **blocker ids** (`blocked_by:` + `BLOCKED` marker), and for epics **children + progress** (`children: done/total`) |
 | `beads_deps({ ids, direction? })` | dependency view: ONE id → the blocker/dependent **tree**; SEVERAL ids → one compact line each. `direction` = `blockers` (default) or `dependents` |
 | `beads_comments({ id })` | read the comments on one issue in time order — read-back after `beads_comment` |
