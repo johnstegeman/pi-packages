@@ -115,7 +115,7 @@ const reviewPrompt = (item) => [
   // single-quoting is safe by construction. The $(git rev-parse HEAD) stays
   // literal — the review child resolves HEAD itself at review time.
   '  ' + "'" + ARGS.reviewPackage + "' '" + item.taskBeadId + "' '" + ARGS.base + "' $(git rev-parse HEAD) -- " + (item.files ?? []).map((f) => "'" + f + "'").join(' '),
-  "Read the printed diff file once — it is scoped to this task's files. Do not re-run git commands beyond building the package. Your review is READ-ONLY: do not mutate the working tree, the index, HEAD, or branch state.",
+  "Read the printed diff file once — it is scoped to this task's files. It can still be large: check its line count first, and when it exceeds 600 lines read the stat summary before the diff and then take the diff in 400-line slices (read with offset/limit), never re-reading a slice you already have. Do not re-run git commands beyond building the package. Your review is READ-ONLY: do not mutate the working tree, the index, HEAD, or branch state.",
   '',
   "Read the implementer's report: " + (ARGS.reportDir ?? '.') + '/' + item.taskBeadId + '-report.md',
   '',

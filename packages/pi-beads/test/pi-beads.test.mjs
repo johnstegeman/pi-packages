@@ -157,6 +157,11 @@ case "$1" in
       esac
       exit 0
     fi
+    if [ "\${FAKE_BD_READY_BODY:-0}" = "1" ]; then
+      # a real bd row carries the whole body; a listing must return an index instead
+      printf '%s\n' '[{"id":"proj-body1","title":"First","status":"open","priority":1,"description":"FULL BODY ONE"},{"id":"proj-body2","title":"Second","status":"open","priority":2,"description":"FULL BODY TWO"}]'
+      exit 0
+    fi
     if [ "\${FAKE_BD_READY_FAIL:-0}" = "1" ]; then echo "boom" >&2; exit 1; fi
     if [ "\${FAKE_BD_READY_EMPTY:-0}" = "1" ]; then
       printf '%s\n' '[{"id":"superpowers-workflow.explore","priority":2,"status":"open","title":"Explore project context: {{topic}}","is_template":true}]'
@@ -278,6 +283,10 @@ case "$1" in
           exit 0 ;;
       esac
     done
+    if [ "\${FAKE_BD_LIST_BODY:-0}" = "1" ]; then
+      printf '%s\n' '[{"id":"proj-body1","title":"First","status":"open","priority":1,"description":"FULL BODY ONE"},{"id":"proj-body2","title":"Second","status":"open","priority":2,"description":"FULL BODY TWO"}]'
+      exit 0
+    fi
     P=""
     INC=""
     prev=""
@@ -381,6 +390,19 @@ case "$1" in
     ;;
 
   close)
+    for a in "$@"; do
+      if [ "$a" = "proj-blocked" ] && [ "\${FAKE_BD_CLOSE_MIXED:-0}" = "1" ]; then
+        # bd closes what it can, prints the successes on stdout, and exits non-zero for the rest
+        echo "✓ Closed proj-ok — done"
+        echo "cannot close blocked issue: proj-blocked is blocked by [proj-gate1] (use --force to override)" >&2
+        echo "Error: 1 of 2 issues failed to close" >&2
+        exit 1
+      fi
+      if [ "$a" = "proj-blocked" ]; then
+        echo "cannot close blocked issue: proj-blocked is blocked by [proj-gate1] (use --force to override)" >&2
+        exit 1
+      fi
+    done
     if [ "$2" = "proj-bad-step" ]; then
       echo "boom" >&2
       exit 1
@@ -405,6 +427,9 @@ case "$1" in
     ;;
   show)
     case "$2" in
+      *desc-keep*)
+        printf '%s\n' '{"id":"proj-desc","status":"open","priority":2,"issue_type":"task","title":"Bodied","description":"FULL BODY"}'
+        exit 0 ;;
     esac
     echo "ok"; exit 0
     ;;
@@ -424,7 +449,7 @@ case "$1" in
   recall) printf '{"k":"v"}\n'; exit 0 ;;
   memories) printf '{"alpha":"one","beta":"two","schema_version":1}\n'; exit 0 ;;
   forget) printf 'Forgot %s\n' "$2"; exit 0 ;;
-  stale) printf '[{"id":"proj-old","status":"in_progress","title":"Old work","priority":2}]\n'; exit 0 ;;
+  stale) printf '[{"id":"proj-old","status":"in_progress","title":"Old work","priority":2,"description":"STALE BODY"}]\n'; exit 0 ;;
   lint) printf '{"total":1,"issues":1,"results":[{"id":"proj-1a2","title":"x","type":"task","missing":["## Acceptance Criteria"],"warnings":1}]}\n'; exit 0 ;;
   reopen)
     for a in "$@"; do [ "$a" = "crmback-fail" ] && { echo "boom" >&2; exit 1; }; done
@@ -2574,6 +2599,111 @@ test("single-repo: beads_mol_pour still succeeds when the ws label write fails",
     15,
     "step labels still applied",
   );
+});
+
+// ---------------------------------------------------------------------------
+// D — a listing is an index, not a body
+//
+// Measured 2026-10-22: the structured payload of four ready issues was 9,460
+// chars against 446 for the fmtRows digest, with `description` 80% of it — and
+// codemode is the only surface these tools have, so 45 list reads came back
+// truncated. beads_show stays the one tool that returns a body.
+// ---------------------------------------------------------------------------
+const withEnv = async (kv, fn) => {
+  const prev = kv.map(([k]) => [k, process.env[k]]);
+  for (const [k, v] of kv) process.env[k] = v;
+  try {
+    return await fn();
+  } finally {
+    for (const [k, v] of prev) {
+      if (v === undefined) delete process.env[k];
+      else process.env[k] = v;
+    }
+  }
+};
+
+test("single-repo: beads_list returns an index — no description in the payload", async () => {
+  const s = await openSession("single", repoDir);
+  const r = await withEnv([["FAKE_BD_LIST_BODY", "1"]], () =>
+    s.byName.get("beads_list").execute("c", {}),
+  );
+  assert.ok(okResult(r), JSON.stringify(r));
+  const issues = r.structuredContent.issues;
+  assert.equal(issues.length, 2);
+  for (const i of issues) {
+    assert.ok(!("description" in i), `description must be stripped: ${JSON.stringify(i)}`);
+    assert.ok(i.id && i.title, "the index still carries the row facts");
+  }
+  // the digest half is unchanged: the index is what a listing is for
+  assert.match(r.content[0].text, /proj-body1 P1 \[open\] First/);
+});
+
+test("single-repo: beads_ready returns an index — no description in the payload", async () => {
+  const s = await openSession("single", repoDir);
+  const r = await withEnv([["FAKE_BD_READY_BODY", "1"]], () =>
+    s.byName.get("beads_ready").execute("c", {}),
+  );
+  assert.ok(okResult(r), JSON.stringify(r));
+  for (const i of r.structuredContent.issues) {
+    assert.ok(!("description" in i), `description must be stripped: ${JSON.stringify(i)}`);
+  }
+});
+
+test("single-repo: beads_stale returns an index too", async () => {
+  const s = await openSession("single", repoDir);
+  const r = await s.byName.get("beads_stale").execute("c", {});
+  assert.ok(okResult(r), JSON.stringify(r));
+  for (const i of r.structuredContent.issues) {
+    assert.ok(!("description" in i), `description must be stripped: ${JSON.stringify(i)}`);
+  }
+});
+
+test("single-repo: beads_show still returns the body", async () => {
+  const s = await openSession("single", repoDir);
+  const r = await s.byName.get("beads_show").execute("c", { id: "proj-desc-keep", full: true });
+  assert.ok(okResult(r), JSON.stringify(r));
+  assert.equal(r.structuredContent.issue.description, "FULL BODY");
+});
+
+// ---------------------------------------------------------------------------
+// F — a close refusal states what is legal
+//
+// bd refuses with "cannot close blocked issue: X is blocked by [Y] (use --force
+// to override)" and relays it verbatim today. This tool has no force parameter
+// (deliberately: forcing a molecule step breaks the gate chain), so the hint was
+// an instruction the caller could not follow — 83 refusals, 11 retried as-is and
+// 4 shelling out to `bd close --force`.
+// ---------------------------------------------------------------------------
+test("single-repo: a blocked close names the blockers and the legal moves, never --force", async () => {
+  const s = await openSession("single", repoDir);
+  const r = await s.byName.get("beads_close").execute("c", { ids: "proj-blocked" });
+  const text = r.content[0].text;
+  assert.match(text, /blocked: proj-blocked by proj-gate1/);
+  assert.match(text, /beads_undep/);
+  assert.match(text, /beads_deps/);
+  // the gate remedy must show the ARG SHAPE: beads_gate_resolve takes the gate's own id, and a
+  // bare tool name here is how a refusal sends a model into a second failure loop.
+  assert.match(text, /beads_gate_resolve\(\{ id: "<blocker>" \}\)/);
+  assert.ok(!/--force/.test(text), `must not advertise a flag the tool cannot pass: ${text}`);
+  assert.ok(!/^closed /m.test(text), "nothing was closed, so nothing may claim to be");
+});
+
+test("single-repo: a mixed batch reports the closed id AND the blocked one", async () => {
+  // bd closes what it can and exits non-zero for the rest, printing the success
+  // on stdout. The loop used to discard that half and call the batch a failure.
+  const s = await openSession("single", repoDir);
+  const r = await withEnv([["FAKE_BD_CLOSE_MIXED", "1"]], () =>
+    s.byName.get("beads_close").execute("c", { ids: "proj-ok proj-blocked" }),
+  );
+  const text = r.content[0].text;
+  assert.match(text, /^closed proj-ok/);
+  assert.match(text, /blocked: proj-blocked by proj-gate1/);
+  assert.ok(!/--force/.test(text), `must not advertise --force: ${text}`);
+  // A partial close is still a write: the id reported closed must have emitted the change event,
+  // or the aggregate never hears about it and the report disagrees with the tooling.
+  assert.equal(s.emitted.at(-1), "beads:changed");
+  // and the blocked id must not also be named as a failed close of the whole batch
+  assert.ok(!/bd close failed for [^:]*proj-ok/.test(text), `closed id named as failed: ${text}`);
 });
 
 // ---------------------------------------------------------------------------

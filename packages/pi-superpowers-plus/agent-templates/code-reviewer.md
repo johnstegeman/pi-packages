@@ -116,4 +116,10 @@ For each issue:
 
 ## Beads
 
+**Reaching these tools.** Every `beads_*` tool is registered with `codemode`/`deferred` exposure,
+so none is in your declared `tools:` list — that is expected, not a missing toolset. Read one from a
+`codemode` script: `return await tools.beads_show({ id: "<TASK-ID>", full: true });`. Do not shell out
+to `bd`: the tools read across every repository, carry the blocker ids and the epic progress, and a raw
+`bd` dump costs far more context for less.
+
 **Do NOT create, update, or close any beads issues (beads_* tools / bd commands) — task tracking belongs to the orchestrator. Your beads access is READ-ONLY — reading the task/gate bead is fine; never write. Report your verdict; the controller records it.**

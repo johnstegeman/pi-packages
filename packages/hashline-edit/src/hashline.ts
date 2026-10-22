@@ -61,9 +61,20 @@ export function formatAnchor(line: number, hash: string): string {
 
 const ANCHOR_PATTERN = /^([1-9][0-9]*)#([A-Za-z0-9_-]{3})$/;
 
-/** Parse a "LINE#HASH" anchor string. Returns null if malformed. */
+/**
+ * Parse a "LINE#HASH" anchor string. Returns null if malformed.
+ *
+ * Two kinds of noise are tolerated, because both come from copying `read`/`grep` output
+ * verbatim: line numbers there are padded to the width of the last line shown (" 49#Oau") and
+ * the anchor is followed by the `:` section separator ("562#T-x:"). Whitespace anywhere in the
+ * token and one trailing colon are stripped - neither changes which line or hash was meant, and
+ * the caller still compares the hash against the file, so removing noise can never turn a stale
+ * anchor into a valid one. Nothing else is repaired: a missing hash, a bare number, a bare hash
+ * or a hash that is not exactly three characters states nothing, so it stays a parse failure.
+ */
 export function parseAnchor(anchor: string): { line: number; hash: string } | null {
-	const match = ANCHOR_PATTERN.exec(anchor);
+	const cleaned = anchor.replace(/\s+/g, "").replace(/:$/, "");
+	const match = ANCHOR_PATTERN.exec(cleaned);
 	if (!match) return null;
 	return { line: Number(match[1]), hash: match[2] };
 }

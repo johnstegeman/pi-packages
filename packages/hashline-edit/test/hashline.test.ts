@@ -52,6 +52,15 @@ test("formatAnchor and parseAnchor round-trip", () => {
 	assert.deepEqual(parseAnchor("9#Xy_"), { line: 9, hash: "Xy_" });
 });
 
+test("parseAnchor tolerates whitespace and one trailing colon copied from read output", () => {
+	// `read` emits `${padStart(line)}#${hash}:${content}` (src/read.ts:16), so a copy can carry a
+	// padded line number and the separator colon. Observed in the wild as " 49 #Oau" and "562#T-x:".
+	assert.deepEqual(parseAnchor(" 49#Oau"), { line: 49, hash: "Oau" });
+	assert.deepEqual(parseAnchor("49 #Oau"), { line: 49, hash: "Oau" });
+	assert.deepEqual(parseAnchor("562#T-x:"), { line: 562, hash: "T-x" });
+	assert.deepEqual(parseAnchor("\t9#Xy_ \n"), { line: 9, hash: "Xy_" });
+});
+
 test("parseAnchor rejects malformed anchors", () => {
 	assert.equal(parseAnchor("bad"), null);
 	assert.equal(parseAnchor("9#"), null);
@@ -59,4 +68,11 @@ test("parseAnchor rejects malformed anchors", () => {
 	assert.equal(parseAnchor("9#Xy_extra"), null);
 	assert.equal(parseAnchor("0#Xy_"), null);
 	assert.equal(parseAnchor("-1#Xy_"), null);
+	// Observed in the wild: a line number with no hash, a bare number, a bare hash, a 4-character
+	// hash and a doubled colon. Repairs remove noise only - none of these states the intent.
+	assert.equal(parseAnchor("481#"), null);
+	assert.equal(parseAnchor("1373"), null);
+	assert.equal(parseAnchor("yRZ"), null);
+	assert.equal(parseAnchor("1624#FZKQ"), null);
+	assert.equal(parseAnchor("9#Xy_::"), null);
 });

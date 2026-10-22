@@ -16,8 +16,9 @@ Dispatch a subagent with this prompt:
 
     ## The Task
 
+    First, **as a direct tool call** — not inside the codemode script below:
     call set_phase({ phase: "development" }).
-    Read your task bead, from a codemode script:
+    Then read your task bead, from a codemode script:
     `return await tools.beads_show({ id: "<TASK_ID>", full: true });`
     It contains the exact, full text of the task. (The beads_* tools have
     code-mode exposure, so they are not in your declared tool list — reach
@@ -40,9 +41,13 @@ Dispatch a subagent with this prompt:
 
     Read the diff file once — it contains the fix commits, a stat summary,
     and the fix diff with surrounding context. Do not re-run git commands.
-    If the diff file is missing, fetch the diff yourself:
-    git diff --stat [FIX_BASE_SHA]..[HEAD_SHA] and
-    git diff [FIX_BASE_SHA]..[HEAD_SHA].
+    The package can be big: check its line count first (wc -l), and when it exceeds 600 lines,
+    read the stat summary before the diff and then the diff in 400-line slices (read with
+    offset/limit), never re-reading a slice you already have. One huge Read result is the
+    failure to avoid here.
+    If the diff file is missing, fetch the diff yourself — bounded the same
+    way: git diff --stat [FIX_BASE_SHA]..[HEAD_SHA] first, then a per-file
+    git diff for each file you must judge.
 
     Your review is read-only on this checkout. Do not mutate the working
     tree, the index, HEAD, or branch state in any way.

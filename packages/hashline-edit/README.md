@@ -50,12 +50,19 @@ Reference `LINE#HASH` anchors copied from a prior `read` (or `grep`) call:
 }
 ```
 
+An anchor is `LINE#HASH`: a line number, `#`, and a **three-character** hash. A copy of
+`read`/`grep` output can carry the padded line number and the `:` section separator with it, so
+whitespace anywhere in the token and one trailing colon are stripped before parsing — the hash is
+still compared against the file, so removing that noise can never make a stale anchor valid.
+Anything else is a parse failure (`E_BAD_REF`): no hash (`481#`), a bare line number, a bare hash,
+or a hash that is not exactly three characters (`1624#FZKQ`).
+
 | Op | Fields | Behavior |
 |---|---|---|
 | `replace` | `pos` (required), `end` (optional), `lines` | Replace `pos` through `end` inclusive. Single line if `end` omitted. Empty `lines` deletes the range. |
 | `append` | `pos` (optional), `lines` | Insert after `pos`. Omit `pos` to append at EOF. |
 | `prepend` | `pos` (optional), `lines` | Insert before `pos`. Omit `pos` to prepend at BOF. |
-| `replace_text` | `oldText`, `newText` | Exact-substring replace. Fails unless `oldText` matches exactly once. May be combined with other operations when the resolved ranges do not overlap. |
+| `replace_text` | `oldText`, `newText` | Exact-substring replace. Fails unless `oldText` matches exactly once. May be combined with other operations when the resolved ranges do not overlap — put them in separate entries, or in one entry: an entry carrying several op keys is split into one entry per op, and overlapping ranges still fail with `E_EDIT_CONFLICT`. |
 
 All operations in a batch are resolved against the same pre-edit file snapshot and applied atomically. Replacement ranges and insertion points must not overlap. An overlapping batch fails with `[E_EDIT_CONFLICT]`; split it into separate edit calls or revise the overlapping ranges.
 

@@ -144,7 +144,7 @@ const requirement = (dimension) => {
     'Read the review package ONCE at:',
     ARGS.packagePath,
     '',
-    'It contains the commit list, stat summary, and the full diff with context — it is your view of the change. Do not re-run git commands. Your review is READ-ONLY.',
+    'It contains the commit list, stat summary, and the full diff with context — it is your view of the change. Do not re-run git commands. It can be large: check its line count first, and when it exceeds 600 lines read the stat summary before the diff and then take the diff in 400-line slices (read with offset/limit), never re-reading a slice you already have. Your review is READ-ONLY.',
     '',
     'What was implemented:',
     (ARGS.description ?? ''),

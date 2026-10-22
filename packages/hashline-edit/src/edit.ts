@@ -205,6 +205,28 @@ function normalizeEditEntry(entry: Record<string, unknown>): Record<string, unkn
 	return result;
 }
 
+const OP_KEYS = ["replace", "append", "prepend", "replace_text"] as const;
+
+/**
+ * Split an entry that carries several ops into one entry per op.
+ *
+ * Until 2026-10-22 the tool description invited combining `replace_text` with other edits while
+ * `resolveEntry` rejected any entry holding more than one op key; of 160 observed `E_BAD_REF`s,
+ * 63 entries had been written that way (39 of them `{replace, replace_text}`). Splitting is
+ * lossless in both directions: every op is resolved against the same pre-edit snapshot, so entry
+ * order carries no meaning, and overlap is still caught afterwards by `validateResolvedOps` and
+ * reported as `E_EDIT_CONFLICT` - the honest answer, rather than a capability gap.
+ *
+ * Idempotent for the single-op case, which is the overwhelmingly common one.
+ */
+function expandMultiOpEntry(entry: Record<string, unknown>): Record<string, unknown>[] {
+	const present = OP_KEYS.filter((key) => entry[key] != null);
+	if (present.length <= 1) return [entry];
+	// The op keys are the only fields the entry schema declares, so each split entry keeps
+	// everything that can reach `resolveEntry`; anything else was going to be ignored anyway.
+	return present.map((key) => ({ [key]: entry[key] }));
+}
+
 /**
  * Compatibility shim invoked by the framework before schema validation. Some
  * models (e.g. Opus 4.6, GLM-5.1) pass `edits` as a JSON string instead of an
@@ -214,7 +236,8 @@ function normalizeEditEntry(entry: Record<string, unknown>): Record<string, unkn
  * "edits.0: must be object" validation failure.
  *
  * Additionally, individual edit entries are normalized to repair flattened
- * structures (e.g. `append` sent as a bare array with `pos` at the entry level).
+ * structures (e.g. `append` sent as a bare array with `pos` at the entry level),
+ * and an entry carrying several op keys is split into one entry per op.
  */
 function prepareEditArguments(args: unknown): { path: string; edits: EditEntry[] } {
 	if (!args || typeof args !== "object") {
@@ -223,19 +246,19 @@ function prepareEditArguments(args: unknown): { path: string; edits: EditEntry[]
 	const obj = args as Record<string, unknown>;
 	if (typeof obj.edits !== "string") {
 		if (Array.isArray(obj.edits)) {
-			obj.edits = (obj.edits as unknown[]).map((entry) =>
+			obj.edits = (obj.edits as unknown[]).flatMap((entry) =>
 				entry && typeof entry === "object"
-					? normalizeEditEntry(entry as Record<string, unknown>)
-					: entry,
+					? expandMultiOpEntry(normalizeEditEntry(entry as Record<string, unknown>))
+					: [entry],
 			);
 		}
 		return args as { path: string; edits: EditEntry[] };
 	}
 	const parsed = parseStringEdits(obj.edits);
-	const normalized = parsed.map((entry) =>
+	const normalized = parsed.flatMap((entry) =>
 		entry && typeof entry === "object"
-			? normalizeEditEntry(entry as Record<string, unknown>)
-			: entry,
+			? expandMultiOpEntry(normalizeEditEntry(entry as Record<string, unknown>))
+			: [entry],
 	);
 	return { ...obj, edits: normalized } as { path: string; edits: EditEntry[] };
 }
@@ -248,7 +271,11 @@ function looksLikePastedAnchorOutput(text: string): boolean {
 
 function resolveAnchorToIndex(anchor: string, lines: string[], hashes: string[]): number {
 	const parsed = parseAnchor(anchor);
-	if (!parsed) throw badRefError(anchor, "does not parse as LINE#HASH");
+	if (!parsed)
+		throw badRefError(
+			anchor,
+			'does not parse as LINE#HASH (a line number, "#", and a three-character hash, e.g. 42#TmR)',
+		);
 	const index = parsed.line - 1;
 	if (index < 0 || index >= lines.length) {
 		throw staleAnchorError(
@@ -311,13 +338,15 @@ function resolveEntry(
 	hashes: string[],
 	config: HashlineConfig,
 ): ResolvedOp {
+	// Unreachable by construction: both entry paths (`prepareEditArguments` and `execute`'s
+	// defensive fallback) run `expandMultiOpEntry` first. Assert rather than report, so a future
+	// caller that forgets cannot surface this as if it were bad model input.
 	const opCount = [entry.replace, entry.append, entry.prepend, entry.replace_text].filter(
 		(op) => op != null,
 	).length;
 	if (opCount > 1) {
-		throw badRefError(
-			"(entry)",
-			"edit entry must specify exactly one of replace, append, prepend, replace_text; multiple were provided",
+		throw new Error(
+			"internal: multi-op entry reached resolveEntry; expandMultiOpEntry must split it first",
 		);
 	}
 	if (entry.replace) {
@@ -425,10 +454,11 @@ export function createHashlineEditTool(
 		name: "edit",
 		label: "edit (hashline)",
 		description:
-			"Edit a file using hash-anchored line references (from a prior read/grep). Ops: replace, append, prepend, replace_text. All operations are resolved against the same pre-edit file snapshot and applied atomically; replace_text may be combined with other non-overlapping edits, but overlapping ranges fail with E_EDIT_CONFLICT.",
+			"Edit a file using hash-anchored line references (from a prior read/grep). Ops: replace, append, prepend, replace_text - one op per entry; an entry that carries several is split into one entry per op. All operations are resolved against the same pre-edit file snapshot and applied atomically, so the ops may be combined freely, and overlapping ranges fail with E_EDIT_CONFLICT. An anchor is LINE#HASH with a three-character hash: whitespace and a trailing ':' are tolerated, but a missing or wrongly shaped hash is rejected.",
 		promptGuidelines: [
 			"Pass the edits parameter as an array of objects, not as a JSON string. Do not stringify or escape the array.",
 			'Example: edits=[{"replace":{"pos":"2#TmR","lines":["  console.log(\'hi\');"]}}]',
+			"One op per entry. To combine ops, list them as separate entries or put them in one entry - the entry is split either way.",
 			"Overlapping edit ranges fail with E_EDIT_CONFLICT; split the batch into separate calls or revise the overlapping ranges.",
 		],
 		parameters: editSchema,
@@ -437,11 +467,14 @@ export function createHashlineEditTool(
 			// Defensive fallback: if edits arrived as a string (e.g. a direct call
 			// that bypassed prepareArguments), coerce it now.
 			let edits = typeof rawEdits === "string" ? parseStringEdits(rawEdits) : rawEdits;
-			// Defensive fallback: normalize flattened entries even if prepareArguments was bypassed.
-			edits = edits.map((entry) =>
+			// Defensive fallback: normalize flattened entries and split multi-op entries even if
+			// prepareArguments was bypassed (a direct `execute` call, as the tests make).
+			edits = edits.flatMap((entry) =>
 				entry && typeof entry === "object"
-					? (normalizeEditEntry(entry as Record<string, unknown>) as EditEntry)
-					: entry,
+					? (expandMultiOpEntry(
+							normalizeEditEntry(entry as Record<string, unknown>),
+						) as EditEntry[])
+					: [entry],
 			);
 			const absolutePath = resolvePathArg(path, ctx.cwd);
 			return withFileMutationQueue(absolutePath, async () => {
