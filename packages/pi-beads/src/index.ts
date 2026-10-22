@@ -663,7 +663,10 @@ export default function piBeadsLean(pi: any) {
   // retried the same close and 4 shelled out to `bd close --force`. The refusal now names the
   // blockers and the moves that actually work, and the `--force` hint is stripped everywhere.
   const BLOCKED_CLOSE_LINE = /cannot close blocked issue:\s*(\S+)\s+is blocked by\s*\[([^\]]*)\]/;
-  const CLOSED_LINE = /\u2713\s*Closed\s+(\S+)/;
+  // bd prints "✓ Closed <id> — …" on stdout. The glyph is cosmetic (bd suppresses marks when
+  // stdout is not a TTY), so only the word is required: without this half, a partial close looks
+  // like a total failure, which is the lie this branch removes.
+  const CLOSED_LINE = /^\s*(?:\u2713\s*)?Closed\s+(\S+)/;
 
   const stripForceHint = (text: string) =>
     text.replace(/\s*\(use --force to override\)/gi, "").trim();
@@ -689,8 +692,9 @@ export default function piBeadsLean(pi: any) {
   };
 
   const blockedRemedy =
-    "Close or beads_undep the blocker if the dependency is wrong; if the blocker is a gate, " +
-    'close the gated step with beads_gate_resolve. beads_deps({ ids: "<blocker>" }) tells you which.';
+    "Close or beads_undep the blocker if the dependency is wrong; if the blocker is a gate, call " +
+    'beads_gate_resolve({ id: "<blocker>" }) — it resolves that gate and closes the step it gated. ' +
+    'beads_deps({ ids: "<blocker>" }) tells you which kind it is.';
   function resolveCreateTarget(repoParam?: string, verb = "create"): { dir: string } | { error: string } {
     const supplied = repoParam !== undefined && repoParam !== null && String(repoParam).trim() !== "";
     if (!supplied) {
@@ -749,8 +753,8 @@ export default function piBeadsLean(pi: any) {
   // to the structured half, and every beads tool has codemode/deferred exposure only, so the
   // compact form was unreachable and 45 list reads came back truncated (largest 49k tokens).
   // A listing is an index: `beads_show` is the one tool that returns a body.
-  const indexArray = (json: string) =>
-    issueArray(json).map((issue: any) => {
+  const indexArray = (json: string | any[]) =>
+    (Array.isArray(json) ? json : issueArray(json)).map((issue: any) => {
       if (!issue || typeof issue !== "object" || !("description" in issue)) return issue;
       const { description: _body, ...index } = issue;
       return index;
@@ -1358,7 +1362,7 @@ export default function piBeadsLean(pi: any) {
           arr.some((n: any) => (n.depth || 0) > 0 && n.status !== "closed");
         return jsonResult((blocked ? "BLOCKED\n" : "") + body, {
           blocked,
-          nodes: indexArray(JSON.stringify(arr)),
+          nodes: indexArray(arr),
         });
       }
       const lines: string[] = [];
@@ -1370,7 +1374,7 @@ export default function piBeadsLean(pi: any) {
         );
         const arr = jparse(r.out);
         const items = Array.isArray(arr) ? arr : [];
-        by_id[id] = indexArray(JSON.stringify(items));
+        by_id[id] = indexArray(items);
         lines.push(
           `${id} ${label}: ${items.length ? items.map((x: any) => `${x.id}[${x.status}]`).join(", ") : "(none)"}`,
         );
@@ -1740,13 +1744,17 @@ export default function piBeadsLean(pi: any) {
             if (!closedIds.includes(id)) closedIds.push(id);
             changed = true;
           }
+          const failedHere = rids.filter((id) => !closedIds.includes(id));
           const msg = blocked.length
             ? `blocked: ${blocked.map((b) => `${b.id} by ${b.blockers.join(", ")}`).join("; ")}. ${blockedRemedy}`
             : (() => {
                 const rest = stripForceHint(errText(r));
-                return `bd close failed for ${rids.join(", ")}: ${rest}`;
+                return `bd close failed for ${failedHere.join(", ")}: ${rest}`;
               })();
           failure = failure ? `${failure}; ${msg}` : msg;
+          // A partial close is still a write: re-export and emit beads:changed for the ids bd
+          // did close, or the report claims a close the aggregate never hears about.
+          if (changed) await afterWrite(dir);
           // each repo's close is independent: keep going so later repos are
           // neither silently skipped nor omitted from the accumulated failure.
           continue;

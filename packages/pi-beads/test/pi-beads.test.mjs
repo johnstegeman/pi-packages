@@ -449,7 +449,7 @@ case "$1" in
   recall) printf '{"k":"v"}\n'; exit 0 ;;
   memories) printf '{"alpha":"one","beta":"two","schema_version":1}\n'; exit 0 ;;
   forget) printf 'Forgot %s\n' "$2"; exit 0 ;;
-  stale) printf '[{"id":"proj-old","status":"in_progress","title":"Old work","priority":2}]\n'; exit 0 ;;
+  stale) printf '[{"id":"proj-old","status":"in_progress","title":"Old work","priority":2,"description":"STALE BODY"}]\n'; exit 0 ;;
   lint) printf '{"total":1,"issues":1,"results":[{"id":"proj-1a2","title":"x","type":"task","missing":["## Acceptance Criteria"],"warnings":1}]}\n'; exit 0 ;;
   reopen)
     for a in "$@"; do [ "$a" = "crmback-fail" ] && { echo "boom" >&2; exit 1; }; done
@@ -2649,6 +2649,15 @@ test("single-repo: beads_ready returns an index — no description in the payloa
   }
 });
 
+test("single-repo: beads_stale returns an index too", async () => {
+  const s = await openSession("single", repoDir);
+  const r = await s.byName.get("beads_stale").execute("c", {});
+  assert.ok(okResult(r), JSON.stringify(r));
+  for (const i of r.structuredContent.issues) {
+    assert.ok(!("description" in i), `description must be stripped: ${JSON.stringify(i)}`);
+  }
+});
+
 test("single-repo: beads_show still returns the body", async () => {
   const s = await openSession("single", repoDir);
   const r = await s.byName.get("beads_show").execute("c", { id: "proj-desc-keep", full: true });
@@ -2671,8 +2680,10 @@ test("single-repo: a blocked close names the blockers and the legal moves, never
   const text = r.content[0].text;
   assert.match(text, /blocked: proj-blocked by proj-gate1/);
   assert.match(text, /beads_undep/);
-  assert.match(text, /beads_gate_resolve/);
   assert.match(text, /beads_deps/);
+  // the gate remedy must show the ARG SHAPE: beads_gate_resolve takes the gate's own id, and a
+  // bare tool name here is how a refusal sends a model into a second failure loop.
+  assert.match(text, /beads_gate_resolve\(\{ id: "<blocker>" \}\)/);
   assert.ok(!/--force/.test(text), `must not advertise a flag the tool cannot pass: ${text}`);
   assert.ok(!/^closed /m.test(text), "nothing was closed, so nothing may claim to be");
 });
@@ -2688,6 +2699,11 @@ test("single-repo: a mixed batch reports the closed id AND the blocked one", asy
   assert.match(text, /^closed proj-ok/);
   assert.match(text, /blocked: proj-blocked by proj-gate1/);
   assert.ok(!/--force/.test(text), `must not advertise --force: ${text}`);
+  // A partial close is still a write: the id reported closed must have emitted the change event,
+  // or the aggregate never hears about it and the report disagrees with the tooling.
+  assert.equal(s.emitted.at(-1), "beads:changed");
+  // and the blocked id must not also be named as a failed close of the whole batch
+  assert.ok(!/bd close failed for [^:]*proj-ok/.test(text), `closed id named as failed: ${text}`);
 });
 
 // ---------------------------------------------------------------------------
