@@ -48,6 +48,16 @@ export interface RexExecResult {
 export type RexExec = (args: string[], options?: { timeoutMs?: number }) => Promise<RexExecResult>;
 
 /**
+ * How long a killed `rex` gets to report its own death before the promise
+ * settles anyway. `'close'` fires only once the child's stdio closes, and a
+ * grandchild that inherited those pipes keeps them open after the CLI itself
+ * is gone — long enough that settlement cannot wait for it: this promise sits
+ * inside the pane queue, so one call that never settles would wedge every
+ * later `launchPane`/`minimizePane` in the process.
+ */
+const SETTLE_BACKSTOP_MS = 250;
+
+/**
  * Run `rex` with `args` and settle, whatever happens.
  *
  * `shell: false` and argv the caller built: nothing here is interpolated into a
@@ -55,7 +65,9 @@ export type RexExec = (args: string[], options?: { timeoutMs?: number }) => Prom
  * stdin is closed so a CLI that would prompt cannot wait on a terminal that is
  * not there; stderr is captured because that is where `rex` explains a
  * `bad_request`. A child killed by the timeout has no exit status, so it is -1,
- * the same "no status" the Rex API itself uses.
+ * the same "no status" the Rex API itself uses — and a call that timed out is
+ * -1 whatever status the child happened to exit with, because a clean exit that
+ * races the kill is still a call that never answered.
  */
 export function execRex(
   args: string[],
@@ -66,6 +78,7 @@ export function execRex(
     let stdout = "";
     let stderr = "";
     let settled = false;
+    let timedOut = false;
     let timer: ReturnType<typeof setTimeout> | undefined;
     const finish = (code: number) => {
       if (settled) return;
@@ -76,10 +89,14 @@ export function execRex(
 
     const child = spawn("rex", args, { stdio: ["ignore", "pipe", "pipe"], shell: false });
     timer = setTimeout(() => {
+      timedOut = true;
       stderr += `${stderr === "" ? "" : "\n"}rex ${args[0] ?? ""} timed out after ${timeoutMs} ms`;
       // SIGKILL, not SIGTERM: a CLI stuck in a syscall still has to go, and a
       // child left behind a settled promise would keep the process open.
       child.kill("SIGKILL");
+      // Settlement must not depend on `'close'`: if the child, or anything it
+      // started, still holds the pipes, the stream may not close at all.
+      setTimeout(() => finish(-1), SETTLE_BACKSTOP_MS).unref();
     }, timeoutMs);
     timer.unref();
 
@@ -100,7 +117,9 @@ export function execRex(
       finish(-1);
     });
     // 'close', not 'exit': stdout may still be draining when the process ends.
-    child.on("close", (code) => finish(code ?? -1));
+    // A child that exits 0 just as the timer fires is still a timeout, not a
+    // successful call.
+    child.on("close", (code) => finish(timedOut ? -1 : (code ?? -1)));
   });
 }
 

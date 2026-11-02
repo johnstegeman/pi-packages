@@ -493,7 +493,9 @@ let paneQueue: Promise<unknown> = Promise.resolve();
  * that carries the failure.
  */
 function enqueue<T>(work: () => Promise<T>): Promise<T> {
-  const result = paneQueue.then(work, work);
+  // No rejection arm: `paneQueue` is only ever reassigned to the promise below,
+  // which already resolves either way, so the chain is never rejected.
+  const result = paneQueue.then(work);
   paneQueue = result.then(
     () => undefined,
     () => undefined,
@@ -623,9 +625,10 @@ async function setLayerMinimized(deps: PaneDeps, layerId: string): Promise<Minim
       JSON.stringify({ layer_id: layerId, state: "minimized" }),
     ]);
     if (result.code === 0) return { minimized: true };
-    return { minimized: false, reason: failureReason(result.stderr) };
+    return { minimized: false, reason: failureReason(result.stderr, "rex call failed") };
   } catch (error) {
-    return { minimized: false, reason: failureReason(error instanceof Error ? error.message : String(error)) };
+    const message = error instanceof Error ? error.message : String(error);
+    return { minimized: false, reason: failureReason(message, "rex call failed") };
   }
 }
 
@@ -635,12 +638,13 @@ async function setLayerMinimized(deps: PaneDeps, layerId: string): Promise<Minim
  * The CLI prefixes its diagnostics with `Error: `, which is its own
  * decoration rather than the message; after it is what went wrong
  * (`bad_request: a window must keep a visible pane`, a missing binary, a
- * timeout). A call that failed without saying anything still gets the
- * documented reason for a refused state change.
+ * timeout). A failure that said nothing gets the caller's `fallback`: an empty
+ * diagnostic is no evidence of any particular cause, and naming one would be a
+ * guess dressed as an answer.
  */
-function failureReason(text: string): string {
+function failureReason(text: string, fallback: string): string {
   const detail = text.trim().replace(/^Error:\s*/i, "").trim();
-  return detail === "" ? "bad_request" : detail;
+  return detail === "" ? fallback : detail;
 }
 
 /**

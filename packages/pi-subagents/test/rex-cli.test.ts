@@ -30,6 +30,7 @@ import {
   execRex,
   type PaneDeps,
   readProcessState,
+  rexReply,
 } from "../src/rex/rex-cli.js";
 
 const SESSION = "session:pane";
@@ -44,6 +45,8 @@ const FAKE_ENV_KEYS = [
   "REX_FAKE_CLOSE_LAYER",
   "REX_FAKE_EXIT_CODE",
   "REX_FAKE_PROGRAM_STATUS",
+  "REX_FAKE_PROCESS",
+  "REX_FAKE_HOLD_EXIT",
   "REX_FAKE_CAPTURE",
   "REX_FAKE_CAPTURE_TEXT",
 ] as const;
@@ -76,7 +79,7 @@ function fakeRexSource(): string {
     '  } else if (method === "session.set_layer_state") {',
     '    if (env.REX_FAKE_SET_LAYER_STATE === "bad_request") fail("bad_request: last visible pane", 1);',
     // A failure with nothing on stderr: the reason has to fall back to the
-    // documented code rather than an empty string.
+    // caller's generic text rather than an empty string.
     '    if (env.REX_FAKE_SET_LAYER_STATE === "quiet") process.exit(1);',
     "    out({ revision: 2 });",
     '  } else if (method === "session.close_layer") {',
@@ -85,7 +88,9 @@ function fakeRexSource(): string {
     '  } else fail("unknown method " + method, 2);',
     "}",
     "function blockCall(method) {",
+    '  const blockId = args[args.indexOf("-b") + 1];',
     '  if (method === "process") {',
+    '    if (env.REX_FAKE_PROCESS === "missing") fail("block target " + blockId + " not found", 3);',
     "    const code = env.REX_FAKE_EXIT_CODE;",
     '    out({ last_exit: code === undefined ? null : { exit_code: Number(code), error: "exit status " + code }, child: null });',
     '  } else if (method === "program_status") {',
@@ -100,6 +105,14 @@ function fakeRexSource(): string {
     '} else if (args[0] === "whoami") out({ rex_version: "fake" });',
     // A `rex` that never answers: the timeout has to kill it.
     'else if (args[0] === "sleep") Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 5000);',
+    // A `rex` that exits 0 at once while a grandchild keeps the inherited pipes
+    // open: `'close'` on the parent side then cannot fire until the grandchild is
+    // gone, which is the case the timeout has to settle without.
+    'else if (args[0] === "hold") {',
+    '  require("node:child_process").spawn("sleep", [args[1] ?? "3"], { stdio: "inherit" }).unref();',
+    '  if (env.REX_FAKE_HOLD_EXIT === "0") process.exit(0);',
+    '  Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 10000);',
+    "}",
     // A `rex` that answers with a failure.
     'else if (args[0] === "fail") fail("boom", 7);',
     'else fail("unknown command", 2);',
@@ -190,6 +203,44 @@ describe("execRex — the only place this package spawns rex", () => {
     expect(result.code).toBe(-1);
     expect(result.stderr).toContain("timed out");
   });
+
+  // The pane queue only moves when the call in it settles, so a `rex` whose
+  // stdio stays open after it is killed must not be able to hold the queue: the
+  // promise settles on its own, not on the stream closing.
+  it("settles on the timeout even when a grandchild keeps the pipes open", async () => {
+    const started = Date.now();
+    // The fake exits 0 at once and leaves `sleep 3` holding the inherited pipes,
+    // so `'close'` cannot fire until the grandchild is gone.
+    process.env.REX_FAKE_HOLD_EXIT = "0";
+    const result = await execRex(["hold", "3"], { timeoutMs: 100 });
+    const elapsed = Date.now() - started;
+
+    expect(result.code).toBe(-1);
+    expect(result.stderr).toContain("timed out");
+    // Well before the 3 s the pipes stay open: the backstop settled it.
+    expect(elapsed).toBeLessThan(2000);
+  });
+
+  it("reports a timeout, not success, when the child exits 0 as the timer fires", async () => {
+    // Same shape with a grandchild that lets go after the timeout but before the
+    // backstop: `'close'` then arrives carrying a clean exit status, which must
+    // not be reported as a successful call.
+    process.env.REX_FAKE_HOLD_EXIT = "0";
+
+    const result = await execRex(["hold", "0.4"], { timeoutMs: 300 });
+
+    expect(result).toMatchObject({ code: -1 });
+    expect(result.stderr).toContain("timed out");
+  });
+
+  // The three ways `rexReply()` has no body to read, asserted where the
+  // decision is made rather than through a caller that would mask it.
+  it("reads no reply body from a failed call, non-JSON, or a JSON array", () => {
+    expect(rexReply({ code: 1, stdout: "{}", stderr: "" })).toBeUndefined();
+    expect(rexReply({ code: 0, stdout: "not json", stderr: "" })).toBeUndefined();
+    expect(rexReply({ code: 0, stdout: "[1,2]", stderr: "" })).toBeUndefined();
+    expect(rexReply({ code: 0, stdout: '{"layer_id":"layer:a"}', stderr: "" })).toEqual({ layer_id: "layer:a" });
+  });
 });
 
 describe("launchPane — create the pane, then minimize it", () => {
@@ -251,6 +302,21 @@ describe("launchPane — create the pane, then minimize it", () => {
       undefined,
     );
     expect(calls()).toHaveLength(1);
+  });
+
+  it("resolves undefined when the exec seam throws, rather than into the manager", async () => {
+    // `RexExec` is documented as never rejecting. A deps object that does anyway
+    // must still not carry a rejection into a spawn, where it would take down a
+    // fan-out that could otherwise have fallen back to the in-process runner.
+    const started = launchPane({
+      deps: { exec: () => Promise.reject(new Error("boom")), sessionId: SESSION, windowId: WINDOW },
+      label: "a",
+      command: ["/bin/pi"],
+      cwd: "/w",
+      index: 0,
+    });
+
+    await expect(started).resolves.toBeUndefined();
   });
 
   // Half an id is no id: without a layer id the pane could never be minimized or
@@ -322,10 +388,15 @@ describe("minimizePane — a refusal is an answer, not an exception", () => {
     });
   });
 
-  it("falls back to bad_request when the CLI fails without saying why", async () => {
+  it("falls back to a generic reason when the CLI fails without saying why", async () => {
     process.env.REX_FAKE_SET_LAYER_STATE = "quiet";
 
-    await expect(minimizePane(deps(), "layer:a")).resolves.toEqual({ minimized: false, reason: "bad_request" });
+    // No diagnostic means no evidence about the cause: calling this a
+    // `bad_request` would be a guess, and a timeout looks exactly like this.
+    await expect(minimizePane(deps(), "layer:a")).resolves.toEqual({
+      minimized: false,
+      reason: "rex call failed",
+    });
   });
 
   it("carries the spawn failure as the reason when rex cannot be started at all", async () => {
@@ -406,10 +477,12 @@ describe("readProcessState — the pane's exit status and what it says it is doi
   });
 
   it("reports nothing when the pane is gone, without asking a second question", async () => {
-    process.env.PATH = emptyDir;
+    // Only `process` fails: `program_status` would still answer, so the log is
+    // what proves the second question is never asked.
+    process.env.REX_FAKE_PROCESS = "missing";
 
     await expect(readProcessState(deps(), "block:a")).resolves.toEqual({ lastExit: null, status: null });
-    expect(calls()).toEqual([]);
+    expect(calls()).toEqual([["block", "call", "-s", SESSION, "-b", "block:a", "process"]]);
   });
 });
 
