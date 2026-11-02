@@ -18,7 +18,7 @@
  *   - abort closes the layer.
  */
 
-import { mkdtempSync, rmSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -123,6 +123,13 @@ function lifecycle(): { minimized?: string; closed?: string } {
     minimized: minimised ? JSON.parse(minimised[5]).layer_id : undefined,
     closed: closed ? JSON.parse(closed[5]).layer_id : undefined,
   };
+}
+
+/** The task file the child was handed, read back off its argv. */
+function readPromptFile(): string {
+  const command: string[] = createRequest().layout.block.options.command;
+  const promptArg = command[command.length - 1];
+  return readFileSync(promptArg.slice(1), "utf-8");
 }
 
 /** Wait for the run to announce its handle, without racing the tail's poll. */
@@ -398,5 +405,96 @@ describe("falling back to the in-process runner", () => {
 
     expect(result.responseText).toBe("in-process");
     expect(fake.calls()).toEqual([]);
+  });
+});
+
+describe("the parent conversation", () => {
+  it("is prepended to the task when the spawn asked to inherit it", async () => {
+    const { runner: run, ctx, options } = runner({}, { inheritContext: true });
+    // The parent's branch, as `buildParentContext()` reads it.
+    ctx.sessionManager.getBranch = vi.fn(() => [
+      { type: "message", message: { role: "user", content: "we picked the pane path" } },
+      { type: "message", message: { role: "assistant", content: [{ type: "text", text: "agreed" }] } },
+    ]);
+
+    await run.start(ctx, "Explore", "find the pane", options);
+
+    const prompt = readPromptFile();
+    // Byte for byte what the in-process runner would have prompted with: the
+    // context, then the task, in that order.
+    expect(prompt).toContain("# Parent Conversation Context");
+    expect(prompt).toContain("[User]: we picked the pane path");
+    expect(prompt).toContain("[Assistant]: agreed");
+    expect(prompt.indexOf("we picked the pane path")).toBeLessThan(prompt.indexOf("find the pane"));
+  });
+
+  it("stays out of the task when the spawn did not ask for it", async () => {
+    const { runner: run, ctx, options } = runner();
+    ctx.sessionManager.getBranch = vi.fn(() => [
+      { type: "message", message: { role: "user", content: "we picked the pane path" } },
+    ]);
+
+    await run.start(ctx, "Explore", "find the pane", options);
+
+    expect(readPromptFile()).toBe("find the pane");
+    // Never asked, so never read: the branch walk is not free.
+    expect(ctx.sessionManager.getBranch).not.toHaveBeenCalled();
+  });
+});
+
+describe("a child that writes its session file late", () => {
+  it("follows the file that finally appears, so the live view is not left empty", async () => {
+    // The session file lands after the 2 s grace window, and the result file
+    // after that: discovery on a deadline alone would bind the tail to a path
+    // that never exists.
+    process.env.STUB_MODE = "slow-start";
+    const { runner: run, ctx, options } = runner();
+
+    const result = await run.start(ctx, "Explore", "find the pane", options);
+
+    expect(result.responseText).toBe("the answer");
+    // The handle names the child's real file, not the guess.
+    expect(result.session.sessionFile.endsWith("_agent-1.jsonl")).toBe(true);
+    expect(result.session.sessionFile).toContain(sessionDir);
+    expect(existsSync(result.session.sessionFile)).toBe(true);
+    // And the tail followed it there: the conversation and the spend are there.
+    expect(getAgentConversation(result.session)).toContain("[Assistant]: the answer");
+    expect(result.session.getSessionStats()?.tokens.output).toBe(20);
+  }, 20_000);
+});
+
+describe("a steer that arrives before the child has reported a state", () => {
+  it("waits for one instead of refusing a child that is merely still starting", async () => {
+    process.env.STUB_MODE = "result-early";
+    // Nothing reports a state yet; it starts reporting 300 ms in.
+    const { runner: run, ctx, options } = runner();
+
+    const started = run.start(ctx, "Explore", "find the pane", options);
+    const session = await waitForSession();
+    setTimeout(() => {
+      process.env.REX_FAKE_PROGRAM_STATUS = "working";
+    }, 300);
+
+    await session.steer("keep going");
+    await started;
+
+    const sent = fake.calls().filter((call) => call[0] === "send");
+    expect(sent).toHaveLength(1);
+    expect(sent[0]).toContain("keep going");
+  });
+
+  it("refuses a state it cannot vouch for, naming it", async () => {
+    process.env.STUB_MODE = "result-early";
+    // `done` is not blocked, but it is also not taking input: the gate is a
+    // whitelist, so anything outside it is refused.
+    process.env.REX_FAKE_PROGRAM_STATUS = "done";
+    const { runner: run, ctx, options } = runner();
+
+    const started = run.start(ctx, "Explore", "find the pane", options);
+    const session = await waitForSession();
+
+    await expect(session.steer("keep going")).rejects.toThrow(/done/);
+    expect(fake.calls().some((call) => call[0] === "send")).toBe(false);
+    await started;
   });
 });

@@ -22,9 +22,10 @@
 // exists to keep: a child is a run, not a session a human drives.
 
 import { mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
-import { dirname } from "node:path";
+import { dirname, join } from "node:path";
 import type { ExtensionAPI, ExtensionContext, ToolCallEventResult } from "@earendil-works/pi-coding-agent";
-import { AgentManager } from "../agent-manager.js";
+import { getAgentDir } from "@earendil-works/pi-coding-agent";
+import { AgentManager, type ManagerRunner, type RunnerProvider } from "../agent-manager.js";
 import {
   extensionCanonicalNames,
   getGraceTurns,
@@ -47,6 +48,8 @@ import {
 } from "../structured-output.js";
 import { type CompiledSchema, compileJsonSchema } from "../workflow/json-schema.js";
 import type { ChildSpec } from "./launcher.js";
+import { createPaneRunner } from "./pane-run.js";
+import { execRex, resolveWindowId } from "./rex-cli.js";
 
 /** The variable the parent sets to the child's `spec.json` path. */
 export const CHILD_SPEC_ENV = "PI_SUBAGENTS_CHILD_SPEC";
@@ -231,16 +234,33 @@ export function installChildMode(pi: ExtensionAPI, spec: ChildSpec): void {
     usage: { input: 0, output: 0, cacheWrite: 0 },
   };
 
-  const injected = installDelegation(pi, spec);
+  const delegation = installDelegation(pi, spec);
   const structured = installStructuredOutput(pi, spec);
   // `codemode` is re-admitted exactly as the in-process scope re-admits it
   // (`agent-runner.ts`, Divergence 4): it is injected there and can never be
   // named by an `ext:` selector here, so an allowlisted type would otherwise
   // lose the toolbox its in-process sibling kept.
-  injected.push(...structured.names, "codemode");
+  const injected = [...delegation.names, ...structured.names, "codemode"];
   installToolScope(pi, spec, injected);
   installTurnLimit(pi, spec, state);
   installSettler(pi, spec, state, structured.capture);
+  installDelegationShutdown(pi, delegation.manager);
+}
+
+/**
+ * Close this child's own panes before this process exits.
+ *
+ * A grandchild is a real `pi` in a layer of its own, and nothing outside this
+ * process will end it — the parent of this child only knows about *this* pane.
+ * So the child's manager stops its runs and waits for each layer to close on the
+ * way out, using the same awaited `dispose()` the root session uses. pi awaits
+ * this handler and then exits, so an unawaited teardown would not run at all.
+ */
+function installDelegationShutdown(pi: ExtensionAPI, manager: AgentManager | undefined): void {
+  if (manager === undefined) return;
+  pi.on("session_shutdown", async () => {
+    await manager.dispose(pi);
+  });
 }
 
 /** What the child knows about its own run, fed by the events it subscribes to. */
@@ -281,16 +301,19 @@ function warnAboutConfigCwd(spec: ChildSpec): void {
  * no `/agents` — because that is what keeps a fan-out from painting twenty
  * capsules twice.
  *
- * Returns the tool names it registered, so the tool scope can re-admit them.
+ * Returns the tool names it registered, so the tool scope can re-admit them, and
+ * the manager itself when there is one — its owner has to dispose it at
+ * shutdown, or its panes outlive this process.
  */
-function installDelegation(pi: ExtensionAPI, spec: ChildSpec): string[] {
-  if (spec.allowedSubagents === false) return [];
+function installDelegation(pi: ExtensionAPI, spec: ChildSpec): { names: string[]; manager?: AgentManager } {
+  if (spec.allowedSubagents === false) return { names: [] };
   // At (or past) the cap this child can never spawn, so it can never own a child
   // to fetch from or steer either — three tools whose every call would be an
   // error are worse than none.
-  if (spec.depth >= spec.maxSubagentDepth) return [];
+  if (spec.depth >= spec.maxSubagentDepth) return { names: [] };
+  const manager = childDelegationManager(spec);
   const tools = createNestedSubagentTools({
-    manager: childDelegationManager(spec.cwd),
+    manager,
     pi,
     parentAgentId: spec.agentId,
     depth: spec.depth,
@@ -299,7 +322,7 @@ function installDelegation(pi: ExtensionAPI, spec: ChildSpec): string[] {
     configCwd: spec.configCwd ?? spec.cwd,
   });
   for (const tool of tools) pi.registerTool(tool);
-  return tools.map((tool) => tool.name);
+  return { names: tools.map((tool) => tool.name), manager };
 }
 
 /**
@@ -312,15 +335,66 @@ function installDelegation(pi: ExtensionAPI, spec: ChildSpec): string[] {
  * concurrency pools, and they have to match the project's, or the shape of a
  * fan-out would change with the modality. Turn defaults are read where they are
  * used (`installTurnLimit()`), not stored, so they need no applier here.
+ *
+ * `configCwd` is where the project's settings were resolved from — the whole
+ * reason it exists is that the child's working directory can be somewhere else.
+ * Reading the pools from `cwd` would give this child the wrong project's limits.
  */
-function childDelegationManager(cwd: string): AgentManager {
-  const manager = new AgentManager();
-  const settings = loadSettings(cwd);
+function childDelegationManager(spec: ChildSpec): AgentManager {
+  const manager = new AgentManager(undefined, undefined, undefined, undefined, undefined, {
+    // The child's own manager needs the pane runner for the same reason the root
+    // one does: a grandchild should be a real `pi` in a pane, not a second
+    // in-process session hiding inside this one.
+    runnerFor: childPaneProvider(spec),
+  });
+  const settings = loadSettings(spec.configCwd ?? spec.cwd);
   if (typeof settings.maxConcurrent === "number") manager.setMaxConcurrent(settings.maxConcurrent);
   if (typeof settings.maxConcurrentForeground === "number") {
     manager.setMaxConcurrentForeground(settings.maxConcurrentForeground);
   }
   return manager;
+}
+
+/**
+ * The pane runner a delegating child hands its own manager, so its children are
+ * panes too.
+ *
+ * Detection cannot answer this one: it returns false for exactly this process,
+ * because a child spec in the environment is how a pane child is told what it is
+ * (see `rexTerminalMarkers()`). A child does not need to be told — it *is* a
+ * pane, so Rex is there, its session is the one it lives in, and its own block
+ * names the window its children should float in.
+ *
+ * What it still honours is the user's `runInRexPanes: "off"`: that is a decision
+ * about the user's screen, not about what this process can prove.
+ *
+ * Lazy and memoized, like the root provider: `block inspect` is a `rex` call, and
+ * a child that never delegates must not pay for it.
+ */
+function childPaneProvider(spec: ChildSpec): RunnerProvider {
+  let runner: ManagerRunner | undefined;
+  return async () => {
+    const blockId = process.env.REX_BLOCK;
+    // REX_BLOCK is how this child knows where it is; without it there is no
+    // window to place a pane in.
+    if (blockId === undefined || blockId === "") return undefined;
+    if (loadSettings(spec.configCwd ?? spec.cwd).runInRexPanes === "off") return undefined;
+    if (runner !== undefined) return runner;
+    const windowId = await resolveWindowId({ exec: execRex, sessionId: spec.pane.sessionId }, blockId);
+    if (windowId === undefined) return undefined;
+    runner = createPaneRunner({
+      exec: execRex,
+      // A pane is never created in anyone else's session.
+      sessionId: spec.pane.sessionId,
+      windowId,
+      // The cascade and the transcript store belong to the session that started
+      // it, so a grandchild's transcript is filed beside its parent's.
+      rootSessionId: spec.rootSessionId,
+      agentSessionDir: join(getAgentDir(), "subagent-sessions", spec.rootSessionId),
+      piBinary: process.execPath,
+    });
+    return runner;
+  };
 }
 
 /**

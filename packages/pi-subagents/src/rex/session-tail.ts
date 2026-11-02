@@ -96,7 +96,7 @@ function isRecord(value: unknown): value is JsonRecord {
  * disk itself), which is what lets a caller drop the watcher and still render.
  */
 export class SessionTail {
-  private readonly filePath: string;
+  private filePath: string;
   /** Bytes consumed so far; the next read starts here. */
   private offset = 0;
   /** Bytes read past the last newline: a line the child is still writing. */
@@ -124,6 +124,27 @@ export class SessionTail {
 
   constructor(filePath: string) {
     this.filePath = filePath;
+  }
+
+  /** The file this tail is reading, as it currently knows it. */
+  get file(): string {
+    return this.filePath;
+  }
+
+  /**
+   * Follow a different file.
+   *
+   * Only ever from a path that held nothing — a name predicted for a child that
+   * had not written it yet — to the file the child actually wrote. Byte offsets
+   * are per-file, so the offset is reset; the caller that re-points is the one
+   * that knows nothing was read, and a false return says it was too late to be
+   * true.
+   */
+  retarget(filePath: string): boolean {
+    if (filePath === this.filePath) return false;
+    if (this.offset !== 0) return false;
+    this.filePath = filePath;
+    return true;
   }
 
   /**

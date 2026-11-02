@@ -35,8 +35,6 @@ import type { SessionTail } from "./session-tail.js";
 export interface PaneSessionDeps {
   /** The child's session file, already tailed by the caller (`start()` decides when it watches). */
   tail: SessionTail;
-  /** The same path the tail reads, reported to the UI so `/agents` can reopen a finished run. */
-  sessionFile: string;
   /** Type into the child's pane. The pane runner refuses when its program is not accepting input. */
   steer: (message: string) => Promise<void>;
   /** Close the child's pane, which ends the child. */
@@ -51,8 +49,6 @@ export interface PaneSessionDeps {
  * the child exited, and after `dispose()`.
  */
 export class PaneSession implements RunHandle {
-  readonly sessionFile: string;
-
   private readonly tail: SessionTail;
   private readonly steerChild: (message: string) => Promise<void>;
   private readonly abortChild: () => Promise<void>;
@@ -61,9 +57,21 @@ export class PaneSession implements RunHandle {
 
   constructor(deps: PaneSessionDeps) {
     this.tail = deps.tail;
-    this.sessionFile = deps.sessionFile;
     this.steerChild = deps.steer;
     this.abortChild = deps.abort;
+  }
+
+  /**
+   * The child's transcript, as the tail currently knows it.
+   *
+   * Read through the tail rather than stored: `pi` writes its session file
+   * lazily, so the path a run announces can be a prediction for a moment, and the
+   * tail is what gets re-pointed when the real file appears (see the pane
+   * runner's `followSessionFile()`). A stored string would keep naming a file
+   * that never existed.
+   */
+  get sessionFile(): string {
+    return this.tail.file;
   }
 
   /** The active branch as the file currently describes it — pre-compaction history included. */

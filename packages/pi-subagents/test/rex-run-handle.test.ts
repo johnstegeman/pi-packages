@@ -20,7 +20,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { AgentManager, type ManagerRunner } from "../src/agent-manager.js";
 import { getAgentConversation, type RunResult } from "../src/agent-runner.js";
 import { streamToOutputFile } from "../src/output-file.js";
-import type { AgentRecord, RunHandle } from "../src/types.js";
+import type { RunHandle } from "../src/types.js";
 import { getSessionContextPercent } from "../src/usage.js";
 
 const mockPi = {} as any;

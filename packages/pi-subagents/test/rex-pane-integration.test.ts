@@ -73,7 +73,7 @@ function harness() {
 }
 
 /** The pane runner the manager would get from index.ts's provider. */
-function paneRunner(): ManagerRunner {
+function paneRunner(overrides: Partial<PaneRunDeps> = {}): ManagerRunner {
   const deps: PaneRunDeps = {
     exec: execRex,
     sessionId: SESSION,
@@ -82,6 +82,7 @@ function paneRunner(): ManagerRunner {
     agentSessionDir: sessionDir,
     piBinary: fake.stubBinary,
     onWarning: (message) => warnings.push(message),
+    ...overrides,
   };
   return createPaneRunner(deps);
 }
@@ -90,10 +91,15 @@ function paneRunner(): ManagerRunner {
  * A manager wired the way `index.ts` wires it: one provider, asked once per
  * spawn, answering with the pane runner or nothing at all.
  */
-function managerWith(provider: () => Promise<ManagerRunner | undefined>, inProcess: ManagerRunner): AgentManager {
+function managerWith(
+  provider: () => Promise<ManagerRunner | undefined>,
+  inProcess: ManagerRunner,
+  onWarning?: (message: string) => void,
+): AgentManager {
   manager = new AgentManager(undefined, 10, undefined, undefined, undefined, {
     runner: inProcess,
     runnerFor: provider,
+    onWarning: onWarning === undefined ? undefined : (_record, message) => onWarning(message),
   });
   return manager;
 }
@@ -289,4 +295,93 @@ describe("detection", () => {
       }
     }
   });
+});
+
+describe("an agent that could not get its pane", () => {
+  it("says so on the record, not only in a warning", async () => {
+    process.env.REX_FAKE_NEW_LAYER = "fail";
+    const inProcess = inProcessStub("in-process");
+    managerWith(async () => paneRunner({ fallback: inProcess }), inProcessStub("never"));
+
+    const record = await spawn("Explore", "the only one");
+
+    // It ran, and it ran in-process — but the record carries the difference, so
+    // a reader arriving after the warning scrolled away can still tell.
+    expect(record.result).toBe("in-process");
+    expect(record.paneFallback).toMatch(/could not get a pane/);
+    expect(warnings.some((message) => /in-process instead/.test(message))).toBe(true);
+  });
+});
+
+describe("a refused queued steer", () => {
+  it("is reported instead of being counted as delivered", async () => {
+    // The child is alive but sitting on a dialog: the pane runner refuses the
+    // message, and nobody is left holding a tool result to report it in.
+    process.env.STUB_MODE = "result-early";
+    process.env.REX_FAKE_PROGRAM_STATUS = "blocked";
+    const reported: string[] = [];
+    managerWith(async () => paneRunner(), inProcessStub(), (message) => reported.push(message));
+
+    const { pi, ctx } = harness();
+    const id = manager!.spawn(pi, ctx, "Explore", "do it", {
+      description: "the only one",
+      isBackground: true,
+      model: MODEL,
+    });
+    const record = manager!.getRecord(id)!;
+    // Queued in the window the pane path really has: the handle is announced
+    // only once the child's session file is found.
+    record.pendingSteers = ["keep going"];
+    await manager!.awaitStartup(id);
+    await record.promise;
+
+    expect(fake.calls().some((call) => call[0] === "send")).toBe(false);
+    expect(reported.some((message) => /not delivered/.test(message))).toBe(true);
+    expect(reported.join("\n")).toMatch(/waiting on a prompt/);
+  });
+});
+
+describe("shutting down with a run still in its pane", () => {
+  it("closes the layer and waits for it before dispose returns", async () => {
+    // The child stays up for 30 s: only a shutdown that closes the layer ends it.
+    process.env.STUB_MODE = "result-early";
+    managerWith(async () => paneRunner(), inProcessStub());
+
+    const { pi, ctx } = harness();
+    const id = manager!.spawn(pi, ctx, "Explore", "do it", {
+      description: "the only one",
+      isBackground: true,
+      model: MODEL,
+    });
+    const record = manager!.getRecord(id)!;
+    await manager!.awaitStartup(id);
+    for (let i = 0; i < 500 && record.session === undefined; i++) {
+      await new Promise((resolve) => setTimeout(resolve, 10));
+    }
+    expect(record.session).toBeDefined();
+
+    const disposed = await Promise.race([
+      manager!.dispose().then(() => "disposed" as const),
+      new Promise<"hung">((resolve) => setTimeout(() => resolve("hung"), 5_000)),
+    ]);
+    manager = undefined;
+
+    expect(disposed).toBe("disposed");
+    // One pane was created, minimized and closed — no more, no less: the layer
+    // the shutdown closed is the one this run was given.
+    const created = fake.paneCalls().filter((call) => call[4] === "session.new_layer");
+    expect(created).toHaveLength(1);
+    const minimized = fake
+      .paneCalls()
+      .filter((call) => call[4] === "session.set_layer_state")
+      .map((call) => JSON.parse(call[5]).layer_id);
+    const closed = fake
+      .paneCalls()
+      .filter((call) => call[4] === "session.close_layer")
+      .map((call) => JSON.parse(call[5]).layer_id);
+    expect(minimized).toHaveLength(1);
+    expect(closed).toEqual(minimized);
+    // And the record is terminal, so nothing reports it as still running.
+    expect(record.status).toBe("stopped");
+  }, 20_000);
 });

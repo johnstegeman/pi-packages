@@ -40,7 +40,7 @@ import { execRex, resolveWindowId } from "./rex/rex-cli.js";
 import { SubagentScheduler } from "./schedule.js";
 import { resolveStorePath, ScheduleStore } from "./schedule-store.js";
 import { applyAndEmitLoaded, getWorkflowStallTimeoutSecs, loadSettings, parseStallTimeoutSecs, STALL_TIMEOUT_SECS_CEILING, type SubagentsSettings, saveAndEmitChanged, setWorkflowStallTimeout, type ToolDescriptionMode } from "./settings.js";
-import { getForegroundOutcomeNote, getStatusNote, partialOutputSuffix } from "./status-note.js";
+import { getForegroundOutcomeNote, getModalityNote, getStatusNote, partialOutputSuffix } from "./status-note.js";
 import { type AgentConfig, type AgentInvocation, type AgentMentionMode, type AgentRecord, type AgentTombstone, type JoinMode, type NotificationDetails, type RunHandle, type SubagentType, type ViewerMarkdownMode, type WidgetMode } from "./types.js";
 import { createMentionProvider, mentionRoster, type TypeInfo } from "./ui/agent-mention.js";
 import {
@@ -216,7 +216,7 @@ function formatTaskNotification(record: AgentRecord, resultMaxLen: number, showC
     record.toolCallId ? `<tool-use-id>${escapeXml(record.toolCallId)}</tool-use-id>` : null,
     record.outputFile ? `<output-file>${escapeXml(record.outputFile)}</output-file>` : null,
     `<status>${escapeXml(status)}</status>`,
-    `<summary>Agent "${escapeXml(record.description)}" ${record.status}${getStatusNote(record.status)}</summary>`,
+    `<summary>Agent "${escapeXml(record.description)}" ${record.status}${getStatusNote(record.status)}${escapeXml(getModalityNote(record))}</summary>`,
     `<result>${escapeXml(resultPreview)}</result>`,
     `<usage><total_tokens>${totalTokens}</total_tokens><tool_uses>${record.toolUses}</tool_uses>${ctxXml}${compactXml}${costXml}<duration_ms>${durationMs}</duration_ms></usage>`,
     `</task-notification>`,
@@ -770,6 +770,13 @@ export default function (pi: ExtensionAPI) {
     // Per spawn, not at construction: inside Rex a subagent is a real `pi` in a
     // pane, everywhere else the in-process session it has always been.
     runnerFor: getPaneRunner,
+    // A refusal that arrives after the caller was told "yes" — a queued steering
+    // message the child would not take, a pane that could not be confirmed
+    // closed on shutdown — has no tool result to ride on, so it surfaces here
+    // through the same channel as every other warning this extension raises.
+    onWarning: (_record, message) => {
+      if (currentCtx?.hasUI) currentCtx.ui.notify(message, "warning");
+    },
   });
 
   // Expose manager via Symbol.for() global registry for cross-package access.
@@ -3315,7 +3322,7 @@ Terse command-style prompts produce shallow, generic work.
 
       let output =
         `Agent: ${record.id}\n` +
-        `Type: ${displayName} | Status: ${record.status}${getStatusNote(record.status)} | ${statsParts.join(" | ")}\n` +
+        `Type: ${displayName} | Status: ${record.status}${getStatusNote(record.status)}${getModalityNote(record)} | ${statsParts.join(" | ")}\n` +
         `Description: ${record.description}\n\n`;
 
       if (record.status === "running") {
@@ -3387,7 +3394,13 @@ Terse command-style prompts produce shallow, generic work.
         if (!record.pendingSteers) record.pendingSteers = [];
         record.pendingSteers.push(params.message);
         pi.events.emit("subagents:steered", { id: record.id, message: params.message });
-        return textResult(`Steering message queued for agent ${record.id}. It will be delivered once the session initializes.`);
+        // "Queued", not "delivered": the handle this session starts may still
+        // refuse the message (a pane child that is not taking input yet), and
+        // the manager reports that refusal when it happens rather than
+        // pretending here that it cannot.
+        return textResult(
+          `Steering message queued for agent ${record.id}. It will be sent once the session is ready; if the agent refuses it, you will be notified.`,
+        );
       }
 
       try {

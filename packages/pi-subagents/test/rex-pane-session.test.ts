@@ -110,7 +110,6 @@ function paneSession(
   tail = t;
   const session = new PaneSession({
     tail: t,
-    sessionFile: path,
     steer: async () => {},
     abort: async () => {},
     ...overrides,

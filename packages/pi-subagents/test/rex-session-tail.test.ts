@@ -277,3 +277,33 @@ describe("SessionTail", () => {
     expect(events).toHaveLength(0);
   });
 });
+
+describe("re-pointing a tail", () => {
+  it("follows the file the child actually wrote, and reads what is in it", () => {
+    // The shape a pane run has: the parent guessed a path (the child had not
+    // written anything yet) and the real file turned up afterwards.
+    const guess = join(dir, "agent-1.jsonl");
+    const real = copyFixture();
+    tail = new SessionTail(guess);
+    expect(tail.file).toBe(guess);
+    expect(tail.read().messages).toHaveLength(0);
+
+    expect(tail.retarget(real)).toBe(true);
+
+    expect(tail.file).toBe(real);
+    // Byte offsets are per-file, so the retargeted tail reads the new file from
+    // its start rather than from where the guess left off.
+    expect(tail.read().messages.map((message) => message.role)).toEqual(ROLES);
+  });
+
+  it("refuses to re-point a tail that already read something", () => {
+    // A tail with data has counted what it read; hopping to another file would
+    // keep those messages and then add another file's on top of them.
+    const first = copyFixture();
+    tail = new SessionTail(first);
+    tail.read();
+
+    expect(tail.retarget(join(dir, "other.jsonl"))).toBe(false);
+    expect(tail.file).toBe(first);
+  });
+});

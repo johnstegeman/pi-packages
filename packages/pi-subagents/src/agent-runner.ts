@@ -608,6 +608,12 @@ export interface RunResult {
   structuredJson?: string;
   /** Whether the extra structured-output prompt had to be sent. */
   structuredRetried?: boolean;
+  /**
+   * Why this run happened in-process although a pane was expected — set by a
+   * runner that could not get its pane and fell back. The in-process runner
+   * itself never sets it: for that runner, in-process is not a fallback.
+   */
+  paneFallback?: string;
 }
 
 /**

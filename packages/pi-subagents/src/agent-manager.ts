@@ -49,6 +49,14 @@ export type OnAgentCompact = (record: AgentRecord, info: CompactionInfo) => void
  * accounting above all.
  */
 export type OnAgentUsage = (record: AgentRecord, usage: LifetimeUsage) => void;
+/**
+ * A message about a run that nobody asked for and no result can carry: a
+ * steering message that was refused, and so on.
+ *
+ * Separate from `error` because the run is not failing: the agent is fine, the
+ * one thing that did not happen is the thing the caller should be told about.
+ */
+export type OnAgentWarning = (record: AgentRecord, message: string) => void;
 export type CompactionInfo = { reason: "manual" | "threshold" | "overflow"; tokensBefore: number };
 
 /**
@@ -79,6 +87,19 @@ export type RunResume = (
 export interface ManagerRunner {
   start: RunStart;
   resume: RunResume;
+  /**
+   * End a run this runner started and resolve when nothing of it is still
+   * running outside this process — a pane child's layer closed.
+   *
+   * Optional, and absent means "nothing to do": an in-process run lives inside
+   * this process and pi's own shutdown ends it. A runner that starts a real
+   * child process implements it, because a parent that exits first leaves the
+   * child running in a pane nobody owns.
+   *
+   * Called from `dispose()` after the record was aborted, and must settle —
+   * a shutdown that waits forever is worse than a pane left open.
+   */
+  close?: (session: RunHandle) => Promise<void>;
 }
 
 /**
@@ -428,6 +449,7 @@ export class AgentManager {
   private onStart?: OnAgentStart;
   private onCompact?: OnAgentCompact;
   private onUsage?: OnAgentUsage;
+  private onWarning?: OnAgentWarning;
   private maxConcurrent: number;
   private maxConcurrentForeground = DEFAULT_MAX_CONCURRENT_FOREGROUND;
   /** How a run actually runs — see {@link ManagerRunner}. */
@@ -489,10 +511,11 @@ export class AgentManager {
     onStart?: OnAgentStart,
     onCompact?: OnAgentCompact,
     onUsage?: OnAgentUsage,
-    options: { runner?: ManagerRunner; runnerFor?: RunnerProvider } = {},
+    options: { runner?: ManagerRunner; runnerFor?: RunnerProvider; onWarning?: OnAgentWarning } = {},
   ) {
     this.runner = options.runner ?? IN_PROCESS_RUNNER;
     this.runnerFor = options.runnerFor;
+    this.onWarning = options.onWarning;
     this.onComplete = onComplete;
     this.onStart = onStart;
     this.onCompact = onCompact;
@@ -985,10 +1008,13 @@ export class AgentManager {
             }
           }
         }
-        // Flush any steers that arrived before the session was ready
+        // Flush any steers that arrived before the session was ready. A refusal
+        // is reported, never swallowed: a queued steer dropped here would read
+        // as delivered, both to the caller that was told it was queued and to a
+        // user watching the agent never do what they asked.
         if (record.pendingSteers?.length) {
           for (const msg of record.pendingSteers) {
-            session.steer(msg).catch(() => {});
+            this.steerSession(record, session, msg);
           }
           record.pendingSteers = undefined;
         }
@@ -1004,7 +1030,7 @@ export class AgentManager {
       ? chosen.then((runner) => this.startWith(record, runner, ctx, type, prompt, runOptions))
       : this.startWith(record, chosen, ctx, type, prompt, runOptions);
     const promise = started
-      .then(async ({ responseText, session, aborted, steered, failure, structuredJson, structuredRetried }) => {
+      .then(async ({ responseText, session, aborted, steered, failure, structuredJson, structuredRetried, paneFallback }) => {
         // Don't overwrite status if externally stopped via abort()
         if (record.status !== "stopped") {
           // Precedence: a hard abort keeps "aborted"; then a failed final turn
@@ -1026,6 +1052,16 @@ export class AgentManager {
         record.structuredJson = structuredJson;
         record.structuredRetried = structuredRetried;
         record.session = session;
+        // Where the agent actually ran, when that is not where it was asked to:
+        // kept on the record because the warning that explained it is transient
+        // and a reader arriving later (a tool result, `/agents`, a mention) has
+        // to be able to tell an in-process fallback from a pane run.
+        if (paneFallback !== undefined) record.paneFallback = paneFallback;
+        // Refreshed from the settled handle, not trusted from `onSessionCreated`:
+        // a pane child writes its session file lazily, so the announcement may
+        // have carried a predicted path that has since been corrected. Guarded
+        // because a runner may report no handle at all.
+        if (session) record.sessionFile = session.sessionFile ?? record.sessionFile;
         record.completedAt ??= Date.now();
 
         detach();
@@ -1478,19 +1514,42 @@ export class AgentManager {
    * current tool execution and appears as a user message. If the session isn't
    * ready yet, the message is queued on `pendingSteers` and flushed when the
    * session is created. Returns false if the agent can't accept steering
-   * (unknown id, or no longer running/queued).
+   * (unknown id, or no longer running/queued); a later refusal reaches
+   * `onWarning`, since a boolean returned now cannot describe it.
    */
   steer(id: string, message: string): boolean {
     const record = this.agents.get(id);
     if (!record) return false;
     if (record.status !== "running" && record.status !== "queued") return false;
     if (record.session) {
-      record.session.steer(message).catch(() => {});
+      this.steerSession(record, record.session, message);
     } else {
       if (!record.pendingSteers) record.pendingSteers = [];
       record.pendingSteers.push(message);
     }
     return true;
+  }
+
+  /**
+   * Deliver one steering message, and report a refusal instead of dropping it.
+   *
+   * A steer is an async request over a process boundary — `rex send` into a pane,
+   * a prompt into an in-process session — so it can be refused after the caller
+   * was told it was accepted. Swallowing that rejection makes a dropped message
+   * indistinguishable from a delivered one, so the refusal goes to
+   * `onWarning` (a notification the user sees) rather than nowhere.
+   */
+  private steerSession(record: AgentRecord, session: RunHandle, message: string): void {
+    const report = (error: unknown) => {
+      const reason = error instanceof Error ? error.message : String(error);
+      this.onWarning?.(record, `the steering message for agent "${record.handle ?? record.id}" was not delivered: ${reason}`);
+    };
+    try {
+      // `Promise.resolve` because a session may report the refusal synchronously.
+      Promise.resolve(session.steer(message)).catch(report);
+    } catch (error) {
+      report(error);
+    }
   }
 
   getRecord(id: string): AgentRecord | undefined {
@@ -1723,7 +1782,8 @@ export class AgentManager {
     // Clear queue — via dequeue, so anyone blocked in spawnAndWait is woken
     // rather than left awaiting a gate nothing will ever resolve.
     this.dequeue(() => true);
-    const handles = [...this.agents.values()].map(record => record.session);
+    const records = [...this.agents.values()];
+    const handles = records.map(record => record.session);
     this.agents.clear();
     this.startups.clear();
     if (pi) {
@@ -1737,9 +1797,42 @@ export class AgentManager {
       // exit with in-flight agents would otherwise leave stale registrations there.
       for (const repo of this.worktreeRepos) prune(repo);
     }
+    // A pane child is a real process of its own, in a layer of its own: nothing
+    // in this process ends it, and this process is about to exit. So the runs are
+    // stopped and their panes waited for BEFORE the session sweep below — an
+    // orphaned pane with a live child in it is the one outcome a shutdown must
+    // not produce, and the sweep is what would otherwise leave the tail stopped
+    // while the child kept working.
+    await Promise.all(records.map(record => this.stopExternalRun(record)));
     // Awaited, unlike the eviction path: pi awaits this extension's `session_shutdown`
     // handler and the process exits right after it returns, so anything left unawaited
     // here never runs at all. Bounded — each call carries its own ceiling, concurrently.
     await Promise.all(handles.map(handle => shutdownChildSession(handle)));
+  }
+
+  /**
+   * Stop a run that lives outside this process and wait for it to be gone.
+   *
+   * Only runners that implement {@link ManagerRunner.close} have one — the
+   * in-process runner has nothing outside this process to end, and is left
+   * exactly as it was. Aborting first is what makes the child stop; awaiting the
+   * close is what proves the pane is gone before the process exits. A close that
+   * throws is reported and swallowed: a shutdown must not fail because Rex did.
+   */
+  private async stopExternalRun(record: AgentRecord): Promise<void> {
+    const session = record.session;
+    const runner = this.runnerForRecord(record);
+    if (session === undefined || runner.close === undefined) return;
+    if (record.status === "running" || record.status === "queued") {
+      record.abortController?.abort();
+      record.status = "stopped";
+      record.completedAt ??= Date.now();
+    }
+    try {
+      await runner.close(session);
+    } catch (error) {
+      const reason = error instanceof Error ? error.message : String(error);
+      this.onWarning?.(record, `the pane for agent "${record.handle ?? record.id}" could not be confirmed closed: ${reason}`);
+    }
   }
 }

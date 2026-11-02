@@ -210,6 +210,21 @@ describe("execRex — the only place this package spawns rex", () => {
     expect(result.stderr).toContain("timed out");
   });
 
+  // A run that settled from its result file has no use for a `rex wait` still
+  // watching: the caller aborts the call, and the process has to go with it.
+  it("kills a call the caller cancelled, without calling it a timeout", async () => {
+    const controller = new AbortController();
+    const started = Date.now();
+    const pending = execRex(["sleep"], { timeoutMs: 10_000, signal: controller.signal });
+    setTimeout(() => controller.abort(), 100);
+    const result = await pending;
+
+    expect(result.code).toBe(-1);
+    // Not the CLI's own clock that ended it, so nothing claims it timed out.
+    expect(result.stderr).not.toContain("timed out");
+    expect(Date.now() - started).toBeLessThan(3_000);
+  });
+
   // The pane queue only moves when the call in it settles, so a `rex` whose
   // stdio stays open after it is killed must not be able to hold the queue: the
   // promise settles on its own, not on the stream closing.

@@ -38,7 +38,7 @@ import {
   runAgent,
 } from "../agent-runner.js";
 import { getAgentConfig, getConfig } from "../agent-types.js";
-import { extractText } from "../context.js";
+import { buildParentContext, extractText } from "../context.js";
 import { detectEnv } from "../env.js";
 import { buildMemoryBlock, buildReadOnlyMemoryBlock } from "../memory.js";
 import { describeModel, resolveDefaultModel } from "../model-resolver.js";
@@ -61,7 +61,14 @@ import {
   writeChildFiles,
 } from "./launcher.js";
 import { PaneSession } from "./pane-session.js";
-import { captureTail, type PaneDeps, type RexExec, type RexExecResult, readProcessState } from "./rex-cli.js";
+import {
+  captureTail,
+  type PaneDeps,
+  type ProcessState,
+  type RexExec,
+  type RexExecResult,
+  readProcessState,
+} from "./rex-cli.js";
 import { SessionTail } from "./session-tail.js";
 
 /** How often the child's result file is looked for, and its session file too. */
@@ -83,8 +90,25 @@ const WAIT_TIMEOUT_MS = WAIT_WINDOW_MS + 5_000;
 /** The pause between an unproductive exit read and the next attempt. */
 const EXIT_POLL_INTERVAL_MS = 500;
 
-/** How long the child gets to create its session file before the tail follows a guess. */
+/**
+ * How long the child gets to create its session file before the tail starts on a
+ * path the runner guessed.
+ *
+ * A guess is not the end of the discovery: `pi` writes its JSONL lazily, on the
+ * first turn, so a slow child can cross this window and the tail keeps looking
+ * in the background (see `followSessionFile()`).
+ */
 const SESSION_FILE_GRACE_MS = 2_000;
+
+/**
+ * How long `steerPane()` waits for a child that has not reported a program
+ * status yet.
+ *
+ * A just-started `pi` reports nothing at all for a few hundred milliseconds —
+ * the pane exists, the child is still starting — and refusing in that window
+ * would drop a steer that arrived at exactly the moment a run became steerable.
+ */
+const STEER_STATUS_GRACE_MS = 2_000;
 
 /** The pane label's task slice: enough to tell two agents apart, short enough for a capsule. */
 const LABEL_DESCRIPTION_CHARS = 60;
@@ -150,27 +174,51 @@ export function createPaneRunner(deps: PaneRunDeps): ManagerRunner {
    */
   const states = new WeakMap<RunHandle, RunState>();
 
+  /**
+   * Run this agent in-process instead, saying so on the result as well as out
+   * loud.
+   *
+   * The warning reaches a user who is watching; the record field reaches
+   * everyone else — a later reader of the record, and the tool result that
+   * reports the run — because "this agent has no pane" is a fact about where
+   * it ran, not a transient hiccup.
+   */
+  const inProcess = async (
+    ctx: ExtensionContext,
+    type: SubagentType,
+    prompt: string,
+    options: RunOptions,
+    reason: string,
+  ): Promise<RunResult> => {
+    warn(`agent "${options.description ?? type}" ${reason}; running it in-process instead`);
+    return { ...(await fallback.start(ctx, type, prompt, options)), paneFallback: reason };
+  };
+
   const start: RunStart = async (ctx, type, prompt, options) => {
     const inputs = await compose(deps, ctx, type, prompt, options);
     if (inputs === undefined) {
       // No model means no `--provider`/`--model`, and the rule that a child is
       // always told both explicitly has no exception: an in-process run is
       // better than a child that has to guess what it is.
-      warn(`agent "${options.description ?? type}" could not be given a model for its pane; running it in-process`);
-      return fallback.start(ctx, type, prompt, options);
+      return inProcess(ctx, type, prompt, options, "could not be given a model for its pane");
     }
+    // The place in the cascade is taken BEFORE the launch, not after: two
+    // spawns that both read the size while their panes are being created would
+    // be handed the same bounds and stack on top of each other.
+    const ticket = Symbol(inputs.agentId);
+    live.add(ticket);
     const pane = await launchPane({
       deps: paneDeps(deps),
       label: inputs.label,
       command: childCommand(inputs, deps),
       cwd: inputs.cwd,
-      index: live.size,
+      index: live.size - 1,
     });
     if (pane === undefined) {
-      warn(`the pane for "${inputs.label}" could not be created; running the agent in-process instead`);
-      return fallback.start(ctx, type, prompt, options);
+      live.delete(ticket);
+      return inProcess(ctx, type, prompt, options, "could not get a pane (creating it failed)");
     }
-    return watch({ deps, warn, live, states, inputs, pane, options });
+    return watch({ deps, warn, live, states, inputs, pane, options, ticket });
   };
 
   const resume: RunResume = async (session, prompt, options) => {
@@ -183,7 +231,27 @@ export function createPaneRunner(deps: PaneRunDeps): ManagerRunner {
     return relaunch({ deps, warn, live, state, prompt, options: options ?? {} });
   };
 
-  return { start, resume };
+  /**
+   * End a run this runner started, and resolve once its layer is closed.
+   *
+   * This is the half of a run that no other part of the parent can do: a pane
+   * child is a real process in a layer of its own, and a parent that exits
+   * without closing the layer leaves it running in an orphan pane. The manager
+   * calls this from `dispose()`, after aborting the record — an abort is what
+   * makes the run stop, and this is what proves the pane is gone.
+   *
+   * Idempotent, because the settle path closes the same layer: the promise is
+   * memoized per run, so a dispose that races a settle joins it rather than
+   * asking Rex twice.
+   */
+  const close = async (session: RunHandle): Promise<void> => {
+    const state = states.get(session);
+    // Not ours: an in-process handle, or a run another runner owns.
+    if (state === undefined) return;
+    await closeRunPane(paneDeps(deps), state);
+  };
+
+  return { start, resume, close };
 }
 
 /** Everything the child is launched with, resolved once per spawn. */
@@ -214,10 +282,16 @@ interface RunState {
   /** The pane currently running this agent; a resume replaces it. */
   pane: PaneHandle;
   tail: SessionTail;
-  /** The child's own pi session file, discovered once and reused by a resume. */
+  /** The child's own pi session file, as far as it is known; a resume reuses it. */
   sessionFile: string;
-  /** Set once this run's layer has been closed, so an abort and a settle close it once. */
-  closed: boolean;
+  /**
+   * The promise of this run's layer closing, created once.
+   *
+   * An abort and the settle path both want the layer gone, and a dispose that
+   * races them wants to wait for it — so the close is started once and every
+   * caller waits on the same promise rather than asking Rex twice.
+   */
+  closing?: Promise<void>;
 }
 
 // ---------------------------------------------------------------------------
@@ -276,7 +350,11 @@ async function compose(
   });
 
   const systemPrompt = await systemPromptFor({ type, cwd, configCwd, agentConfig, spec }, ctx, options);
-  const files = writeChildFiles({ taskDir, systemPrompt, prompt, spec });
+  // An inherited parent conversation travels with the task, exactly as
+  // `runAgent()` prepends it: the child sees the same text on both paths, and
+  // the file it receives is the whole of what the parent said.
+  const task = taskFor(ctx, prompt, options.inheritContext);
+  const files = writeChildFiles({ taskDir, systemPrompt, prompt: task, spec });
   if (schemaPath !== undefined && options.structuredOutput !== undefined) {
     writeFileSync(schemaPath, JSON.stringify(options.structuredOutput.schema, null, 2), "utf-8");
   }
@@ -299,6 +377,20 @@ async function compose(
     projectTrusted: ctx.isProjectTrusted(),
   };
   return inputs;
+}
+
+/**
+ * The task text the child receives.
+ *
+ * `inherit_context` prepends the parent's conversation on both paths, and the
+ * same builder produces it, so a pane child reads exactly what an in-process one
+ * would have been prompted with. Empty context (a fresh session) adds nothing,
+ * rather than an empty heading.
+ */
+function taskFor(ctx: ExtensionContext, prompt: string, inheritContext: boolean | undefined): string {
+  if (!inheritContext) return prompt;
+  const parentContext = buildParentContext(ctx);
+  return parentContext === "" ? prompt : parentContext + prompt;
 }
 
 /** The argv that runs the child under the launcher's documented form. */
@@ -354,10 +446,14 @@ async function systemPromptFor(
   const memory = inputs.agentConfig?.memory;
   if (memory) {
     const tools = new Set(inputs.spec.toolScope.tools);
+    // The agent's own name, as the in-process path passes it: a memory block
+    // headed with the type would file a named agent's notes under the wrong
+    // heading.
+    const name = inputs.agentConfig?.name ?? inputs.type;
     extras.memoryBlock =
       tools.has("write") || tools.has("edit")
-        ? buildMemoryBlock(inputs.type, memory, inputs.configCwd)
-        : buildReadOnlyMemoryBlock(inputs.type, memory, inputs.configCwd);
+        ? buildMemoryBlock(name, memory, inputs.configCwd)
+        : buildReadOnlyMemoryBlock(name, memory, inputs.configCwd);
   }
   return buildAgentPrompt(promptConfig, inputs.cwd, env, ctx.getSystemPrompt(), extras);
 }
@@ -414,29 +510,38 @@ async function watch(args: {
   inputs: RunInputs;
   pane: PaneHandle;
   options: RunOptions;
+  /** This run's place in the cascade, taken before the launch; given back when it settles. */
+  ticket: symbol;
 }): Promise<RunResult> {
-  const { deps, warn, live, states, inputs, pane, options } = args;
+  const { deps, warn, live, states, inputs, pane, options, ticket } = args;
   const paneDepsHere = paneDeps(deps);
   reportMinimize(warn, inputs, pane);
 
   // The child writes its own session file, and pi names it with a timestamp —
   // so it is discovered by the id it was launched with rather than predicted.
-  const sessionFile = await findSessionFile(deps.agentSessionDir, inputs.agentId);
-  const tail = new SessionTail(sessionFile);
-  const state: RunState = { inputs, pane, tail, sessionFile, closed: false };
+  const location = await findSessionFile(deps.agentSessionDir, inputs.agentId);
+  const tail = new SessionTail(location.file);
+  const state: RunState = { inputs, pane, tail, sessionFile: location.file };
   const session = new PaneSession({
     tail,
-    sessionFile,
     steer: (message) => steerPane(paneDepsHere, state, message),
     abort: () => closeRunPane(paneDepsHere, state),
   });
   states.set(session, state);
+  // A child slower than the grace window writes its file later, and the path
+  // this run announced is a guess until it does: keep looking, so the live view
+  // fills in and the handle names the file the child actually wrote.
+  const stopFollow =
+    location.found
+      ? () => {}
+      : followSessionFile(deps.agentSessionDir, inputs.agentId, (file) => {
+          state.sessionFile = file;
+          tail.retarget(file);
+        });
   tail.start();
   const stopActivity = feedActivity(tail, options, false);
 
-  const ticket = Symbol(inputs.agentId);
-  live.add(ticket);
-  const stop = { requested: false };
+  const stop = runStop();
   let aborted = options.signal?.aborted === true;
   const unlisten = forwardAbort(options.signal, () => {
     aborted = true;
@@ -446,7 +551,6 @@ async function watch(args: {
   });
 
   options.onSessionCreated?.(session);
-
   try {
     const outcome = await firstOutcome({
       deps: paneDepsHere,
@@ -466,8 +570,10 @@ async function watch(args: {
     return runResult(outcome, session, aborted);
   } finally {
     stop.requested = true;
+    stop.cancel.abort();
     stopActivity();
     unlisten();
+    stopFollow();
     tail.stop();
     live.delete(ticket);
     await closeRunPane(paneDepsHere, state);
@@ -483,6 +589,12 @@ async function watch(args: {
  * current pane rather than the first one. `PaneSession.prompt()` rejects by
  * design — a pane child is a one-shot process, and resuming means starting
  * another on the same transcript.
+ *
+ * Unlike `start()`, a resume that cannot get a pane **throws**: the record was
+ * already settled, its transcript is on disk, and re-running the agent from
+ * scratch in-process would answer a different question than "continue that
+ * conversation". `start()` can fall back because nothing has happened yet; here
+ * something has, and the caller has to be told it was not continued.
  */
 async function relaunch(args: {
   deps: PaneRunDeps;
@@ -507,27 +619,31 @@ async function relaunch(args: {
     prompt,
     spec: inputs.spec,
   });
+  // The cascade slot is taken before the launch, for the same reason as on a
+  // spawn: a resume that read the size while its pane was being made would be
+  // handed the bounds its neighbour already took.
+  const ticket = Symbol(inputs.agentId);
+  live.add(ticket);
   const pane = await launchPane({
     deps: paneDepsHere,
     label: inputs.label,
     command: childCommand({ ...inputs, files }, deps, state.sessionFile),
     cwd: inputs.cwd,
-    index: live.size,
+    index: live.size - 1,
   });
   if (pane === undefined) {
+    live.delete(ticket);
     throw new Error(`the pane for "${inputs.label}" could not be created; the agent was not resumed`);
   }
   reportMinimize(warn, inputs, pane);
   state.pane = pane;
-  state.closed = false;
+  state.closing = undefined;
   // The child appends to the same file, so the same tail keeps following it, and
   // what is already there belongs to the previous run.
   state.tail.start();
   const stopActivity = feedActivity(state.tail, options, true);
 
-  const ticket = Symbol(inputs.agentId);
-  live.add(ticket);
-  const stop = { requested: false };
+  const stop = runStop();
   const unlisten = forwardAbort(options.signal, () => {
     void closeRunPane(paneDepsHere, state);
   });
@@ -548,6 +664,7 @@ async function relaunch(args: {
     return { text: outcome.text, failure: outcome.failure };
   } finally {
     stop.requested = true;
+    stop.cancel.abort();
     stopActivity();
     unlisten();
     state.tail.stop();
@@ -569,12 +686,30 @@ async function relaunch(args: {
  * everything watching checks it, so a run that settled one way leaves nothing
  * running the other way.
  */
+
+/**
+ * What a watching loop is asked to stop: a flag to check, and a controller for
+ * the `rex` call already in flight.
+ *
+ * The flag alone would end the loop but leave a `rex wait` running — up to its
+ * whole 30 s window for a run the result file settled in 200 ms. Aborting the
+ * call is what makes "this run is over" true outside this process too.
+ */
+interface RunStop {
+  requested: boolean;
+  cancel: AbortController;
+}
+
+function runStop(): RunStop {
+  return { requested: false, cancel: new AbortController() };
+}
+
 function firstOutcome(args: {
   deps: PaneDeps;
   warn: (message: string) => void;
   inputs: RunInputs;
   blockId: string;
-  stop: { requested: boolean };
+  stop: RunStop;
 }): Promise<PaneRunResult | { exitCode: number | null }> {
   return Promise.race([
     waitForResult(args.inputs.spec.resultPath, args.stop),
@@ -590,7 +725,7 @@ function firstOutcome(args: {
  * than a watcher per running agent. The timer clears itself the moment the run
  * stops caring, which is how an exit-settled run leaves no interval behind.
  */
-function waitForResult(resultPath: string, stop: { requested: boolean }): Promise<PaneRunResult> {
+function waitForResult(resultPath: string, stop: RunStop): Promise<PaneRunResult> {
   return new Promise<PaneRunResult>((resolve) => {
     const tick = () => {
       if (stop.requested) {
@@ -622,20 +757,23 @@ function waitForResult(resultPath: string, stop: { requested: boolean }): Promis
  * closes a pane with its child, so a pane that is gone has taken its exit status
  * with it. `null` says exactly that, and the caller reports an unobservable
  * status rather than inventing one.
+ *
+ * The wait is cancelled through the run's own stop, so a run that settled from
+ * its result file is left with no `rex` process of its own.
  */
 async function watchExit(
   deps: PaneDeps,
   blockId: string,
   warn: (message: string) => void,
   inputs: RunInputs,
-  stop: { requested: boolean },
+  stop: RunStop,
 ): Promise<number | null> {
   let warned = false;
   for (;;) {
     if (stop.requested) return null;
     const waited = await deps.exec(
       ["wait", "-s", deps.sessionId, blockId, "--json", "--for", `${WAIT_WINDOW_MS}ms`],
-      { timeoutMs: WAIT_TIMEOUT_MS },
+      { timeoutMs: WAIT_TIMEOUT_MS, signal: stop.cancel.signal },
     );
     if (stop.requested) return null;
     const code = replyBody(waited)?.exit_code;
@@ -843,26 +981,38 @@ function lifetimeUsageOf(usage: unknown): LifetimeUsage {
 /**
  * Type a message into the child's pane.
  *
- * Refused unless the child's own program status says it is taking input: a `pi`
- * at a dialog ("password", "allow this tool?") reports `blocked`, and text typed
- * into one lands in the dialog rather than in the conversation. The refusal is an
- * error the caller reports — `steer_subagent` turns it into the tool's message —
- * because a silently dropped steer reads as a delivered one.
+ * Refused unless the child's own program status says it is taking input, and
+ * "taking input" is a whitelist: `working` and `idle` only. A `pi` at a dialog
+ * ("password", "allow this tool?") reports `blocked` and text typed into one
+ * lands in the dialog rather than in the conversation; `done` and `error` are
+ * past the point of listening, and any state this runner has never seen is one
+ * it cannot vouch for.
+ *
+ * The refusal is an error the caller reports — `steer_subagent` turns it into
+ * the tool's message, and the manager reports a queued steer's refusal through
+ * `onWarning` — because a silently dropped steer reads as a delivered one.
+ *
+ * `steerableState()` is the one wait: a `pi` that has only just started reports
+ * no program status at all, and a steer that lands in that window is early, not
+ * late.
  */
 async function steerPane(deps: PaneDeps, state: RunState, message: string): Promise<void> {
   const blockId = state.pane.blockId;
-  const process = await readProcessState(deps, blockId);
-  if (process.status === "blocked") {
-    throw new Error(
-      `agent "${state.inputs.label}" is waiting on a prompt in its pane — answer it there, or abort the agent;` +
-        " the message was not sent",
-    );
-  }
+  const process = await steerableState(deps, blockId);
   if (process.lastExit !== null) {
     throw new Error(`agent "${state.inputs.label}" has already exited; the message was not sent`);
   }
   if (process.status === null) {
     throw new Error(`agent "${state.inputs.label}" is not answering in its pane; the message was not sent`);
+  }
+  if (!STEERABLE_PROGRAM_STATES.has(process.status)) {
+    const why =
+      process.status === "blocked"
+        ? "is waiting on a prompt in its pane"
+        : `reports \`${process.status}\``;
+    throw new Error(
+      `agent "${state.inputs.label}" ${why} — answer it in the pane, or abort the agent; the message was not sent`,
+    );
   }
   const sent = await deps.exec(["send", "-s", deps.sessionId, "-b", blockId, message]);
   if (sent.code !== 0) {
@@ -875,6 +1025,32 @@ async function steerPane(deps: PaneDeps, state: RunState, message: string): Prom
   }
 }
 
+/**
+ * The states a pane child accepts typed input in.
+ *
+ * A whitelist, not a blacklist of `blocked`: `working` and `idle` are the two
+ * the design allows, `blocked`/`done`/`error` are all refusals, and so is
+ * anything a later `pi` invents — a state this runner cannot vouch for is not
+ * one to type into.
+ */
+const STEERABLE_PROGRAM_STATES = new Set(["working", "idle"]);
+
+/**
+ * The child's state, waited for while it has reported none at all.
+ *
+ * Bounded by `STEER_STATUS_GRACE_MS`: a child that never reports is a child
+ * this runner cannot reach, and the caller is told so rather than left waiting.
+ */
+async function steerableState(deps: PaneDeps, blockId: string): Promise<ProcessState> {
+  const deadline = Date.now() + STEER_STATUS_GRACE_MS;
+  for (;;) {
+    const state = await readProcessState(deps, blockId);
+    if (state.status !== null || state.lastExit !== null) return state;
+    if (Date.now() >= deadline) return state;
+    await delay(POLL_INTERVAL_MS);
+  }
+}
+
 // ---------------------------------------------------------------------------
 // Small pieces
 // ---------------------------------------------------------------------------
@@ -882,15 +1058,16 @@ async function steerPane(deps: PaneDeps, state: RunState, message: string): Prom
 /**
  * Close the run's current layer, once.
  *
- * An abort closes the layer and then the settle path closes it again; the second
- * call is a wasted round trip and, worse, a second chance to interleave with
- * another agent's pane creation. A resume clears the flag, because its pane is a
- * new one.
+ * An abort closes the layer and then the settle path closes it again, and a
+ * dispose racing either of them wants to know when it is done: so the call is
+ * made once and every caller awaits the same promise. A second call would be a
+ * wasted round trip and, worse, a second chance to interleave with another
+ * agent's pane creation. A resume clears the promise, because its pane is a new
+ * one.
  */
-async function closeRunPane(deps: PaneDeps, state: RunState): Promise<void> {
-  if (state.closed) return;
-  state.closed = true;
-  await closePane(deps, state.pane.layerId);
+function closeRunPane(deps: PaneDeps, state: RunState): Promise<void> {
+  state.closing ??= closePane(deps, state.pane.layerId);
+  return state.closing;
 }
 
 /** The pane's session and window, from the runner's own deps. */
@@ -912,22 +1089,53 @@ function reportMinimize(warn: (message: string) => void, inputs: RunInputs, pane
 }
 
 /**
- * The child's session file, discovered by the id it was launched with.
+ * The child's session file, as far as it can be known at announcement time.
  *
  * pi names it `<timestamp>_<session id>.jsonl`, so the id is the part that is
- * known before the child writes anything. A child that never writes one (it died
- * during startup) leaves the guess as the handle's `sessionFile`: nothing is on
- * disk to name, and a handle has to name something — the run is about to settle as
- * a failure, and the path costs nothing until someone tries to reopen it.
+ * known before the child writes anything — but the file itself appears lazily,
+ * on the child's first turn, which can be well after the pane exists. `found`
+ * says which of the two answers this is: the child's real file, or a path it has
+ * not written yet (see `followSessionFile()`).
+ *
+ * The guess is still the right thing to hand a handle: a handle has to name
+ * something, and a child that died before writing anything has no other name.
  */
-async function findSessionFile(dir: string, agentId: string): Promise<string> {
+async function findSessionFile(dir: string, agentId: string): Promise<{ file: string; found: boolean }> {
   const deadline = Date.now() + SESSION_FILE_GRACE_MS;
   for (;;) {
     const found = sessionFileIn(dir, agentId);
-    if (found !== undefined) return found;
-    if (Date.now() >= deadline) return join(dir, `${agentId}.jsonl`);
+    if (found !== undefined) return { file: found, found: true };
+    if (Date.now() >= deadline) return { file: join(dir, `${agentId}.jsonl`), found: false };
     await delay(POLL_INTERVAL_MS);
   }
+}
+
+/**
+ * Keep looking for the child's session file after the grace window, and hand
+ * the path to `onFound` the moment it turns up.
+ *
+ * Without this, a child slower than `SESSION_FILE_GRACE_MS` leaves the live view
+ * permanently empty: the tail is bound to the guessed path for the life of the
+ * run, so messages, turns, usage and the last assistant text in an error report
+ * all stay blank while the child's real transcript sits beside it unread.
+ *
+ * Stops itself once it finds the file, and returns the stop (also used by the
+ * run's `finally`, so a settled run leaves no interval behind).
+ */
+function followSessionFile(
+  dir: string,
+  agentId: string,
+  onFound: (file: string) => void,
+): () => void {
+  const timer = setInterval(() => {
+    const found = sessionFileIn(dir, agentId);
+    if (found === undefined) return;
+    clearInterval(timer);
+    onFound(found);
+  }, POLL_INTERVAL_MS);
+  // Never the reason the parent process stays alive.
+  timer.unref();
+  return () => clearInterval(timer);
 }
 
 /** pi names a session file `<timestamp>_<session id>.jsonl`; the newest one is this run's. */

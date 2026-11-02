@@ -44,8 +44,15 @@ export interface RexExecResult {
  * The seam the pane verbs take instead of calling `execRex` directly, so a test
  * can drive them without a `rex` on PATH. The contract is `execRex`'s: it
  * resolves, always.
+ *
+ * `signal` is how a caller that has stopped caring ends the process: a watching
+ * run whose result file landed does not need a `rex wait` finishing its 30 s
+ * window, and a killed call reads as `code: -1` like any other unanswered call.
  */
-export type RexExec = (args: string[], options?: { timeoutMs?: number }) => Promise<RexExecResult>;
+export type RexExec = (
+  args: string[],
+  options?: { timeoutMs?: number; signal?: AbortSignal },
+) => Promise<RexExecResult>;
 
 /**
  * How long a killed `rex` gets to report its own death before the promise
@@ -71,9 +78,10 @@ const SETTLE_BACKSTOP_MS = 250;
  */
 export function execRex(
   args: string[],
-  options: { timeoutMs?: number } = {},
+  options: { timeoutMs?: number; signal?: AbortSignal } = {},
 ): Promise<RexExecResult> {
   const timeoutMs = options.timeoutMs ?? DEFAULT_REX_EXEC_TIMEOUT_MS;
+  const signal = options.signal;
   return new Promise<RexExecResult>((resolve) => {
     let stdout = "";
     let stderr = "";
@@ -116,10 +124,23 @@ export function execRex(
       stderr += `${stderr === "" ? "" : "\n"}${error.message}`;
       finish(-1);
     });
+    // A caller that stopped caring kills the call, the same way the timeout does
+    // and for the same reason: a CLI left behind a settled promise keeps the
+    // process open. Not marked `timedOut` — this is not a failure to report, and
+    // the caller already knows why it asked.
+    const cancel = () => {
+      child.kill("SIGKILL");
+      setTimeout(() => finish(-1), SETTLE_BACKSTOP_MS).unref();
+    };
+    if (signal?.aborted === true) cancel();
+    else signal?.addEventListener("abort", cancel, { once: true });
     // 'close', not 'exit': stdout may still be draining when the process ends.
     // A child that exits 0 just as the timer fires is still a timeout, not a
     // successful call.
-    child.on("close", (code) => finish(timedOut ? -1 : (code ?? -1)));
+    child.on("close", (code) => {
+      signal?.removeEventListener("abort", cancel);
+      finish(timedOut ? -1 : (code ?? -1));
+    });
   });
 }
 
@@ -239,7 +260,6 @@ function reportedState(reply: Record<string, unknown> | undefined): string | nul
   }
   return null;
 }
-
 
 /**
  * The window the parent block sits in, which is where its panes float.

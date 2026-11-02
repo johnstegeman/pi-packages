@@ -265,7 +265,12 @@ function stubChildSource(): string {
     '  fs.renameSync(tmp, spec.resultPath);',
     "}",
     "const file = sessionFile();",
+    // A child that writes its session file later than the parent's 2 s grace
+    // window, and its result later still: discovery has to keep looking.
+    'const lateSession = mode === "slow-start";',
+    "if (lateSession) Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 3000);",
     "writeSession(file);",
+    "if (lateSession) Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 600);",
     'if (mode === "silent-exit") process.exit(3);',
     'if (mode === "structured") writeResult({ structuredJson: \'{"answer":"42"}\', structuredRetried: true });',
     'else if (mode === "slow-result") { Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 300); writeResult(); }',

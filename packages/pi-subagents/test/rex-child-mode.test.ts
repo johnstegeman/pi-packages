@@ -22,6 +22,7 @@ import {
 } from "../src/rex/child-mode.js";
 import type { ChildSpec } from "../src/rex/launcher.js";
 import { ctx, hermeticDir, makePi } from "./helpers/boot-extension.js";
+import { installFakeRex } from "./helpers/rex-pane-harness.js";
 
 const SCHEMA = {
   type: "object",
@@ -677,5 +678,95 @@ describe("index.ts hook", () => {
     // What a child does keep: its own delegation tools and its own result file.
     expect([...tools.keys()].sort()).toEqual(["Agent", "get_subagent_result", "steer_subagent"]);
     expect(handlers.has("agent_settled")).toBe(true);
+  });
+});
+
+describe("a child's own children", () => {
+  it("are panes too: its manager is given the pane runner", async () => {
+    // A child already knows Rex is there — it *is* a pane — so detection has no
+    // question to ask (and would answer "no" for this process). What it must
+    // still do is hand its manager the same runner the root manager gets.
+    const dir = hermetic({ maxConcurrent: 3 });
+    const fake = installFakeRex();
+    const savedBlock = process.env.REX_BLOCK;
+    process.env.REX_BLOCK = "block-child";
+    let own: AgentManager | undefined;
+    // The manager is created and configured inside child mode; this is how the
+    // test gets hold of the instance without reaching into module state.
+    const pools = vi.spyOn(AgentManager.prototype, "setMaxConcurrent").mockImplementation(function (this: AgentManager) {
+      own = this;
+    });
+    try {
+      const { pi } = makeChildPi();
+      installChildMode(pi, specFor(dir));
+      expect(own).toBeDefined();
+
+      // The child's own `ctx`, as pi hands it to an extension: the extra members
+      // are the ones the pane runner reads off it (its model, its trust answer,
+      // its system prompt).
+      const child = childCtx({
+        cwd: dir,
+        modelRegistry: { find: vi.fn(), getAvailable: vi.fn(() => []) },
+        getSystemPrompt: vi.fn(() => "the child's own prompt"),
+        isProjectTrusted: vi.fn(() => true),
+        sessionManager: { getSessionFile: () => "/tmp/child.jsonl", getSessionId: () => "root-1" },
+      });
+      const id = own!.spawn(pi, child as never, "Explore", "do it", {
+        description: "a grandchild",
+        isBackground: true,
+        model: { provider: "anthropic", id: "claude-sonnet-4-6", name: "Claude Sonnet 4.6" },
+      });
+      const record = own!.getRecord(id)!;
+      await own!.awaitStartup(id);
+      for (let i = 0; i < 500 && !fake.paneCalls().some((call) => call[4] === "session.new_layer"); i++) {
+        await new Promise((resolve) => setTimeout(resolve, 10));
+      }
+
+      // The grandchild got a real pane, in this child's session and its block's
+      // window — no `rex whoami` probe, no in-process session.
+      const create = fake.paneCalls().find((call) => call[4] === "session.new_layer");
+      expect(create).toBeDefined();
+      const request = JSON.parse(create![5]);
+      expect(request.session_id).toBe("rex-session");
+      expect(request.window_id).toBe("window:1");
+      expect(request.layout.block.label).toContain("a grandchild");
+      expect(fake.calls().some((call) => call[0] === "whoami")).toBe(false);
+      await record.promise;
+    } finally {
+      if (savedBlock === undefined) delete process.env.REX_BLOCK;
+      else process.env.REX_BLOCK = savedBlock;
+      pools.mockRestore();
+      fake.restore();
+    }
+  }, 20_000);
+});
+
+describe("a child shutting down", () => {
+  it("disposes its own manager, so no grandchild outlives the run that made it", async () => {
+    const dir = hermetic();
+    const { pi, handlers, send } = makeChildPi();
+    const dispose = vi.spyOn(AgentManager.prototype, "dispose").mockResolvedValue(undefined);
+    try {
+      installChildMode(pi, specFor(dir));
+      expect(handlers.get("session_shutdown")).toHaveLength(1);
+
+      // Awaited, as pi awaits it: the process exits right after this returns.
+      await send("session_shutdown");
+
+      expect(dispose).toHaveBeenCalledTimes(1);
+    } finally {
+      dispose.mockRestore();
+    }
+  });
+
+  it("registers no shutdown handler when it has no manager to dispose", () => {
+    const dir = hermetic();
+    const { pi, handlers } = makeChildPi();
+
+    // At the depth cap there are no delegation tools and no manager: nothing to
+    // tear down, and a handler that exists only to do nothing is noise.
+    installChildMode(pi, specFor(dir, { depth: 2, maxSubagentDepth: 2 }));
+
+    expect(handlers.get("session_shutdown")).toBeUndefined();
   });
 });

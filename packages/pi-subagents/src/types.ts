@@ -258,6 +258,17 @@ export interface AgentRecord {
   structuredJson?: string;
   /** Whether the child needed the extra structured-output prompt. */
   structuredRetried?: boolean;
+  /**
+   * Why this agent ran in-process although a Rex pane was expected, when the
+   * runner had to fall back.
+   *
+   * Absent for every ordinary run — including every run outside Rex, where
+   * in-process is the point rather than a fallback. Present means the spawn
+   * wanted a pane and could not get one, so a reader arriving after the warning
+   * was shown (a tool result, the fleet view, a mention) can still tell where
+   * the agent actually ran.
+   */
+  paneFallback?: string;
   /** Parent agent ID for ownership-scoped nested controls. */
   parentAgentId?: string;
   /**
