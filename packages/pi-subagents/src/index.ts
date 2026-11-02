@@ -33,6 +33,7 @@ import { describeModel, type ModelRegistry, resolveModel } from "./model-resolve
 import { checkModelScope, isScopeModelsEnabled, setScopeModelsEnabled } from "./model-scope.js";
 import { getMaxSubagentDepth, setMaxSubagentDepth } from "./nested-tools.js";
 import { createOutputFilePath, ensureOutputFile, getOutputTranscriptDefault, sessionTaskDir, setOutputTranscriptDefault, streamToOutputFile, writeInitialEntry } from "./output-file.js";
+import type { RexPanesSetting } from "./rex/detect.js";
 import { SubagentScheduler } from "./schedule.js";
 import { resolveStorePath, ScheduleStore } from "./schedule-store.js";
 import { applyAndEmitLoaded, getWorkflowStallTimeoutSecs, loadSettings, parseStallTimeoutSecs, STALL_TIMEOUT_SECS_CEILING, type SubagentsSettings, saveAndEmitChanged, setWorkflowStallTimeout, type ToolDescriptionMode } from "./settings.js";
@@ -452,6 +453,16 @@ export default function (pi: ExtensionAPI) {
   let viewerMarkdown: ViewerMarkdownMode = "assistant";
   function getViewerMarkdown(): ViewerMarkdownMode { return viewerMarkdown; }
   function setViewerMarkdown(mode: ViewerMarkdownMode): void { viewerMarkdown = mode; }
+  /**
+   * Whether a subagent runs as a real `pi` in a Rex pane. Module state only so
+   * the settings snapshot writes back what the user set instead of a default it
+   * invented: detection re-reads the file (`rexPanesEnabled`), because that is
+   * where the answer lives and it is memoized for the process either way.
+   * `undefined` is "the user never set it", which is `"auto"`.
+   */
+  let runInRexPanes: RexPanesSetting | undefined;
+  function getRunInRexPanes(): RexPanesSetting | undefined { return runInRexPanes; }
+  function setRunInRexPanes(mode: RexPanesSetting): void { runInRexPanes = mode; }
   /**
    * The viewer's `m` key, from either entry point: set the mode and persist it,
    * so the key and `/agents → Settings` stay one setting rather than one per
@@ -1507,6 +1518,7 @@ export default function (pi: ExtensionAPI) {
       setShowModel,
       setViewerMarkdown,
       setWorkflowStallTimeout,
+      setRunInRexPanes,
     },
     (event, payload) => pi.events.emit(event, payload),
   );
@@ -3909,6 +3921,11 @@ Write the file using the write tool. Only write the file, nothing else.`;
       showCost: isShowCostEnabled(),
       showModel: isShowModelEnabled(),
       viewerMarkdown: getViewerMarkdown(),
+      // The user's answer, not the effective one: unset is `"auto"`, and writing
+      // that through would turn the default into explicit configuration.
+      // undefined is dropped by JSON.stringify, same reasoning as
+      // `fallbackSubagent`.
+      runInRexPanes: getRunInRexPanes(),
       // Seconds, 0 = off — read per run, so unlike `workflowsEnabled` above this
       // is the effective value rather than a session-frozen one.
       workflowStallTimeoutSecs: getWorkflowStallTimeoutSecs(),
@@ -4094,6 +4111,14 @@ Write the file using the write tool. Only write the file, nothing else.`;
             "How much of the conversation viewer renders as Markdown. assistant = assistant text only (default); all = tool results too, for tools that emit Markdown — accepting that a Markdown pass over a diff or a log eats `#` comments, swallows a `---` line and re-fences indented output; off = everything verbatim. `m` in the viewer cycles the same setting (footer: raw / md / md+).",
           currentValue: getViewerMarkdown(),
           values: ["off", "assistant", "all"],
+        },
+        {
+          id: "runInRexPanes",
+          label: "Rex panes",
+          description:
+            "Run each subagent as a real `pi` in a minimized floating Rex pane instead of an in-process session. auto = panes whenever pi is itself inside Rex and the server answers (outside Rex, in print mode, and inside a subagent's own child there is no pane either way); off = always in-process, for capsules you would rather not see. The answer is decided once, at this session's first agent spawn — so with nothing spawned yet, a change applies to the next agent.",
+          currentValue: getRunInRexPanes() ?? "auto",
+          values: ["auto", "off"],
         },
         {
           id: "fleetView",
@@ -4292,6 +4317,19 @@ Write the file using the write tool. Only write the file, nothing else.`;
       } else if (id === "viewerMarkdown") {
         setViewerMarkdown(value as ViewerMarkdownMode);
         notifyApplied(ctx, `Viewer markdown set to ${value}`);
+      } else if (id === "runInRexPanes") {
+        const mode = value as RexPanesSetting;
+        setRunInRexPanes(mode);
+        // The modality is memoized, so an agent that has already spawned this
+        // session keeps the old answer and the next session picks this up — the
+        // Settings row says so, rather than promising more than the memo can
+        // deliver.
+        notifyApplied(
+          ctx,
+          mode === "off"
+            ? "Rex panes off — subagents run in-process"
+            : "Rex panes on — subagents run in a minimized Rex pane when pi is inside Rex",
+        );
       } else if (id === "fleetView") {
         const enabled = value === "on";
         setFleetViewEnabled(enabled);

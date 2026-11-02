@@ -118,6 +118,23 @@ describe("settings persistence", () => {
     expect(loadSettings(projectDir)).toEqual({}); // non-boolean dropped
   });
 
+  it("round-trips runInRexPanes modes; drops a spelling it does not know", () => {
+    for (const mode of ["auto", "off"] as const) {
+      saveSettings({ runInRexPanes: mode }, projectDir);
+      expect(loadSettings(projectDir)).toEqual({ runInRexPanes: mode });
+    }
+    // Absence stays absence: `auto` is the default, so writing it would only
+    // put a line in the user's file that they did not choose.
+    saveSettings({}, projectDir);
+    expect(loadSettings(projectDir)).toEqual({});
+    // Anything else is dropped rather than resolved to the nearest mode —
+    // `auto` spawns panes, so a typo must not be read as permission.
+    for (const junk of ["panes", "offf", "AUTO", true, false, 0, 1, null, ""]) {
+      writeProject({ runInRexPanes: junk } as any);
+      expect(loadSettings(projectDir)).toEqual({});
+    }
+  });
+
   it("round-trips agentMentions modes; drops an unknown one", () => {
     for (const mode of ["model", "direct", "off"] as const) {
       saveSettings({ agentMentions: mode }, projectDir);

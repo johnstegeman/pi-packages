@@ -6,6 +6,10 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { getAgentDir } from "@earendil-works/pi-coding-agent";
 import { NO_FALLBACK } from "./agent-types.js";
+// Type-only: detect.ts imports `loadSettings` from this module, so a value
+// import here would be a cycle. The shape belongs to the detector, which is
+// the only thing that reads the key.
+import type { RexPanesSetting } from "./rex/detect.js";
 import type { AgentMentionMode, JoinMode, ViewerMarkdownMode, WidgetMode } from "./types.js";
 
 export interface SubagentsSettings {
@@ -237,6 +241,22 @@ export interface SubagentsSettings {
    */
   workflowStallTimeoutSecs?: number;
   /**
+   * How a subagent runs when pi itself is inside Rex: `"auto"` (the default)
+   * gives it a real `pi` process in a minimized floating pane, `"off"` keeps
+   * the in-process runner that has always run it.
+   *
+   * Auto rather than an opt-in because the pane path needs no announcement: it
+   * applies only where the environment proves it can (see `detectRexPanes` —
+   * Rex markers set, a terminal, a `rex` CLI that answers, and not already a
+   * subagent's child), and is invisible everywhere else. So `"off"` is the
+   * escape hatch, not the default: it exists for a user who finds the capsules
+   * distracting, and for isolating the in-process path while debugging it.
+   *
+   * Read on the spawn path through `rexPanesEnabled()`, which memoizes for the
+   * process — the first spawn decides the modality and later spawns reuse it.
+   */
+  runInRexPanes?: RexPanesSetting;
+  /**
    * Hard ceiling on nested subagent delegation, counted from the main session:
    * main = 0, its subagents = 1, their children = 2. Defaults to `2`; `0` or `1`
    * disables nesting project-wide. Read when a subagent session is built, so a
@@ -351,6 +371,11 @@ export interface SettingsAppliers {
   setShowModel: (b: boolean) => void;
   setViewerMarkdown: (mode: ViewerMarkdownMode) => void;
   setWorkflowStallTimeout: (n: number) => void;
+  // Read on the spawn path, not captured at init: an agent started after the
+  // change gets the new answer, the same contract `workflowStallTimeoutSecs`
+  // has. Absent is never applied, so module state keeps "unset" distinct from
+  // an explicit `"auto"` — the settings snapshot writes both back unchanged.
+  setRunInRexPanes: (mode: RexPanesSetting) => void;
 }
 
 /** Emit callback — a subset of `pi.events.emit` to keep helpers testable. */
@@ -361,6 +386,7 @@ const VALID_TOOL_DESCRIPTION_MODES: ReadonlySet<string> = new Set<ToolDescriptio
 const VALID_WIDGET_MODES: ReadonlySet<string> = new Set<WidgetMode>(["all", "background", "off"]);
 const VALID_VIEWER_MARKDOWN_MODES: ReadonlySet<string> = new Set<ViewerMarkdownMode>(["off", "assistant", "all"]);
 const VALID_AGENT_MENTION_MODES: ReadonlySet<string> = new Set<AgentMentionMode>(["model", "direct", "off"]);
+const VALID_REX_PANES_SETTINGS: ReadonlySet<string> = new Set<RexPanesSetting>(["auto", "off"]);
 
 // Sanity ceilings — prevent hand-edited configs from asking for values that
 // make no operational sense (e.g. 1e6 concurrent subagents). Permissive enough
@@ -528,6 +554,14 @@ function sanitize(raw: unknown): SubagentsSettings {
   if (typeof r.workflowsEnabled === "boolean") {
     out.workflowsEnabled = r.workflowsEnabled;
   }
+  // An unrecognized spelling is dropped rather than mapped to the nearest mode:
+  // `auto` spawns panes, so reading a typo as permission would do the one thing
+  // a user writing `"of"` or `"false"` was trying to prevent. Absent and `auto`
+  // are the same answer, which is why the detector treats `undefined` as
+  // permission instead of defaulting here.
+  if (typeof r.runInRexPanes === "string" && VALID_REX_PANES_SETTINGS.has(r.runInRexPanes)) {
+    out.runInRexPanes = r.runInRexPanes as RexPanesSetting;
+  }
   if (r.fallbackSubagent === false) {
     // The only non-string spelling worth accepting: a boolean would otherwise be
     // dropped, silently leaving the PERMISSIVE default in place. Every string is
@@ -619,6 +653,7 @@ export function applySettings(s: SubagentsSettings, appliers: SettingsAppliers):
   if (typeof s.workflowStallTimeoutSecs === "number") {
     appliers.setWorkflowStallTimeout(s.workflowStallTimeoutSecs);
   }
+  if (s.runInRexPanes) appliers.setRunInRexPanes(s.runInRexPanes);
 }
 
 /**
