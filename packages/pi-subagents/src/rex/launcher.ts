@@ -1,9 +1,12 @@
-// The pane launcher's pure builders: the child's files and spec, the argv a
-// terminal block runs, and the `session.new_layer` request that creates it.
+// The pane launcher's builders and its lifecycle calls: the child's files and
+// spec, the argv a terminal block runs, the `session.new_layer` request that
+// creates it, and the small set of `rex` calls that create, minimize and close
+// it.
 //
-// Every function here is a value-in/values-out builder so the command shapes can
-// be unit-tested without a Rex server and without spawning anything. The `rex`
-// calls and the process watching land on top of this in later tasks.
+// The builders are value-in/values-out so the command shapes can be unit-tested
+// without a Rex server and without spawning anything; the lifecycle calls on top
+// of them are thin, and `test/rex-cli.test.ts` asserts their argv against a fake
+// `rex` on PATH. Process watching is the read side of `rex-cli.ts`.
 //
 // The one rule that must not drift: an agent type's `isolated`, `extensions`,
 // `exclude_extensions` and `skills` have to mean in the child process what they
@@ -23,6 +26,7 @@ import {
 import { getToolNamesForType } from "../agent-types.js";
 import { sessionTaskDir } from "../output-file.js";
 import type { AgentConfig } from "../types.js";
+import { type PaneDeps, type RexExecResult, rexReply } from "./rex-cli.js";
 
 /** The `pi` flags' documented file forms: `--system-prompt <text|path>`. */
 const REPLACE_PROMPT_FLAG = "--system-prompt";
@@ -461,4 +465,167 @@ export function buildNewLayerArgs(input: {
     },
   };
   return ["api", "call", "-s", input.sessionId, "session.new_layer", JSON.stringify(request)];
+}
+
+// ---------------------------------------------------------------------------
+// The lifecycle calls: create, minimize, close
+// ---------------------------------------------------------------------------
+
+/**
+ * Serialize the calls that make a pane visible and then take it off screen.
+ *
+ * `session.new_layer` and `session.set_layer_state` are two calls, so there is
+ * a window (measured at 21-29 ms on Rex 0.0.1793420730) in which a pane is on
+ * screen. Two spawns interleaving there do not lose a layer, but a 20-way
+ * fan-out would put twenty panes on screen in whatever order the server
+ * happened to answer, which reads as a flicker rather than as a queue. One
+ * chain, one create-and-minimize pair at a time, is the whole concurrency
+ * story: it costs a few tens of milliseconds per spawn and buys an order the
+ * user can predict.
+ */
+let paneQueue: Promise<unknown> = Promise.resolve();
+
+/**
+ * Run `work` after every pane step already queued.
+ *
+ * The bookkeeping promise swallows both outcomes so one failed step cannot
+ * wedge the chain: the returned promise is the caller's, and it is the one
+ * that carries the failure.
+ */
+function enqueue<T>(work: () => Promise<T>): Promise<T> {
+  const result = paneQueue.then(work, work);
+  paneQueue = result.then(
+    () => undefined,
+    () => undefined,
+  );
+  return result;
+}
+
+/** What `launchPane()` needs: the pane's session, its label and the child's argv. */
+export interface LaunchPaneInput {
+  deps: PaneDeps;
+  label: string;
+  command: string[];
+  cwd: string;
+  /** This pane's place in the current stack; see `paneBoundsForIndex()`. */
+  index: number;
+}
+
+/**
+ * Create one child's pane and take it off screen.
+ *
+ * Returns the ids the server assigned, or undefined when no pane was created.
+ * Undefined is the caller's signal to run that agent in-process instead; a
+ * throw would take down a fan-out because one pane could not be made, so
+ * nothing here throws. The minimize is awaited before returning, so a caller
+ * that records a pane under these ids is not racing the second call.
+ *
+ * A refused minimize is not a failed launch: the child is already running and
+ * the pane is merely visible. This return value has nowhere to report that, so
+ * the refusal is logged here instead — claiming the pane was minimized would be
+ * a lie, and staying silent would leave a pane on screen unexplained.
+ */
+export function launchPane(input: LaunchPaneInput): Promise<{ layerId: string; blockId: string } | undefined> {
+  return enqueue(() => createPane(input));
+}
+
+async function createPane(input: LaunchPaneInput): Promise<{ layerId: string; blockId: string } | undefined> {
+  let ids: { layerId: string; blockId: string } | undefined;
+  try {
+    const result = await input.deps.exec(
+      buildNewLayerArgs({
+        sessionId: input.deps.sessionId,
+        windowId: input.deps.windowId,
+        label: input.label,
+        command: input.command,
+        cwd: input.cwd,
+        bounds: paneBoundsForIndex(input.index),
+      }),
+    );
+    ids = layerIds(result);
+  } catch {
+    // The exec seam is documented as never rejecting; a deps object that
+    // does anyway still must not throw into the manager.
+    return undefined;
+  }
+  if (!ids) return undefined;
+  if (!(await setLayerMinimized(input.deps, ids.layerId))) {
+    // Not a failed launch — the child is already running — but the pane is on
+    // screen where a capsule was promised, and nothing else would say so.
+    console.warn(
+      `[pi-subagents] the pane for ${input.label} was created but could not be minimized; it stays visible (${ids.layerId})`,
+    );
+  }
+  return ids;
+}
+
+/**
+ * The ids `session.new_layer` answered with.
+ *
+ * Both are required: the layer id is what minimizes and closes the pane, the
+ * block id is what the run reads process state and captures from. A reply
+ * missing either — a null `block_ids`, an error body the CLI still exited 0
+ * on — is a launch that cannot be tracked, so it counts as no launch at all.
+ */
+function layerIds(result: RexExecResult): { layerId: string; blockId: string } | undefined {
+  const reply = rexReply(result);
+  const layerId = reply?.layer_id;
+  const blockIds = reply?.block_ids;
+  const blockId = Array.isArray(blockIds) ? blockIds[0] : undefined;
+  if (typeof layerId !== "string" || layerId === "") return undefined;
+  if (typeof blockId !== "string" || blockId === "") return undefined;
+  return { layerId, blockId };
+}
+
+/**
+ * Minimize one layer, and report whether the server did it.
+ *
+ * False means the pane is still on screen, and it is never reported as
+ * success: Rex refuses with `bad_request` when the window would lose its last
+ * visible pane, and a caller that assumed otherwise would leave a pane on
+ * screen it believes is a capsule.
+ */
+export function minimizePane(deps: PaneDeps, layerId: string): Promise<boolean> {
+  return enqueue(() => setLayerMinimized(deps, layerId));
+}
+
+async function setLayerMinimized(deps: PaneDeps, layerId: string): Promise<boolean> {
+  try {
+    const result = await deps.exec([
+      "api",
+      "call",
+      "-s",
+      deps.sessionId,
+      "session.set_layer_state",
+      JSON.stringify({ layer_id: layerId, state: "minimized" }),
+    ]);
+    return result.code === 0;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Close one pane and everything running in it.
+ *
+ * Tolerant by design: the pane closes itself when its child exits
+ * (`exit.on_completion`), so the common case is a layer that is already gone
+ * and a `not_found` from the server. Only layers this module created are ever
+ * named here — `close_layer` ends the programs in a pane, and closing a layer
+ * the user owns is not cleanup.
+ */
+export async function closePane(deps: PaneDeps, layerId: string): Promise<void> {
+  try {
+    await deps.exec([
+      "api",
+      "call",
+      "-s",
+      deps.sessionId,
+      "session.close_layer",
+      JSON.stringify({ layer_id: layerId }),
+    ]);
+  } catch {
+    // Nothing left to do about a pane that will not close from here: the
+    // program ends with its child, and this is already the cleanup path.
+  }
 }
