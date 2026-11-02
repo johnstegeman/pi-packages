@@ -52,7 +52,8 @@ Closing a pane by hand is the same event as a crash: the child dies, no result f
 
 | Child state | What `steer_subagent` answers |
 |---|---|
-| `working`, `idle`, or no status yet (a just-started `pi` reports nothing for a few hundred ms, and that window is waited out) | The message is sent |
+| `working`, `idle`, or no status yet (a just-started `pi` reports nothing for a few hundred milliseconds, and that window is waited out) | The message is sent |
+| Still no status after about two seconds | `agent "…" is not answering in its pane; the message was not sent` — a child that never reports is one this runner cannot reach, and the wait is bounded rather than open |
 | `blocked` — at a permission, question or login prompt | `agent "…" is waiting on a prompt in its pane — answer it in the pane, or abort the agent; the message was not sent` |
 | `done`, `error`, or a state this build has never seen | Refused; a whitelist, not a blacklist of `blocked` |
 | Already exited | `agent "…" has already exited; the message was not sent` |
@@ -61,7 +62,7 @@ A refused steer is never silently dropped: `steer_subagent` reports it in its ow
 
 **From the pane**, you are typing into a normal `pi` session: any prompt, any slash command. Extra turns you cause are counted and reported like any others.
 
-**Stopping** always closes the layer, which kills the child. `x` in `/agents` — or any explicit abort — settles the record `stopped`; `Esc` on a blocking foreground call reaches the same close through the run's abort signal and settles `aborted`. There is deliberately no way to interrupt a single tool call: a pane run is stopped, not paused.
+**Stopping** always closes the layer, which kills the child. `x` in `/agents`, `Esc` on a blocking foreground call, and a parent that aborts for any other reason all reach that same close, and all leave the record `stopped` — the abort marks it stopped before the run can report anything of its own. `aborted` is a different status: it means the run ran out of turn budget, and on this path only the child's own self-stop can produce it. There is deliberately no way to interrupt a single tool call: a pane run is stopped, not paused.
 
 **Resuming** relaunches the child on its own session file (`--session <file>`) in a fresh pane. It is the same conversation continued under a second process, which is why a pane agent stays resumable after its pane is gone — `Agent({ resume })` and `@handle` work exactly as they do in-process.
 

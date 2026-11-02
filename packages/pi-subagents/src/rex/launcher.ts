@@ -467,8 +467,10 @@ export function buildChildCommand(input: {
  * pane run needs to tell a crash from a clean exit.
  *
  * `exit.on_completion` is left at Rex's default of true: the pane closes itself
- * when the child finishes, and a quick failure stays open so the error can be
- * read.
+ * when the child finishes, a failing one included — a `pi` that dies takes its
+ * pane with it within a second or two rather than leaving it open. Completion
+ * and failure are therefore read from the child's result file and its exit
+ * status, never from a pane that survived the exit.
  *
  * The returned vector excludes the `rex` executable itself — the caller spawns
  * it.

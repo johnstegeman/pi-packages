@@ -243,11 +243,12 @@ just delivered as files and flags.
 `src/rex/pane-run.ts` implements `RunHandle` for one agent:
 
 - **Completion**: await the result file — polled every 100 ms, because the file appears by
-  rename and there is nothing to watch before it exists — or the process exit
-  (`rex wait -b BLOCK --json`, whose `child_exited` payload carries the code, with
-  `rex block call -b BLOCK process` → `last_exit` as the fallback), whichever comes first. A
-  child that exits without a result file is reported with the exit status and whatever the
-  session tail holds plus `rex capture -b BLOCK --trim` when the pane still exists. `{ lastExit:
+  rename and there is nothing to watch before it exists — or the process exit, whichever comes
+  first. The exit comes from `rex wait -s <session> <block> --json --for <ms>` (the block is an
+  argument, not a flag), whose `child_exited` payload carries the code as `exit_code`, with
+  `rex block call -s <session> -b BLOCK process` → `last_exit` as the fallback. A child that
+  exits without a result file is reported with the exit status and whatever the session tail
+  holds plus `rex capture -s <session> -b BLOCK --trim` when the pane still exists. `{ lastExit:
   null, status: null }` means "not yet observable", never "still running", because it is what
   both a closed block and a live program read as.
 - **Blocked child**: a child that stops on its own prompt (permission, question, login) is
@@ -424,7 +425,6 @@ New coverage:
 
 1. **Spike** (throwaway script, no product code): verify `ctx.shutdown()` from `agent_settled`
    closes a real pane, when a child exits on its own versus when it stops on a UI prompt, and how
-   long the create→minimize flash lasts. Minimize itself is already verified.
    long the create→minimize flash lasts. Minimize itself is already verified.
 2. `src/rex/detect.ts` + the `runInRexPanes` setting, with tests.
 3. `src/rex/launcher.ts` builders (spec, files, command array, bounds) + the confinement

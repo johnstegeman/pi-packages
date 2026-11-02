@@ -374,7 +374,6 @@ Covered by `test/nested-tools.test.ts` (the inline shapes, the fetched position,
 `test/foreground-result-retrieval.test.ts` is unchanged and passes untouched.
 
 Unchanged by design: the `@handle` mention namespace, `takenHandles()`, nested records' absence of
-Unchanged by design: the `@handle` mention namespace, `takenHandles()`, nested records' absence of
 handles and tombstones, and the ten-minute eviction cutoff.
 
 ## Divergence 10 — subagents run as real `pi` processes in Rex panes (`pi-packages-mol-hx8zk`)
