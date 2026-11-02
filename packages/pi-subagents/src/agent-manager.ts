@@ -30,7 +30,7 @@ import {
 } from "./agent-runner.js";
 import { getAgentConfig } from "./agent-types.js";
 import { assignHandle, handleBase } from "./mention.js";
-import { describeModel, resolveDefaultModel } from "./model-resolver.js";
+import { describeModel, resolveRunInvocation } from "./model-resolver.js";
 import type { AgentInvocation, AgentRecord, AgentTombstone, IsolationMode, MentionResolution, RunHandle, SubagentType, ThinkingLevel } from "./types.js";
 import { addUsage, type LifetimeUsage } from "./usage.js";
 import type { CompiledSchema } from "./workflow/json-schema.js";
@@ -921,15 +921,20 @@ export class AgentManager {
       }
     }
 
-    // The model and thinking level this run will use, resolved EXACTLY as the
-    // in-process runner resolves them (explicit option > agent file > parent),
+    // The model and thinking level this run will use, from the ONE resolver the
+    // in-process runner also calls — explicit option > agent file > parent —
     // and written to the record BEFORE anything can read it. The record is the
     // one place every surface reads its labels from, and a pane-backed run has
     // no session the parent can read them off afterwards — so they cannot wait
-    // for `onSessionCreated`.
-    const runModel = options.model
-      ?? resolveDefaultModel(ctx.model, ctx.modelRegistry, getAgentConfig(type)?.model);
-    const runThinking = options.thinkingLevel ?? getAgentConfig(type)?.thinking;
+    // for `onSessionCreated`. Resolved here rather than inside the run, so a
+    // context that cannot answer (no registry to resolve the agent file's model
+    // against) still starts the run with the labels it can name instead of
+    // failing the tool call over one.
+    const { model: runModel, thinkingLevel: runThinking } = resolveRunInvocation({
+      options,
+      config: getAgentConfig(type),
+      ctx,
+    });
     if (runModel || runThinking) {
       const invocation: AgentInvocation = { ...record.invocation };
       if (runModel) Object.assign(invocation, describeModel(runModel));

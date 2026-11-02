@@ -19,8 +19,9 @@ import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { AgentManager, type ManagerRunner } from "../src/agent-manager.js";
 import { getAgentConversation, type RunResult } from "../src/agent-runner.js";
+import { getAgentConfig, getAllTypes, registerAgents } from "../src/agent-types.js";
 import { streamToOutputFile } from "../src/output-file.js";
-import type { RunHandle } from "../src/types.js";
+import type { AgentConfig, RunHandle } from "../src/types.js";
 import { getSessionContextPercent } from "../src/usage.js";
 
 const mockPi = {} as any;
@@ -52,19 +53,22 @@ const runnerWithHandle = (handle: RunHandle, announceSession = true): ManagerRun
   resume: vi.fn(async () => ({ text: "resumed by the fake runner" })),
 });
 
-const managerWith = (runner: ManagerRunner) =>
+/** An injected runner and nothing else: no callbacks, no limits to tune. */
+const makeManager = (runner: ManagerRunner) =>
   new AgentManager(undefined, 10, undefined, undefined, undefined, { runner });
 
 describe("RunHandle seam — an injected runner settles the record", () => {
   let manager: AgentManager;
-  afterEach(() => {
-    manager?.dispose();
+  afterEach(async () => {
+    // Awaited: `dispose()` sweeps the runs' handles, and a test that left a
+    // dispose in flight would let its warnings land in the next one.
+    await manager?.dispose();
     vi.restoreAllMocks();
   });
 
   it("settles a record from a runner that hands back no AgentSession", async () => {
     const handle = fakeHandle();
-    manager = managerWith(runnerWithHandle(handle));
+    manager = makeManager(runnerWithHandle(handle));
 
     const id = manager.spawn(mockPi, mockCtx, "Explore", "do the thing", {
       description: "do the thing",
@@ -84,7 +88,7 @@ describe("RunHandle seam — an injected runner settles the record", () => {
   it("names the model and thinking level from the spawn options without a session", async () => {
     // The pane modality: the parent never touches the child's session, so the
     // model/thinking labels have to be there before the run starts.
-    manager = managerWith(runnerWithHandle(fakeHandle(), false));
+    manager = makeManager(runnerWithHandle(fakeHandle(), false));
 
     const id = manager.spawn(mockPi, mockCtx, "Explore", "do the thing", {
       description: "do the thing",
@@ -103,10 +107,70 @@ describe("RunHandle seam — an injected runner settles the record", () => {
     });
   });
 
+  it("labelled from what it can resolve when the context has no model registry", async () => {
+    // The labels are now resolved at SPAWN, so an unguarded `ctx.modelRegistry`
+    // would fail the tool call itself over display data. A context without one
+    // (a stub, or a partial SDK context) must still start the run: the agent
+    // file's model cannot be resolved, so the answer is what it can name.
+    const existing = new Map(getAllTypes().map((name) => [name, getAgentConfig(name)!]));
+    registerAgents(
+      new Map([
+        ...existing,
+        [
+          "model-in-file",
+          {
+            name: "model-in-file",
+            description: "an agent file that names a model",
+            extensions: true,
+            skills: true,
+            systemPrompt: "",
+            promptMode: "replace",
+            model: "anthropic/claude-haiku-4-5",
+          } as AgentConfig,
+        ],
+      ]),
+    );
+    try {
+      manager = makeManager(runnerWithHandle(fakeHandle(), false));
+      const ctx = { cwd: "/tmp" } as any;
+
+      const id = manager.spawn(mockPi, ctx, "model-in-file", "do the thing", {
+        description: "do the thing",
+        isBackground: true,
+      });
+      const record = manager.getRecord(id)!;
+
+      expect(await record.promise).toBe("fake");
+      expect(record.status).toBe("completed");
+      // Nothing was invented: no parent model, no registry to resolve the
+      // agent file's, so no label rather than a wrong one.
+      expect(record.invocation).toBeUndefined();
+    } finally {
+      registerAgents(existing);
+    }
+  });
+
+  it("disposes a handle with no extension runner, and does not throw", async () => {
+    // A run backed by a file has no extension runner at all (`PaneSession` never
+    // has one), so the shutdown's `session_shutdown` emit has nothing to run
+    // against: the dispose has to fall through to the handle's own `dispose()`.
+    const dispose = vi.fn();
+    manager = makeManager(runnerWithHandle(fakeHandle({ dispose }), false));
+
+    const id = manager.spawn(mockPi, mockCtx, "Explore", "do the thing", {
+      description: "do the thing",
+      isBackground: true,
+    });
+    await manager.getRecord(id)!.promise;
+
+    await expect(manager.dispose()).resolves.toBeUndefined();
+    expect(dispose).toHaveBeenCalledTimes(1);
+  });
+
   it("resumes through the injected runner's resume, not the in-process one", async () => {
     const handle = fakeHandle();
     const runner = runnerWithHandle(handle);
-    manager = managerWith(runner);
+    manager = makeManager(runner);
 
     const id = manager.spawn(mockPi, mockCtx, "Explore", "start", {
       description: "start",
@@ -130,7 +194,7 @@ describe("RunHandle seam — an injected runner settles the record", () => {
     // crash, and relabelling it `error` contradicts what the user was told.
     const handle = fakeHandle();
     let reject!: (error: Error) => void;
-    manager = managerWith({
+    manager = makeManager({
       start: vi.fn(async (_ctx, _type, _prompt, options) => {
         options.onSessionCreated?.(handle);
         return { responseText: "fake", session: handle, aborted: false, steered: false };
@@ -169,7 +233,7 @@ describe("RunHandle seam — an injected runner settles the record", () => {
     const steer = vi.fn(async () => {});
     const handle = fakeHandle({ steer });
     let finish!: (result: RunResult) => void;
-    manager = managerWith({
+    manager = makeManager({
       start: vi.fn(async (_ctx, _type, _prompt, options) => {
         options.onSessionCreated?.(handle);
         return new Promise<RunResult>((resolve) => {

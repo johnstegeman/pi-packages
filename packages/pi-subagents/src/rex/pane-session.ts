@@ -22,9 +22,10 @@
 //     process, so `shutdownChildSession()` has nothing to emit `session_shutdown`
 //     into and degrades to a plain dispose.
 //
-// The three things a file cannot do — steer, abort, dispose's pane calls — arrive
-// as injected functions, so this class never learns how the pane is reached and
-// stays testable without Rex.
+// The two things a file cannot do — steer, abort — arrive as injected functions,
+// so this class never learns how the pane is reached and stays testable without
+// Rex. It injects no close: a pane run's layer is closed by the runner that
+// created it, and `dispose()` here only stops the tail.
 
 import type { AgentSession, AgentSessionEvent } from "@earendil-works/pi-coding-agent";
 import type { RunHandle } from "../types.js";

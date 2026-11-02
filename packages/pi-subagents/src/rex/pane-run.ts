@@ -41,7 +41,7 @@ import { getAgentConfig, getConfig } from "../agent-types.js";
 import { buildParentContext, extractText } from "../context.js";
 import { detectEnv } from "../env.js";
 import { buildMemoryBlock, buildReadOnlyMemoryBlock } from "../memory.js";
-import { describeModel, resolveDefaultModel } from "../model-resolver.js";
+import { describeModel, resolveRunInvocation } from "../model-resolver.js";
 import { getMaxSubagentDepth } from "../nested-tools.js";
 import { sessionTaskDir } from "../output-file.js";
 import { buildAgentPrompt, type PromptExtras } from "../prompts.js";
@@ -115,14 +115,20 @@ const SESSION_FILE_GRACE_MS = 2_000;
 const STEER_STATUS_GRACE_MS = 2_000;
 
 /**
- * How long a close gets on the shutdown path.
+ * How long one close of a run's layer gets — on every path that closes one.
  *
- * Shorter than the default allowance because this one is best-effort by nature: a
- * quit that spent ten seconds on a wedged Rex would delay the exit it is trying
- * to make clean, and a pane left behind by a process that is going away is the
- * lesser evil. Long enough for a healthy server, which answers in milliseconds.
+ * Shorter than `rex`'s default allowance because a close here is best-effort by
+ * nature: an abort, a settled run, or a quit, where a pane left behind by a
+ * process that is going away is the lesser evil. Long enough for a healthy
+ * server, which answers in milliseconds.
+ *
+ * The same number on every path, not only on a shutdown's, because the close is
+ * memoized per run: whichever caller asks first decides how long the shared
+ * promise waits, and that is almost always the abort listener or the settle
+ * path. A ceiling asked for only by `dispose()` would therefore never be the one
+ * that applies — see `teardownClose()`.
  */
-const SHUTDOWN_CLOSE_TIMEOUT_MS = 2_000;
+const CLOSE_TIMEOUT_MS = 2_000;
 
 /** The pane label's task slice: enough to tell two agents apart, short enough for a capsule. */
 const LABEL_DESCRIPTION_CHARS = 60;
@@ -227,12 +233,15 @@ export function createPaneRunner(deps: PaneRunDeps): ManagerRunner {
     // the manager has no handle for it yet, so a quit there would leave a live
     // child in an orphan pane.
     const run = trackRun(inFlight, inputs.agentId, inputs.label);
+    // The place in the cascade is taken BEFORE the launch, not after: two spawns
+    // that both read the size while their panes are being created would be
+    // handed the same bounds and stack on top of each other. Taken out here so
+    // the `finally` can give it back on every exit — a launch that throws used
+    // to keep its place for the life of the process, pushing every later pane
+    // one row further down.
+    const ticket = Symbol(inputs.agentId);
+    live.add(ticket);
     try {
-      // The place in the cascade is taken BEFORE the launch, not after: two
-      // spawns that both read the size while their panes are being created would
-      // be handed the same bounds and stack on top of each other.
-      const ticket = Symbol(inputs.agentId);
-      live.add(ticket);
       const pane = await launchPane({
         deps: paneDeps(deps),
         label: inputs.label,
@@ -241,11 +250,14 @@ export function createPaneRunner(deps: PaneRunDeps): ManagerRunner {
         index: live.size - 1,
       });
       if (pane === undefined) {
-        live.delete(ticket);
         return inProcess(ctx, type, prompt, options, "could not get a pane (creating it failed)");
       }
       return await watch({ deps, warn, live, states, inputs, pane, options, ticket, run });
     } finally {
+      // Released on every exit: `watch()` gives it back too on its way out (a
+      // settled run's capsule is gone), the delete is idempotent, and this is
+      // the arm that covers a launch that threw.
+      live.delete(ticket);
       // Both a no-op when `watch()` already registered the way out, and the
       // reason a run that threw before it got that far cannot strand a dispose.
       run.settle();
@@ -282,8 +294,11 @@ export function createPaneRunner(deps: PaneRunDeps): ManagerRunner {
     const state = states.get(session);
     // Not ours: an in-process handle, or a run another runner owns.
     if (state === undefined) return;
-    const unclosed = await closeRun(state, inFlight.get(state.inputs.agentId), paneDeps(deps));
-    if (unclosed !== undefined) reportUnclosed(warn, state.inputs.label, unclosed);
+    // The register's own entry for this run is the marker a later `closeAll()`
+    // reads too, so the two levers cannot both report the same failed close.
+    const run = inFlight.get(state.inputs.agentId);
+    const unclosed = await closeRun(state, run, paneDeps(deps));
+    if (unclosed !== undefined) reportUnclosed(warn, run ?? state, state.inputs.label, unclosed);
   };
 
   /**
@@ -301,7 +316,7 @@ export function createPaneRunner(deps: PaneRunDeps): ManagerRunner {
     await Promise.all(
       runs.map(async (run) => {
         const unclosed = await closeRun(undefined, run, paneDeps(deps));
-        if (unclosed !== undefined) reportUnclosed(warn, run.label, unclosed);
+        if (unclosed !== undefined) reportUnclosed(warn, run, run.label, unclosed);
       }),
     );
   };
@@ -314,9 +329,10 @@ export function createPaneRunner(deps: PaneRunDeps): ManagerRunner {
  *
  * A thunk rather than the ids, because a resume replaces the pane: the close has
  * to read whichever pane the run has when somebody asks, not the one it had when
- * the thunk was made. `options.timeoutMs` is for the shutdown path.
+ * the thunk was made. It takes no arguments: every caller is a teardown and gets
+ * the same allowance (`CLOSE_TIMEOUT_MS`).
  */
-type CloseThunk = (options?: { timeoutMs?: number }) => Promise<CloseResult>;
+type CloseThunk = () => Promise<CloseResult>;
 
 /**
  * One run between "its pane exists" and "its layer is closed".
@@ -335,6 +351,20 @@ interface InFlightRun {
   closable: Promise<CloseThunk | undefined>;
   /** Resolve {@link closable}, once. */
   settle(close?: CloseThunk): void;
+  /** See {@link CloseReport}. */
+  unclosedReported?: boolean;
+}
+
+/**
+ * Where a failed close is remembered, so one pane is reported once.
+ *
+ * Both shutdown levers reach the same run — `close()` through the record's
+ * handle, `closeAll()` through the register — and both see the same memoized
+ * close result. The marker lives on the run (and on its state for a run the
+ * register no longer holds), so the second lever stays quiet.
+ */
+interface CloseReport {
+  unclosedReported?: boolean;
 }
 
 /**
@@ -378,19 +408,28 @@ async function closeRun(
   deps: PaneDeps,
 ): Promise<CloseResult | undefined> {
   const close = run === undefined ? undefined : await run.closable;
-  if (close !== undefined) return await close({ timeoutMs: SHUTDOWN_CLOSE_TIMEOUT_MS });
+  if (close !== undefined) return await close();
   if (state === undefined) return undefined;
-  return await closeRunPane(deps, state, { timeoutMs: SHUTDOWN_CLOSE_TIMEOUT_MS });
+  return await teardownClose(deps, state);
 }
 
 /**
- * Say so when a pane would not close at shutdown.
+ * Say so when a pane would not close at shutdown — once per pane.
  *
  * Only the shutdown path reports this: there, a layer that is still open means a
- * child that outlives its parent, and nobody will look again.
+ * child that outlives its parent, and nobody will look again. A shutdown uses
+ * both levers (the manager closes each record, then drains what is left), and
+ * they see the same memoized result, so `marker` is what keeps one pane from
+ * producing the same warning twice.
  */
-function reportUnclosed(warn: (message: string) => void, label: string, result: CloseResult): void {
-  if (result.closed) return;
+function reportUnclosed(
+  warn: (message: string) => void,
+  marker: CloseReport,
+  label: string,
+  result: CloseResult,
+): void {
+  if (result.closed || marker.unclosedReported === true) return;
+  marker.unclosedReported = true;
   warn(`the pane for "${label}" could not be closed (${result.reason}); its child may still be running`);
 }
 
@@ -429,7 +468,7 @@ interface RunInputs {
 }
 
 /** The live state of one pane-backed run. */
-interface RunState {
+interface RunState extends CloseReport {
   inputs: RunInputs;
   /** The pane currently running this agent; a resume replaces it. */
   pane: PaneHandle;
@@ -474,11 +513,12 @@ async function compose(
   const agentConfig = getAgentConfig(type);
   const cwd = options.cwd ?? ctx.cwd;
   const configCwd = options.configCwd ?? cwd;
-  const model = options.model ?? resolveDefaultModel(ctx.model, ctx.modelRegistry, agentConfig?.model);
+  // The same resolver `runAgent()` opens its session with: explicit option >
+  // agent file > parent model, and the thinking level the same way.
+  const { model, thinkingLevel: thinking } = resolveRunInvocation({ options, config: agentConfig, ctx });
   if (model === undefined) return { fallback: "could not be given a model for its pane" };
 
   const isolated = options.isolated;
-  const thinking = options.thinkingLevel ?? agentConfig?.thinking;
   const agentId = options.agentId ?? type;
   // The runner's own root session is the fallback, not this `ctx`'s: the
   // transcript store this runner writes to is keyed by the former, and a
@@ -727,13 +767,13 @@ async function watch(args: {
     tail,
     steer: (message) => steerPane(paneDepsHere, state, message),
     abort: async () => {
-      await closeRunPane(paneDepsHere, state);
+      await teardownClose(paneDepsHere, state);
     },
   });
   states.set(session, state);
   // The pane exists and the manager has no handle for it yet: this is the way a
   // shutdown closes it. Registered before the handle is announced, deliberately.
-  run.settle((options) => closeRunPane(paneDepsHere, state, options));
+  run.settle(() => teardownClose(paneDepsHere, state));
   // A child slower than the grace window writes its file later, and the path
   // this run announced is a guess until it does: keep looking, so the live view
   // fills in and the handle names the file the child actually wrote.
@@ -755,7 +795,7 @@ async function watch(args: {
     aborted = true;
     // Closing the layer ends the child, which is what an abort means here: the
     // run is stopped rather than interrupted mid-tool-call.
-    void closeRunPane(paneDepsHere, state);
+    void teardownClose(paneDepsHere, state);
   });
 
   options.onSessionCreated?.(session);
@@ -784,7 +824,7 @@ async function watch(args: {
     stopFollow();
     tail.stop();
     live.delete(ticket);
-    await closeRunPane(paneDepsHere, state);
+    await teardownClose(paneDepsHere, state);
   }
 }
 
@@ -832,12 +872,12 @@ async function relaunch(args: {
   // `state.pane` naming it, a close would otherwise close the pane this resume has
   // just replaced.
   const run = trackRun(inFlight, inputs.agentId, inputs.label);
+  // Taken before the launch, for the same reason as on a spawn, and out here so
+  // the `finally` gives it back on every exit — a resume whose launch throws
+  // must not leave every later pane one row lower.
+  const ticket = Symbol(inputs.agentId);
+  live.add(ticket);
   try {
-    // The cascade slot is taken before the launch, for the same reason as on a
-    // spawn: a resume that read the size while its pane was being made would be
-    // handed the bounds its neighbour already took.
-    const ticket = Symbol(inputs.agentId);
-    live.add(ticket);
     const pane = await launchPane({
       deps: paneDepsHere,
       label: inputs.label,
@@ -846,16 +886,16 @@ async function relaunch(args: {
       index: live.size - 1,
     });
     if (pane === undefined) {
-      live.delete(ticket);
       throw new Error(`the pane for "${inputs.label}" could not be created; the agent was not resumed`);
     }
     reportMinimize(warn, inputs, pane);
     state.pane = pane;
     // A new layer, so a new close: the previous run's promise has settled.
     state.closing = undefined;
-    run.settle((options) => closeRunPane(paneDepsHere, state, options));
+    run.settle(() => teardownClose(paneDepsHere, state));
     return await relaunchWatch({ deps, warn, live, inputs, state, options, ticket });
   } finally {
+    live.delete(ticket);
     run.settle();
     inFlight.delete(inputs.agentId);
   }
@@ -891,7 +931,7 @@ async function relaunchWatch(args: {
   let aborted = options.signal?.aborted === true;
   const unlisten = forwardAbort(options.signal, () => {
     aborted = true;
-    void closeRunPane(paneDepsHere, state);
+    void teardownClose(paneDepsHere, state);
   });
   try {
     const outcome = await firstOutcome({
@@ -918,7 +958,7 @@ async function relaunchWatch(args: {
     unlisten();
     state.tail.stop();
     live.delete(ticket);
-    await closeRunPane(paneDepsHere, state);
+    await teardownClose(paneDepsHere, state);
   }
 }
 
@@ -1337,7 +1377,7 @@ async function steerableState(deps: PaneDeps, blockId: string): Promise<ProcessS
 // ---------------------------------------------------------------------------
 
 /**
- * Close the run's current layer, once.
+ * Close the run's current layer, once, on the allowance every teardown gets.
  *
  * An abort closes the layer and then the settle path closes it again, and a
  * dispose racing either of them wants to know when it is done: so the call is
@@ -1346,15 +1386,13 @@ async function steerableState(deps: PaneDeps, blockId: string): Promise<ProcessS
  * agent's pane creation. A resume clears the promise, because its pane is a new
  * one.
  *
- * The first caller's `timeoutMs` is the one that applies — the promise is shared,
- * and a shutdown close is the only caller that asks for a short one.
+ * Every caller asks for the same short allowance, which is what makes it
+ * effective: the promise is shared, so the FIRST caller's deadline is the one
+ * that applies, and the abort listener or the settle path's `finally` is almost
+ * always first — which is why none of them may ask for the default one.
  */
-function closeRunPane(
-  deps: PaneDeps,
-  state: RunState,
-  options: { timeoutMs?: number } = {},
-): Promise<CloseResult> {
-  state.closing ??= closePane(deps, state.pane.layerId, options);
+function teardownClose(deps: PaneDeps, state: RunState): Promise<CloseResult> {
+  state.closing ??= closePane(deps, state.pane.layerId, { timeoutMs: CLOSE_TIMEOUT_MS });
   return state.closing;
 }
 

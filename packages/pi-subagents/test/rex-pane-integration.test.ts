@@ -22,7 +22,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { AgentManager, type ManagerRunner } from "../src/agent-manager.js";
 import { resetRexDetectionForTests, rexPanesEnabled } from "../src/rex/detect.js";
 import { createPaneRunner, type PaneRunDeps } from "../src/rex/pane-run.js";
-import { execRex } from "../src/rex/rex-cli.js";
+import { execRex, type RexExec, type RexExecResult } from "../src/rex/rex-cli.js";
 import { getSessionContextPercent } from "../src/usage.js";
 import { type FakeRex, installFakeRex } from "./helpers/rex-pane-harness.js";
 
@@ -445,11 +445,49 @@ describe("shutting down with a run still in its pane", () => {
 
     expect(await disposeWithin(5_000)).toBe("disposed");
 
-    expect(warnings.some((message) => /could not be closed/.test(message))).toBe(true);
-    expect(warnings.join("\n")).toContain("internal: the server is wedged");
+    // Once: the shutdown closes the record's handle and then drains the
+    // register, and both see the same memoized failure.
+    const unclosed = warnings.filter((message) => /could not be closed/.test(message));
+    expect(unclosed).toHaveLength(1);
+    expect(unclosed[0]).toContain("internal: the server is wedged");
     // The run is still terminal: the record is not left looking like it is live.
     expect(record.status).toBe("stopped");
     // Let the result file settle the run before the next test reuses the harness.
+    await record.promise.catch(() => {});
+  }, 20_000);
+
+  it("closes a pane on the shutdown ceiling, not the CLI's default allowance", async () => {
+    // The close is memoized per run, and the run's own path (the abort listener,
+    // or the settle path's `finally`) is always the first to ask — so a dispose
+    // that asked for a short close of its own would inherit whatever deadline
+    // that first caller set. Ten seconds of a wedged server on the quit path is
+    // exactly what the ceiling exists to prevent, which is why every teardown
+    // close carries it.
+    process.env.STUB_MODE = "hold";
+    const allowances: (number | undefined)[] = [];
+    const exec: RexExec = async (args, options): Promise<RexExecResult> => {
+      if (args[4] === "session.close_layer") allowances.push(options?.timeoutMs);
+      return execRex(args, options);
+    };
+    managerWith(async () => paneRunner({ exec }), inProcessStub());
+
+    const { pi, ctx } = harness();
+    const id = manager!.spawn(pi, ctx, "Explore", "do it", {
+      description: "the only one",
+      isBackground: true,
+      model: MODEL,
+    });
+    const record = manager!.getRecord(id)!;
+    await manager!.awaitStartup(id);
+    for (let i = 0; i < 500 && record.session === undefined; i++) {
+      await new Promise((resolve) => setTimeout(resolve, 10));
+    }
+    expect(record.session).toBeDefined();
+
+    expect(await disposeWithin(5_000)).toBe("disposed");
+
+    // Said, not defaulted: `undefined` is `closePane`'s ten-second allowance.
+    expect(allowances).toEqual([2_000]);
     await record.promise.catch(() => {});
   }, 20_000);
 

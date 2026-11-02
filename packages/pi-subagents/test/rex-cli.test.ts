@@ -87,6 +87,9 @@ function fakeRexSource(): string {
     "    out({ revision: 2 });",
     '  } else if (method === "session.close_layer") {',
     '    if (env.REX_FAKE_CLOSE_LAYER === "not_found") fail("not_found: no layer", 1);',
+    // A failure that merely *mentions* something missing: not the `not_found`
+    // code, so not a pane that is already gone.
+    '    if (env.REX_FAKE_CLOSE_LAYER === "not_found_text") fail("block target layer:a not found", 3);',
     '    if (env.REX_FAKE_CLOSE_LAYER === "error") fail("internal: the server is wedged", 1);',
     // A server that takes the request and never answers.
     '    if (env.REX_FAKE_CLOSE_LAYER === "hang") Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 5000);',
@@ -496,10 +499,23 @@ describe("closePane — cleanup that tolerates a pane already gone", () => {
 
   it("reports a layer that is already gone as closed", async () => {
     // The ordinary answer: `exit.on_completion` closes a pane with its child, so
-    // `not found` is the state the caller wanted, not a failure to report.
+    // the server's `not_found` code is the state the caller wanted, not a
+    // failure to report.
     process.env.REX_FAKE_CLOSE_LAYER = "not_found";
 
     await expect(closePane(deps(), "layer:a")).resolves.toEqual({ closed: true });
+  });
+
+  it("does not read a failure that merely mentions something missing as a closed pane", async () => {
+    // The other direction of the same rule: matching the words rather than the
+    // code would count a refused close as a cleanup it never performed, and a
+    // live child would be left in a pane nobody looks at again.
+    process.env.REX_FAKE_CLOSE_LAYER = "not_found_text";
+
+    await expect(closePane(deps(), "layer:a")).resolves.toEqual({
+      closed: false,
+      reason: "block target layer:a not found",
+    });
   });
 
   it("reports a close the server refused, with its own words", async () => {

@@ -26,6 +26,7 @@ import type { ManagerRunner } from "../src/agent-manager.js";
 import { getAgentConversation, type RunOptions } from "../src/agent-runner.js";
 import { getAgentConfig, getAllTypes, registerAgents } from "../src/agent-types.js";
 import { sessionTaskDir } from "../src/output-file.js";
+import { paneBoundsForIndex } from "../src/rex/launcher.js";
 import { createPaneRunner, type PaneRunDeps } from "../src/rex/pane-run.js";
 import { execRex } from "../src/rex/rex-cli.js";
 import type { AgentConfig, RunHandle } from "../src/types.js";
@@ -465,6 +466,30 @@ describe("steering", () => {
   });
 });
 
+describe("a pane that will not close", () => {
+  it("is reported once, though close() and closeAll() both see it", async () => {
+    // Both shutdown levers reach the same run — the record's handle and the
+    // runner's own register — and the close is memoized, so they get the same
+    // failure. Reported from both, a user sees the same warning twice about one
+    // pane, which reads as two panes.
+    process.env.STUB_MODE = "result-early";
+    process.env.REX_FAKE_CLOSE_LAYER = "error";
+    const { runner: run, ctx, options } = runner();
+
+    const started = run.start(ctx, "Explore", "find the pane", options);
+    const session = await waitForSession();
+
+    await run.close(session);
+    await run.closeAll();
+
+    const unclosed = warnings.filter((message) => /could not be closed/.test(message));
+    expect(unclosed).toHaveLength(1);
+    expect(unclosed[0]).toContain("internal: the server is wedged");
+    // The run still settles from its result file, with the child it always had.
+    expect((await started).responseText).toBe("the answer");
+  }, 20_000);
+});
+
 describe("abort", () => {
   it("closes the layer and settles as an aborted run rather than a failure", async () => {
     // The child is still alive when the abort lands, so only the abort can end
@@ -624,6 +649,26 @@ describe("falling back to the in-process runner", () => {
     expect(fake.calls()).toEqual([]);
   });
 
+  it("gives the cascade place back when a launch falls through to in-process", async () => {
+    // The place a pane takes is what puts the next one a row lower. A run that
+    // never got a pane has no capsule to give up later, so it must not hold one
+    // either — otherwise every spawn after it is placed one row too low for the
+    // rest of the process's life.
+    process.env.REX_FAKE_NEW_LAYER = "fail";
+    const fallback = fakeFallback();
+    const { runner: run, ctx, options } = runner({ fallback });
+
+    const first = await run.start(ctx, "Explore", "no pane", options);
+    expect(first.paneFallback).toBeDefined();
+    delete process.env.REX_FAKE_NEW_LAYER;
+    await run.start(ctx, "Explore", "a pane this time", { ...options, agentId: "agent-2" });
+
+    const creates = fake.paneCalls().filter((call) => call[4] === "session.new_layer");
+    expect(creates).toHaveLength(2);
+    // The one that succeeded is the first live pane, so it sits at the origin.
+    expect(JSON.parse(creates[1][5]).bounds).toEqual(paneBoundsForIndex(0));
+  });
+
   it("runs the agent in-process when no model could be resolved for the child", async () => {
     const fallback = fakeFallback();
     const { runner: run, ctx, options } = runner({ fallback }, { model: undefined });
@@ -632,6 +677,47 @@ describe("falling back to the in-process runner", () => {
 
     expect(result.responseText).toBe("in-process");
     expect(fake.calls()).toEqual([]);
+  });
+});
+
+describe("a launch that throws", () => {
+  it("does not leave its place in the cascade taken", async () => {
+    // `start()` takes the cascade place before the launch and gives it back in
+    // its `finally` — the only arm that runs when the launch itself throws, here
+    // through inputs the child's command cannot be built from. A leaked place
+    // puts every later pane one row lower, for the life of the process.
+    let binaryBroken = true;
+    const deps: PaneRunDeps = {
+      exec: execRex,
+      sessionId: SESSION,
+      windowId: WINDOW,
+      rootSessionId: "root-1",
+      agentSessionDir: sessionDir,
+      get piBinary(): string {
+        if (binaryBroken) throw new Error("the pi binary could not be resolved");
+        return fake.stubBinary;
+      },
+      onWarning: (message) => warnings.push(message),
+    };
+    const run = createPaneRunner(deps);
+    const { pi, ctx } = harness();
+    const options = {
+      pi,
+      agentId: "agent-1",
+      handle: "explore",
+      description: "find the pane",
+      model: MODEL,
+    } as RunOptions;
+
+    await expect(run.start(ctx, "Explore", "find the pane", options)).rejects.toThrow(/pi binary/);
+
+    binaryBroken = false;
+    const result = await run.start(ctx, "Explore", "find the pane", { ...options, agentId: "agent-2" });
+    expect(result.responseText).toBe("the answer");
+
+    const creates = fake.paneCalls().filter((call) => call[4] === "session.new_layer");
+    expect(creates).toHaveLength(1);
+    expect(JSON.parse(creates[0][5]).bounds).toEqual(paneBoundsForIndex(0));
   });
 });
 

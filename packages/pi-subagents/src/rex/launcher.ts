@@ -816,8 +816,12 @@ export async function closePane(
     );
     if (result.code === 0) return { closed: true };
     // Already gone: the outcome this call exists to produce, whichever side
-    // closed it first.
-    if (/not[_ ]?found/i.test(result.stderr)) return { closed: true };
+    // closed it first. Anchored on the CLI's own error code rather than on the
+    // words "not found" anywhere in the output: a refused close whose message
+    // happened to mention something missing (a block id in a diagnostic, a
+    // server's prose) is still a refused close, and reading it as a success is
+    // the one mistake that leaves a live child in an orphan pane.
+    if (/^Error:\s*not_found\b/i.test(result.stderr)) return { closed: true };
     return { closed: false, reason: failureReason(result.stderr, `rex exited with status ${result.code}`) };
   } catch (error) {
     // `execRex` never rejects, but the seam is injectable.

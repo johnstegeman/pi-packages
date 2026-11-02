@@ -142,23 +142,39 @@ describe("PaneSession", () => {
     });
   });
 
-  it("forwards the tail's events, and stops delivering after the unsubscribe", async () => {
+  it("forwards the tail's events, and stops delivering to the listener that unsubscribed", async () => {
     const path = copyFixture();
     const { session, tail: t } = paneSession(path);
     const events: AgentSessionEvent[] = [];
+    // Two subscriptions, because one listener cannot tell "delivered to
+    // everyone" from "delivered to the only one there is": an unsubscribe that
+    // cleared the whole set would look identical.
+    const other: AgentSessionEvent[] = [];
     const unsubscribe = session.subscribe(event => events.push(event));
+    session.subscribe(event => other.push(event));
     t.start();
 
     appendFileSync(path, line(userEntry("f001", LEAF)) + line(assistantEntry("f002", "f001")));
     await vi.waitFor(() => {
       expect(events.map(e => e.type)).toEqual(["message_end", "message_end", "turn_end"]);
+      expect(other.map(e => e.type)).toEqual(["message_end", "message_end", "turn_end"]);
     }, WAIT);
 
     unsubscribe();
     appendFileSync(path, line(userEntry("f003", "f002")));
-    await new Promise(resolve => setTimeout(resolve, 400));
+    await vi.waitFor(() => {
+      expect(other.map(e => e.type)).toEqual(["message_end", "message_end", "turn_end", "message_end"]);
+    }, WAIT);
 
+    // The unsubscribed listener heard nothing after its unsubscribe; the other
+    // subscription on the same tail is untouched.
     expect(events.map(e => e.type)).toEqual(["message_end", "message_end", "turn_end"]);
+
+    // And a disposed handle is still readable — the class promises it, because
+    // the tail catches up from disk on a read.
+    session.dispose();
+    appendFileSync(path, line(userEntry("f004", "f003")));
+    expect(session.messages.map(m => m.role).slice(-1)).toEqual(["user"]);
   });
 
   it("reports the tail's token totals as session stats once a usage entry exists", () => {
