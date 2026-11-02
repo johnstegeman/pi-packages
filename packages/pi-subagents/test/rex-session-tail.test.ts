@@ -46,6 +46,7 @@ beforeEach(() => {
 afterEach(() => {
   tail?.stop();
   tail = undefined;
+  vi.restoreAllMocks();
   rmSync(dir, { recursive: true, force: true });
 });
 
@@ -88,6 +89,46 @@ function assistantEntry(id: string, parentId: string | null, usage = { input: 10
         cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
       },
       stopReason: "stop",
+      timestamp: 1767225610000,
+    },
+  };
+}
+
+/**
+ * The same assistant entry with no `usage` object at all: `usage` is required on
+ * pi's own assistant message, so only a hand-written or half-flushed file can
+ * produce one, and the turn is still a turn.
+ */
+function assistantEntryWithoutUsage(id: string, parentId: string | null): unknown {
+  return {
+    type: "message",
+    id,
+    parentId,
+    timestamp: "2026-01-01T00:00:10.000Z",
+    message: {
+      role: "assistant",
+      content: [{ type: "text", text: `answer ${id}` }],
+      api: "anthropic-messages",
+      provider: "anthropic",
+      model: "claude-sonnet-4-5",
+      stopReason: "stop",
+      timestamp: 1767225610000,
+    },
+  };
+}
+
+function toolResultEntry(id: string, parentId: string, text: string): unknown {
+  return {
+    type: "message",
+    id,
+    parentId,
+    timestamp: "2026-01-01T00:00:10.000Z",
+    message: {
+      role: "toolResult",
+      toolCallId: "call-9",
+      toolName: "read",
+      content: [{ type: "text", text }],
+      isError: false,
       timestamp: 1767225610000,
     },
   };
@@ -247,6 +288,43 @@ describe("SessionTail", () => {
     expect(snapshot.usage).toEqual({ input: 10, output: 5, cacheWrite: 0 });
   });
 
+  it("starts over when the file is rewritten shorter, instead of stalling past its end", () => {
+    const path = copyFixture();
+    const t = new SessionTail(path);
+    tail = t;
+    t.start();
+    expect(t.read().messages.map(m => m.role)).toEqual(ROLES);
+
+    // An in-place rewrite, the way a resume or a hand edit leaves the file: it
+    // is now shorter than the bytes already read, so reading on from the old
+    // offset would return 0 for ever and the snapshot would never change again.
+    writeFileSync(path, line(userEntry("g001", null)) + line(assistantEntry("g002", "g001")));
+
+    const snapshot = t.read();
+    expect(snapshot.messages.map(m => m.role)).toEqual(["user", "assistant"]);
+    expect(snapshot.turns).toBe(1);
+    expect(snapshot.usage).toEqual({ input: 10, output: 5, cacheWrite: 0 });
+
+    // The reset cleared the offset too, so the tail keeps following the new file.
+    appendFileSync(path, line(assistantEntry("g003", "g002")));
+    expect(t.read().turns).toBe(2);
+  });
+
+  it("counts an assistant turn that carries no usage, and adds nothing to the spend", () => {
+    const path = copyFixture();
+    const t = new SessionTail(path);
+    tail = t;
+    t.start();
+
+    appendFileSync(path, line(assistantEntryWithoutUsage("f001", LEAF)));
+
+    const snapshot = t.read();
+    expect(snapshot.messages).toHaveLength(ROLES.length + 1);
+    // The message is what the turn was, so the turn counts even without spend.
+    expect(snapshot.turns).toBe(4);
+    expect(snapshot.usage).toEqual({ input: 2130, output: 132, cacheWrite: 400 });
+  });
+
   it("stops reporting appends after stop()", async () => {
     const path = copyFixture();
     const t = new SessionTail(path);
@@ -260,8 +338,84 @@ describe("SessionTail", () => {
     await new Promise(resolve => setTimeout(resolve, 400));
 
     expect(events).toHaveLength(0);
+
+    // A stopped tail still catches up for the snapshot — that catch-up must stay
+    // silent, or reading after the run would replay it into the subscribers the
+    // watcher can no longer cancel.
+    expect(t.read().messages.map(m => m.role)).toEqual([...ROLES, "assistant"]);
+    expect(events).toHaveLength(0);
   });
 
+  it("does not announce entries a later line in the same pass branched away from", async () => {
+    const path = copyFixture();
+    const t = new SessionTail(path);
+    tail = t;
+    const events: AgentSessionEvent[] = [];
+    t.subscribe(e => events.push(e));
+    t.start();
+
+    // One write, so all three lines land in a single pass: a compaction and an
+    // assistant turn continuing the fixture's leaf, then a user message parented
+    // to the first user message, which abandons both. Neither may be announced —
+    // a `turn_end` for a message the snapshot no longer holds would make the
+    // event stream disagree with `turns` for the rest of the run.
+    appendFileSync(
+      path,
+      line(compactionEntry("f001", LEAF, 42000)) + line(assistantEntry("f002", "f001")) + line(userEntry("f003", "e0a1")),
+    );
+
+    await vi.waitFor(() => {
+      expect(events.map(e => e.type)).toEqual(["message_end"]);
+    }, WAIT);
+    // And nothing from the abandoned branch follows on a later tick either.
+    await new Promise(resolve => setTimeout(resolve, 400));
+    expect(events.map(e => e.type)).toEqual(["message_end"]);
+    expect(roles(t)).toEqual(["system", "user", "user"]);
+    expect(t.read().turns).toBe(0);
+  });
+
+  it("keeps fanning out when one subscriber throws, and delivers the rest of the batch", async () => {
+    const path = copyFixture();
+    const t = new SessionTail(path);
+    tail = t;
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const events: AgentSessionEvent[] = [];
+    // First in the fan-out, so every event of the batch passes through it.
+    t.subscribe(() => {
+      throw new Error("subscriber exploded");
+    });
+    t.subscribe(e => events.push(e));
+    t.start();
+
+    appendFileSync(path, line(userEntry("f001", LEAF)) + line(assistantEntry("f002", "f001")));
+
+    await vi.waitFor(() => {
+      expect(events.map(e => e.type)).toEqual(["message_end", "message_end", "turn_end"]);
+    }, WAIT);
+    // One warning per event it refused, and every event still reached the other
+    // listener: a subscriber's own failure is reported, not swallowed and not
+    // allowed to take the rest of the batch with it.
+    expect(warn).toHaveBeenCalledTimes(events.length);
+    expect(warn.mock.calls[0][0]).toContain("subscriber exploded");
+  });
+
+  it("joins a line that spans many chunk reads into one message", () => {
+    const path = copyFixture();
+    const t = new SessionTail(path);
+    tail = t;
+    t.start();
+
+    // A tool result whose payload is bigger than the 64 KiB read chunk: it
+    // arrives over several reads with no newline in between, and is one message.
+    const payload = "x".repeat(200 * 1024);
+    appendFileSync(path, line(toolResultEntry("f001", LEAF, payload)));
+
+    const snapshot = t.read();
+    expect(snapshot.messages).toHaveLength(ROLES.length + 1);
+    const last = snapshot.messages[snapshot.messages.length - 1];
+    if (last.role !== "toolResult") throw new Error("expected a toolResult");
+    expect(last.content[0]).toEqual({ type: "text", text: payload });
+  });
   it("takes a listener out of the fan-out when its unsubscribe runs", async () => {
     const path = copyFixture();
     const t = new SessionTail(path);

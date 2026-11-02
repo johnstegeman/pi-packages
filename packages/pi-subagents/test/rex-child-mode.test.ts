@@ -90,7 +90,6 @@ function makeChildPi() {
     return () => {};
   });
   pi.sendUserMessage = vi.fn();
-  pi.getThinkingLevel = vi.fn(() => "medium");
   const send = async (event: string, payload: Record<string, unknown> = {}, c: any = ctx()) => {
     for (const handler of handlers.get(event) ?? []) await handler({ type: event, ...payload }, c);
   };
@@ -387,6 +386,31 @@ describe("installChildMode", () => {
     await send("session_start");
 
     expect(pi.setActiveTools).toHaveBeenCalledWith(["read"]);
+  });
+
+  it("adds a tool registered between session_start and turn_end to the active set", async () => {
+    const dir = hermetic();
+    const { pi, send } = makeChildPi();
+    // An extension that registers late — pi-mcp connects on `session_start` — is
+    // in the registry but not yet in the active set, which is why the scope is
+    // re-derived at every `turn_end` as well as at `session_start`.
+    let registry = [toolInfo("read", "builtin:read")];
+    pi.getAllTools = vi.fn(() => registry);
+    const applied: string[][] = [];
+    pi.setActiveTools = vi.fn((names: string[]) => {
+      applied.push([...names]);
+    });
+    pi.getActiveTools = vi.fn(() => applied[applied.length - 1] ?? []);
+    installChildMode(pi, specFor(dir, { allowedSubagents: false }));
+
+    await send("session_start");
+    expect(applied).toEqual([["read"]]);
+
+    registry = [...registry, toolInfo("mcp_query", "/ext/mcp/index.ts")];
+    await send("turn_end", {});
+
+    // The late arrival lands inside the scope instead of next to it.
+    expect(applied.at(-1)).toEqual(["read", "mcp_query"]);
   });
 
   it("does not re-set an active list that has not changed", async () => {

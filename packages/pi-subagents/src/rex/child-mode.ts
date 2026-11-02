@@ -14,8 +14,12 @@
 //   - the turn cap still binds, because the child's own settings hold the
 //     project default the spec deliberately does not carry;
 //   - the run reports once. At `agent_settled` the child writes its result file
-//     (atomically, before shutting down) and then calls `ctx.shutdown()` — which
-//     is what actually ends the session and lets Rex close the pane.
+//     (atomically) and then calls `ctx.shutdown()`, which is what actually ends
+//     the session and lets Rex close the pane. The write is guarded and the
+//     shutdown is not: a result that cannot be written — a full disk, a task
+//     directory removed under us — is logged rather than filed as an answer, and
+//     the process still ends, because a child that outlives its run leaves the
+//     parent with nothing to read and the pane with no exit to notice.
 //
 // `index.ts` calls `installChildMode()` and returns immediately; nothing in the
 // root-manager registration below it runs in a child. That is the rule this file
