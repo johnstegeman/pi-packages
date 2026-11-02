@@ -72,6 +72,8 @@ The message is typed as one line: a message carrying a newline or any other cont
 
 **Resuming** relaunches the child on its own session file (`--session <file>`) in a fresh pane. It is the same conversation continued under a second process, which is why a pane agent stays resumable after its pane is gone — `Agent({ resume })` and `@handle` work exactly as they do in-process.
 
+**Structured output** works the same way: for `agent({ schema })` — and for a workflow step that passes a schema — the parent writes the caller's schema beside the child's prompt, the child recompiles it with the same validator and answers through its `StructuredOutput` tool, and the validated payload comes back in the result file's `structuredJson`. A schema the parent cannot hand over at all (an unusable task directory, a file it cannot write) sends that run **in-process** with the reason on the record (`ran in-process: could not be handed its structured-output schema (…)`) rather than launching a child without the tool, and a child that still cannot apply the file reports the problem as the run's `failure` instead of quietly answering in prose.
+
 ## What an agent file can confine in a pane
 
 Confinement is reproduced as `pi` flags, because the child is a normal `pi` and nothing else can narrow it. The mapping mirrors the in-process runner, and the tests drive it from the same fixture agent files the in-process tests use.

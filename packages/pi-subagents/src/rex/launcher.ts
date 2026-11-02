@@ -16,7 +16,7 @@
 // up as a failing test rather than as a quietly less-confined child.
 
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
-import { join, resolve, sep } from "node:path";
+import { dirname, join, resolve, sep } from "node:path";
 import {
   extensionCanonicalName,
   extensionCanonicalNames,
@@ -294,10 +294,16 @@ export function writeChildFiles(input: {
  * path is still available rather than discovered by a child that has already
  * started.
  *
+ * The directory is created here, not by the caller: this runs before anything
+ * else touches `<taskDir>/<agentId>/` (`sessionTaskDir()` creates only
+ * `<…>/tasks`), and a writer that owns its own directory is one a caller cannot
+ * re-order into an `ENOENT` that would quietly cost the whole run its pane.
+ *
  * Returns the problem, or undefined when the file is good.
  */
 export function writeStructuredSchema(path: string, schema: CompiledSchema): string | undefined {
   try {
+    mkdirSync(dirname(path), { recursive: true });
     writeFileSync(path, JSON.stringify(schema.schema, null, 2), "utf-8");
     const verdict = compileJsonSchema(JSON.parse(readFileSync(path, "utf-8")));
     return verdict.ok ? undefined : verdict.message;
@@ -405,6 +411,7 @@ export function childSpecFromSpawn(input: {
   if (extSelectors && extSelectors.length > 0) spec.extSelectors = extSelectors;
   return spec;
 }
+
 /**
  * The trust answer a pane child is launched with. `-a` trusts the project's
  * `.pi` files for the run, `-na` ignores them — the same two answers pi offers a

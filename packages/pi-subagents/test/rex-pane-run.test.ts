@@ -18,7 +18,7 @@
  *   - abort closes the layer.
  */
 
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -220,6 +220,32 @@ describe("a pane run that succeeds", () => {
     expect(usage).toEqual([{ input: 10, output: 20, cacheWrite: 5, cacheRead: 1, cost: 0.25 }]);
     // No tool calls were made, so no activity is invented.
     expect(toolActivity).toEqual([]);
+  });
+
+  it("hands a first spawn its schema file, creating the directory it goes in", async () => {
+    // The normal case for `agent({ schema })`: a fresh agent id has no directory
+    // under the task dir (`sessionTaskDir()` creates only `<…>/tasks`). A writer
+    // that assumed one exists cost every structured run its pane.
+    const compiled = compileJsonSchema({
+      type: "object",
+      properties: { answer: { type: "string" } },
+      required: ["answer"],
+    });
+    if (!compiled.ok) throw new Error(compiled.message);
+    const { runner: run, ctx, options } = runner({}, { structuredOutput: compiled.compiled });
+
+    const result = await run.start(ctx, "Explore", "find the pane", options);
+
+    // A pane, not the in-process fallback: the spawn was launched, minimized and
+    // settled from the child's own result file.
+    expect(result.responseText).toBe("the answer");
+    expect(result.paneFallback).toBeUndefined();
+    expect(methods()).toEqual(["session.new_layer", "session.set_layer_state", "session.close_layer"]);
+    const dir = join(sessionTaskDir(workDir, "root-1"), "agent-1");
+    expect(JSON.parse(readFileSync(join(dir, "spec.json"), "utf-8")).structuredSchemaPath).toBe(
+      join(dir, "schema.json"),
+    );
+    expect(JSON.parse(readFileSync(join(dir, "schema.json"), "utf-8"))).toEqual(compiled.compiled.schema);
   });
 
   it("relays structured output and its retry flag from the result file", async () => {
@@ -582,8 +608,10 @@ describe("falling back to the in-process runner", () => {
     // proves the file first, so this falls back while the in-process path is
     // still available.
     const fallback = fakeFallback();
-    // A directory where the schema file must go: the write cannot land.
-    mkdirSync(join(sessionTaskDir(workDir, "root-1"), "agent-1", "schema.json"), { recursive: true });
+    // A *file* where the agent's directory must go, so the schema cannot be
+    // written at all. Deliberately not a directory at the schema path: that
+    // would create `<taskDir>/<agentId>/` and hide an ordering bug in the writer.
+    writeFileSync(join(sessionTaskDir(workDir, "root-1"), "agent-1"), "not a directory", "utf-8");
     const compiled = compileJsonSchema({ type: "object" });
     if (!compiled.ok) throw new Error(compiled.message);
     const { runner: run, ctx, options } = runner({ fallback }, { structuredOutput: compiled.compiled });
