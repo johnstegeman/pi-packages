@@ -33,6 +33,7 @@ import { describeModel, type ModelRegistry, resolveModel } from "./model-resolve
 import { checkModelScope, isScopeModelsEnabled, setScopeModelsEnabled } from "./model-scope.js";
 import { getMaxSubagentDepth, setMaxSubagentDepth } from "./nested-tools.js";
 import { createOutputFilePath, ensureOutputFile, getOutputTranscriptDefault, sessionTaskDir, setOutputTranscriptDefault, streamToOutputFile, writeInitialEntry } from "./output-file.js";
+import { installChildMode, readChildSpec } from "./rex/child-mode.js";
 import type { RexPanesSetting } from "./rex/detect.js";
 import { SubagentScheduler } from "./schedule.js";
 import { resolveStorePath, ScheduleStore } from "./schedule-store.js";
@@ -324,6 +325,17 @@ export default function (pi: ExtensionAPI) {
   // would create another manager and leak handlers. Nested orchestration is
   // injected as scoped custom tools by the existing manager instead.
   if (inChildSessionContext()) return;
+
+  // A subagent running as a real `pi` in a Rex pane loads this extension too. It
+  // is not a second root manager: it reads the spec its parent wrote, installs
+  // child mode (tool scope, turn cap, one result file, self-shutdown) and stops
+  // before any of the registration below runs. `readChildSpec()` deletes the
+  // marker it reads, so nothing this child starts inherits its spec.
+  const childSpec = readChildSpec();
+  if (childSpec) {
+    installChildMode(pi, childSpec);
+    return;
+  }
 
   // ---- Register custom notification renderer ----
   pi.registerMessageRenderer<NotificationDetails>(
