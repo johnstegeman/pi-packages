@@ -123,6 +123,45 @@ describe("RunHandle seam — an injected runner settles the record", () => {
     expect(record?.result).toBe("resumed by the fake runner");
   });
 
+  it("leaves a stopped record stopped when the resume unwinds afterwards", async () => {
+    // A stop is recorded the moment it lands; the resume then rejects with
+    // whatever the abort caused — a pane run ends by having its layer closed,
+    // so it reports "exited without writing its result file". That is not a
+    // crash, and relabelling it `error` contradicts what the user was told.
+    const handle = fakeHandle();
+    let reject!: (error: Error) => void;
+    manager = managerWith({
+      start: vi.fn(async (_ctx, _type, _prompt, options) => {
+        options.onSessionCreated?.(handle);
+        return { responseText: "fake", session: handle, aborted: false, steered: false };
+      }),
+      resume: vi.fn(
+        () =>
+          new Promise<{ text: string }>((_resolve, fail) => {
+            reject = fail;
+          }),
+      ),
+    });
+
+    const id = manager.spawn(mockPi, mockCtx, "Explore", "start", {
+      description: "start",
+      isBackground: true,
+    });
+    await manager.getRecord(id)!.promise;
+
+    const resuming = manager.resume(id, "again");
+    // The record is "running" for as long as the resume is in flight, which is
+    // the state `/agents` stop acts on.
+    await Promise.resolve();
+    expect(manager.getRecord(id)!.status).toBe("running");
+    expect(manager.abort(id)).toBe(true);
+    reject(new Error("the agent's pi exited with status 143 without writing its result file"));
+    const record = await resuming;
+
+    expect(record?.status).toBe("stopped");
+    expect(record?.error).toBeUndefined();
+  });
+
   it("steers the live run through the record's handle", async () => {
     // `steer_subagent`, `@handle`, the viewer's composer and nested delegation
     // all go through the manager, which must reach the run — whatever carries

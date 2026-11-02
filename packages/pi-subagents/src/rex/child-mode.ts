@@ -86,24 +86,6 @@ export interface ChildRunResult {
 }
 
 /**
- * True once this extension has installed child mode in this process.
- *
- * The environment marker is the authority during startup (and `detect.ts` reads
- * it for the same reason); this flag is what the rest of the process can ask
- * after the marker has been deleted.
- */
-let childMode = false;
-
-export function isChildMode(): boolean {
-  return childMode;
-}
-
-/** Test seam: forget that child mode was installed, so a suite can observe it again. */
-export function resetChildModeForTests(): void {
-  childMode = false;
-}
-
-/**
  * Read the child's spec, and delete the variable that named it.
  *
  * The variable is the marker that tells a child what it is, and it is inherited
@@ -221,7 +203,6 @@ export function writeChildResult(resultPath: string, result: ChildRunResult): vo
  * children of its own.
  */
 export function installChildMode(pi: ExtensionAPI, spec: ChildSpec): void {
-  childMode = true;
   warnAboutConfigCwd(spec);
 
   const state: RunState = {
@@ -232,6 +213,7 @@ export function installChildMode(pi: ExtensionAPI, spec: ChildSpec): void {
     retried: false,
     assistantTexts: [],
     usage: { input: 0, output: 0, cacheWrite: 0 },
+    lastText: "",
   };
 
   const delegation = installDelegation(pi, spec);
@@ -243,7 +225,7 @@ export function installChildMode(pi: ExtensionAPI, spec: ChildSpec): void {
   const injected = [...delegation.names, ...structured.names, "codemode"];
   installToolScope(pi, spec, injected);
   installTurnLimit(pi, spec, state);
-  installSettler(pi, spec, state, structured.capture);
+  installSettler(pi, spec, state, structured);
   installDelegationShutdown(pi, delegation.manager);
 }
 
@@ -275,6 +257,14 @@ interface RunState {
   usage: { input: number; output: number; cacheWrite: number };
   /** The final assistant message's stop reason, for the failure field. */
   lastStop?: { stopReason: string; errorMessage?: string };
+  /**
+   * The final assistant message's *own* text, empty included.
+   *
+   * Not `assistantTexts`: a "length" stop is a silent max-token death only
+   * when the message that hit the limit produced nothing, and the run-wide last
+   * non-empty text may well be an earlier turn's answer (#144).
+   */
+  lastText: string;
 }
 
 /**
@@ -405,34 +395,56 @@ function childPaneProvider(spec: ChildSpec): RunnerProvider {
 }
 
 /**
+ * What installing the structured-output tool produced: the capture to read the
+ * payload off at settle, the tool name to re-admit into the tool scope, and the
+ * failure to report when the schema could not be applied at all.
+ */
+interface StructuredWiring {
+  capture?: StructuredCapture;
+  names: string[];
+  failure?: string;
+}
+
+/**
  * The `agent({ schema })` contract in a pane: the child reports through
  * `StructuredOutput` and the parent reads the payload off the result file.
  *
- * The schema was compiled by the caller and written beside the spec, so a schema
- * this runtime cannot validate already failed at the call that asked for it.
+ * The schema was compiled by the caller and written beside the spec, and the
+ * parent read that file back before launching (see `writeStructuredSchema()`),
+ * so this should always compile. If it does not — a task directory rewritten
+ * under us, a disk that half-wrote it — the run says so in its result instead
+ * of quietly answering in prose: a caller waiting for a payload cannot use one,
+ * and "no failure" would file that prose as the answer.
  */
 function installStructuredOutput(
   pi: ExtensionAPI,
   spec: ChildSpec,
-): { capture?: StructuredCapture; names: string[] } {
+): StructuredWiring {
   if (spec.structuredSchemaPath === undefined) return { names: [] };
-  const compiled = readCompiledSchema(spec.structuredSchemaPath);
-  if (!compiled) return { names: [] };
+  const schema = readCompiledSchema(spec.structuredSchemaPath);
+  if ("failure" in schema) return { names: [], failure: schema.failure };
   const capture = createStructuredCapture();
-  pi.registerTool(createStructuredOutputTool(compiled, capture));
+  pi.registerTool(createStructuredOutputTool(schema.compiled, capture));
   return { capture, names: [STRUCTURED_OUTPUT_TOOL_NAME] };
 }
 
-function readCompiledSchema(path: string): CompiledSchema | undefined {
+/** The compiled schema, or why this process cannot apply it. */
+function readCompiledSchema(path: string): { compiled: CompiledSchema } | { failure: string } {
   try {
     const verdict = compileJsonSchema(JSON.parse(readFileSync(path, "utf-8")));
-    if (verdict.ok) return verdict.compiled;
-    console.warn(`[pi-subagents] ignoring the child's structured schema at ${path}: ${verdict.message}`);
+    if (verdict.ok) return { compiled: verdict.compiled };
+    return { failure: schemaFailure(path, verdict.message) };
   } catch (error) {
     const reason = error instanceof Error ? error.message : String(error);
-    console.warn(`[pi-subagents] ignoring unreadable structured schema at ${path}: ${reason}`);
+    return { failure: schemaFailure(path, reason) };
   }
-  return undefined;
+}
+
+/** The failure message for a schema that could not be applied, also logged once. */
+function schemaFailure(path: string, reason: string): string {
+  const message = `the structured-output schema at ${path} could not be applied: ${reason}`;
+  console.warn(`[pi-subagents] ${message}`);
+  return message;
 }
 
 /**
@@ -500,7 +512,14 @@ function installToolScope(pi: ExtensionAPI, spec: ChildSpec, injected: string[])
   const refresh = (): void => {
     inScope = compute();
     scoped = true;
-    const next = [...inScope];
+    // What pi can actually activate, in its own registry order — the same
+    // shape `installExtensionToolScope()`'s `renarrow` applies in-process.
+    // `inScope` is the logical scope and can name a tool this build does not
+    // have (the re-admitted `codemode` under `-ne`, a builtin a type lists but
+    // this pi lacks); `getActiveTools()` only ever lists real ones, so
+    // comparing the unfiltered set would find a difference every single turn
+    // and rebuild the system prompt for nothing.
+    const next = pi.getAllTools().map((tool) => tool.name).filter((name) => inScope.has(name));
     const current = pi.getActiveTools();
     // `setActiveTools` rebuilds the system prompt, so re-setting an unchanged
     // list would charge every turn for nothing. The in-process scope skips the
@@ -540,11 +559,16 @@ function installToolScope(pi: ExtensionAPI, spec: ChildSpec, injected: string[])
  * an explanation nobody can find.
  */
 function installTurnLimit(pi: ExtensionAPI, spec: ChildSpec, state: RunState): void {
-  const settings = loadSettings(spec.cwd);
+  // The project the agent belongs to, not the directory it happens to work in:
+  // with `config_cwd` set those differ, and the sibling reads above
+  // (`childDelegationManager()`, the pane provider) already resolve theirs
+  // against `configCwd`. Reading the cap from `cwd` would wrap a run up at
+  // another project's turn count while honouring this one's pools.
+  const settings = loadSettings(spec.configCwd ?? spec.cwd);
   const maxTurns = normalizeMaxTurns(spec.maxTurns ?? settings.defaultMaxTurns);
   // Floored at 1 for the same reason `setGraceTurns()` floors it: a grace of 0
   // would abort on the very turn the wrap-up steer went out.
-  const graceTurns = Math.max(1, spec.graceTurns ?? settings.graceTurns ?? getGraceTurns());
+  const graceTurns = Math.max(1, settings.graceTurns ?? getGraceTurns());
 
   pi.on("turn_end", (_event, ctx) => {
     state.turns++;
@@ -577,13 +601,17 @@ function installSettler(
   pi: ExtensionAPI,
   spec: ChildSpec,
   state: RunState,
-  capture: StructuredCapture | undefined,
+  structured: StructuredWiring,
 ): void {
+  const { capture } = structured;
   pi.on("message_end", (event) => {
     const message = event.message;
     if (message.role !== "assistant") return;
     const text = extractText(message.content).trim();
     if (text) state.assistantTexts.push(text);
+    // Every assistant message, empty included: this is what decides whether a
+    // "length" stop was a truncated answer or a silent max-token death.
+    state.lastText = text;
     state.lastStop = { stopReason: message.stopReason, errorMessage: message.errorMessage };
     state.usage.input += message.usage.input;
     state.usage.output += message.usage.output;
@@ -608,7 +636,7 @@ function installSettler(
     // a child that keeps running after a settle is worse than one that reports
     // why it could not.
     try {
-      writeChildResult(spec.resultPath, buildResult(spec, ctx, state, capture));
+      writeChildResult(spec.resultPath, buildResult(spec, ctx, state, structured));
       state.wrote = true;
     } catch (error) {
       const reason = error instanceof Error ? error.message : String(error);
@@ -637,8 +665,9 @@ function buildResult(
   spec: ChildSpec,
   ctx: ExtensionContext,
   state: RunState,
-  capture: StructuredCapture | undefined,
+  structured: Pick<StructuredWiring, "capture" | "failure">,
 ): ChildRunResult {
+  const { capture } = structured;
   const text = [...state.assistantTexts].reverse().find((entry) => entry !== "") ?? "";
   const structuredFailure = capture !== undefined && capture.json === undefined
     ? capture.lastError !== undefined
@@ -654,7 +683,10 @@ function buildResult(
     thinkingLevel: ctx.thinkingLevel ?? spec.thinking,
     turns: state.turns,
   };
-  const failure = turnFailure(state, text) ?? structuredFailure;
+  // A schema this process could not apply is a failure of the run, not a silent
+  // return to prose: the caller asked for a payload, and would otherwise file
+  // text it cannot use as the answer.
+  const failure = turnFailure(state) ?? structuredFailure ?? structured.failure;
   if (failure !== undefined) result.failure = failure;
   if (capture?.json !== undefined) result.structuredJson = capture.json;
   if (state.retried) result.structuredRetried = true;
@@ -669,12 +701,17 @@ function buildResult(
  * "length" stop that produced no text at all (a silent max-token death). A
  * "length" stop that did produce text is a legitimately truncated answer, not a
  * failure.
+ *
+ * The empty-text question is asked of the FINAL message (`state.lastText`), not
+ * of the text the result carries: a run whose last turn died at the token limit
+ * without emitting anything still has an earlier turn's answer to report, and
+ * deciding from that would file a silent death as a completion (#144).
  */
-function turnFailure(state: RunState, text: string): string | undefined {
+function turnFailure(state: RunState): string | undefined {
   const stop = state.lastStop;
   if (!stop) return undefined;
   if (stop.stopReason === "error") return stop.errorMessage?.trim() || "provider error with no output";
-  if (stop.stopReason === "length" && text === "") {
+  if (stop.stopReason === "length" && state.lastText === "") {
     return "run hit the output token limit before producing any text";
   }
   return undefined;

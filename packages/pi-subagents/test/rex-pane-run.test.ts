@@ -18,15 +18,18 @@
  *   - abort closes the layer.
  */
 
-import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { ManagerRunner } from "../src/agent-manager.js";
 import { getAgentConversation, type RunOptions } from "../src/agent-runner.js";
+import { getAgentConfig, getAllTypes, registerAgents } from "../src/agent-types.js";
+import { sessionTaskDir } from "../src/output-file.js";
 import { createPaneRunner, type PaneRunDeps } from "../src/rex/pane-run.js";
 import { execRex } from "../src/rex/rex-cli.js";
-import type { RunHandle } from "../src/types.js";
+import type { AgentConfig, RunHandle } from "../src/types.js";
+import { compileJsonSchema } from "../src/workflow/json-schema.js";
 import { type FakeRex, installFakeRex } from "./helpers/rex-pane-harness.js";
 
 const SESSION = "session:pane";
@@ -113,6 +116,11 @@ function createRequest(): any {
   const create = fake.paneCalls().find((call) => call[4] === "session.new_layer");
   if (!create) throw new Error("no pane was created");
   return JSON.parse(create[5]);
+}
+
+/** The block id behind the pane's layer id — the fake derives both from one suffix. */
+function blockIdOf(layerId: string): string {
+  return `block-${layerId.replace(/^layer-/, "")}`;
 }
 
 /** The layer ids the run asked to minimize and to close. */
@@ -318,6 +326,52 @@ describe("a rex that stops answering mid-run", () => {
   });
 });
 
+describe("a spawn that reopens an existing conversation", () => {
+  it("launches the child on that session file rather than a fresh one", async () => {
+    // The evicted-record reopen paths (`@handle` on a tombstone, `Agent({ resume })`)
+    // hand the run `resumeSessionFile`. Dropping it starts a blank conversation
+    // inside Rex while telling the user their conversation was reopened.
+    const replayed = join(workDir, "2026-11-02T00-00-00-000Z_old-agent.jsonl");
+    writeFileSync(replayed, "", "utf-8");
+    const { runner: run, ctx, options } = runner({}, { resumeSessionFile: replayed });
+
+    const result = await run.start(ctx, "Explore", "go on", options);
+
+    const command: string[] = createRequest().layout.block.options.command;
+    expect(command[command.indexOf("--session") + 1]).toBe(replayed);
+    expect(command).not.toContain("--session-id");
+    expect(command).not.toContain("--session-dir");
+    // The handle names the file the child actually appends to: the live view
+    // then reads the reopened conversation instead of a guessed path the child
+    // never writes — which is also the path a later relaunch would pass on.
+    expect(result.session.sessionFile).toBe(replayed);
+    expect(getAgentConversation(result.session)).toContain("[Assistant]: the answer");
+  });
+});
+
+describe("a spawn pointed at another project", () => {
+  it("is not told to trust that project's `.pi` files", async () => {
+    // The parent's trust covers *its* project. A `cwd:` spawn into a foreign
+    // repo would otherwise have this run vouch for files pi would have asked a
+    // human about.
+    const other = mkdtempSync(join(tmpdir(), "pi-pane-run-other-"));
+    try {
+      // `cwd:` with the config left in the parent's project, exactly as the
+      // manager builds it for a custom-cwd spawn.
+      const { runner: run, ctx, options } = runner({}, { cwd: other, configCwd: workDir });
+
+      await run.start(ctx, "Explore", "find the pane", options);
+
+      const command: string[] = createRequest().layout.block.options.command;
+      expect(command).toContain("-na");
+      expect(command).not.toContain("-a");
+      expect(createRequest().layout.block.options.cwd).toBe(other);
+    } finally {
+      rmSync(other, { recursive: true, force: true });
+    }
+  });
+});
+
 describe("steering", () => {
   it("sends the text and Enter into the child's pane while it is working", async () => {
     process.env.STUB_MODE = "result-early";
@@ -333,6 +387,42 @@ describe("steering", () => {
     expect(sent.map((call) => call[0])).toEqual(["send", "send-key"]);
     expect(sent[0]).toContain("keep going");
     expect(sent[1]).toContain("enter");
+  });
+
+  it("passes the message as one positional after `--`, so a leading dash is not a flag", async () => {
+    // Measured: `rex send -s S -b B "--help"` prints help and drops the steer,
+    // and a message starting with `-b other` retargets the send.
+    process.env.STUB_MODE = "result-early";
+    process.env.REX_FAKE_PROGRAM_STATUS = "working";
+    const { runner: run, ctx, options } = runner();
+
+    const started = run.start(ctx, "Explore", "find the pane", options);
+    const session = await waitForSession();
+    await session.steer("-b someone-else --help");
+    await started;
+
+    const sent = fake.calls().find((call) => call[0] === "send");
+    if (!sent) throw new Error("no send was made");
+    expect(sent[sent.length - 2]).toBe("--");
+    expect(sent[sent.length - 1]).toBe("-b someone-else --help");
+    // The target is still the block it asked for, not the message's `-b`.
+    expect(sent[sent.indexOf("-b") + 1]).toBe(blockIdOf(lifecycle().minimized as string));
+  });
+
+  it("refuses a message a pane cannot take as one prompt", async () => {
+    // A newline submits the prompt in the pane, so the trailing `enter` would
+    // submit a second, empty one; every other control character is untypeable.
+    process.env.STUB_MODE = "result-early";
+    process.env.REX_FAKE_PROGRAM_STATUS = "working";
+    const { runner: run, ctx, options } = runner();
+
+    const started = run.start(ctx, "Explore", "find the pane", options);
+    const session = await waitForSession();
+
+    await expect(session.steer("first line\nsecond line")).rejects.toThrow(/line break|control/i);
+    await expect(session.steer("bell\u0007here")).rejects.toThrow(/control/i);
+    expect(fake.calls().some((call) => call[0] === "send")).toBe(false);
+    await started;
   });
 
   it("refuses while the child is blocked, so text never lands in a dialog", async () => {
@@ -373,6 +463,95 @@ describe("abort", () => {
   });
 });
 
+describe("aborting a resume", () => {
+  it("settles as a stop instead of a crash about a missing result file", async () => {
+    // A resumed child ends when its layer is closed, so it exits without ever
+    // writing a result file. That is exactly what an abort asks for, and the
+    // docs promise `stopped` — reporting it as "exited without writing its
+    // result file" turns a user stop into a crash.
+    const { runner: run, ctx, options } = runner();
+    const first = await run.start(ctx, "Explore", "find the pane", options);
+
+    // The resumed child reports nothing and stays up: only closing its layer
+    // can end it, so it cannot race this test with a result file.
+    process.env.STUB_MODE = "hold";
+    const controller = new AbortController();
+    const resuming = run.resume(first.session, "go on", { signal: controller.signal });
+    const creates = () => fake.paneCalls().filter((call) => call[4] === "session.new_layer").length;
+    for (let i = 0; i < 500 && creates() < 2; i++) {
+      await new Promise((resolve) => setTimeout(resolve, 10));
+    }
+    expect(creates()).toBe(2);
+    controller.abort();
+
+    const outcome = await resuming.then(
+      (value) => value,
+      (error: Error) => error,
+    );
+    expect(outcome).not.toBeInstanceOf(Error);
+    expect(typeof (outcome as { text: string }).text).toBe("string");
+    // Both layers were closed: the first run's and the resumed one's.
+    expect(fake.paneCalls().filter((call) => call[4] === "session.close_layer")).toHaveLength(2);
+  }, 20_000);
+});
+
+describe("the root session a run is filed under", () => {
+  it("is the runner's, so a nested child's own session cannot move the transcript store", async () => {
+    // A grandchild's `ctx` is its own session, while the cascade's transcripts
+    // live under the root the runner was built for. The spec's `rootSessionId`
+    // is what names result files and the pane's `session-dir`, so it has to come
+    // from the runner.
+    const { runner: run, ctx, options } = runner();
+    ctx.sessionManager.getSessionId = vi.fn(() => "some-other-session");
+
+    await run.start(ctx, "Explore", "find the pane", options);
+
+    const spec = JSON.parse(
+      readFileSync(join(sessionTaskDir(workDir, "root-1"), "agent-1", "spec.json"), "utf-8"),
+    );
+    expect(spec.rootSessionId).toBe("root-1");
+  });
+});
+
+describe("the memory block a child is told about", () => {
+  it("is chosen from the tool set the child actually gets, not the type's raw list", async () => {
+    // `tools: read, write` with `write` denied: the effective set cannot write,
+    // so the child must get the read-only block — the same rule the in-process
+    // runner applies — instead of being told to write memory it cannot write.
+    const existing = new Map(getAllTypes().map((name) => [name, getAgentConfig(name)!]));
+    registerAgents(
+      new Map([
+        ...existing,
+        [
+          "memory-probe",
+          {
+            name: "memory-probe",
+            description: "a memory agent whose write tool is denied",
+            extensions: true,
+            skills: true,
+            systemPrompt: "",
+            promptMode: "replace",
+            memory: "project",
+            builtinToolNames: ["read", "write"],
+            disallowedTools: ["write"],
+          } as AgentConfig,
+        ],
+      ]),
+    );
+    try {
+      const { runner: run, ctx, options } = runner();
+
+      await run.start(ctx, "memory-probe", "find the pane", options);
+
+      const system = readFileSync(join(sessionTaskDir(workDir, "root-1"), "agent-1", "system.md"), "utf-8");
+      expect(system).toContain("Agent Memory (read-only)");
+      expect(system).not.toContain("persistent memory directory");
+    } finally {
+      registerAgents(existing);
+    }
+  });
+});
+
 describe("falling back to the in-process runner", () => {
   const fakeFallback = (): ManagerRunner => ({
     start: vi.fn(async () => ({
@@ -395,6 +574,26 @@ describe("falling back to the in-process runner", () => {
     expect(fallback.start).toHaveBeenCalledTimes(1);
     // Nothing was watched, and nothing was left to watch.
     expect(methods()).toEqual(["session.new_layer"]);
+  });
+
+  it("runs the agent in-process when the schema it asked for cannot be handed over", async () => {
+    // A schema the child could not compile would leave it with no
+    // `StructuredOutput` tool at all — prose its caller cannot read. The parent
+    // proves the file first, so this falls back while the in-process path is
+    // still available.
+    const fallback = fakeFallback();
+    // A directory where the schema file must go: the write cannot land.
+    mkdirSync(join(sessionTaskDir(workDir, "root-1"), "agent-1", "schema.json"), { recursive: true });
+    const compiled = compileJsonSchema({ type: "object" });
+    if (!compiled.ok) throw new Error(compiled.message);
+    const { runner: run, ctx, options } = runner({ fallback }, { structuredOutput: compiled.compiled });
+
+    const result = await run.start(ctx, "Explore", "find the pane", options);
+
+    expect(result.responseText).toBe("in-process");
+    expect(result.paneFallback).toMatch(/structured-output schema/);
+    // Nothing was launched: the pane path never got as far as a pane.
+    expect(fake.calls()).toEqual([]);
   });
 
   it("runs the agent in-process when no model could be resolved for the child", async () => {

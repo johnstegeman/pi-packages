@@ -233,6 +233,21 @@ export function rexReply(result: RexExecResult): Record<string, unknown> | undef
   }
 }
 
+/**
+ * Why a `rex` call failed, as it should be shown to a user.
+ *
+ * The CLI prefixes its diagnostics with `Error: `, which is its own
+ * decoration rather than the message; after it is what went wrong
+ * (`bad_request: a window must keep a visible pane`, a missing binary, a
+ * timeout). A failure that said nothing gets the caller's `fallback`: an empty
+ * diagnostic is no evidence of any particular cause, and naming one would be a
+ * guess dressed as an answer.
+ */
+export function failureReason(text: string, fallback: string): string {
+  const detail = text.trim().replace(/^Error:\s*/i, "").trim();
+  return detail === "" ? fallback : detail;
+}
+
 /** `last_exit.exit_code`, or null while the program runs or when it never started one. */
 function exitCodeOf(reply: Record<string, unknown> | undefined): number | null {
   const lastExit = reply?.last_exit;

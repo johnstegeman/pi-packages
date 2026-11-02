@@ -189,6 +189,19 @@ function assertValidSpawnCwd(cwd: unknown): asserts cwd is string | undefined | 
 }
 
 /**
+ * True when the record already carries the user's stop.
+ *
+ * `abort()` writes "stopped" the moment the abort lands, and every settle path
+ * after it must leave that answer alone: a run that unwinds from an abort — with
+ * a rejection, a missing result file, or a plain empty result — is neither a
+ * crash nor a completion. A function rather than the bare comparison, so a path
+ * that assigned "running" a few lines earlier is not narrowed out of the check.
+ */
+function wasStopped(record: AgentRecord): boolean {
+  return record.status === "stopped";
+}
+
+/**
  * Whether a record occupies one of the `maxConcurrent` background slots.
  * Nested children don't: their parent already holds a slot, so counting (and
  * therefore queueing) them would deadlock a parent that waits on its own child.
@@ -1403,14 +1416,24 @@ export class AgentManager {
         signal,
       });
       // Same contract as the spawn path (#144): a failed final turn is an
-      // error, not a completion — but the resumed text stays available.
-      record.status = failure ? "error" : "completed";
-      if (failure) record.error = failure;
+      // error, not a completion — but the resumed text stays available. And the
+      // same "don't overwrite a stop" guard the spawn path and the background
+      // resume carry: a user stop is recorded the moment the abort lands, and a
+      // run that unwinds afterwards must not relabel it.
+      if (!wasStopped(record)) {
+        record.status = failure ? "error" : "completed";
+        if (failure) record.error = failure;
+      }
       record.result = text;
       record.completedAt = Date.now();
     } catch (err) {
-      record.status = "error";
-      record.error = err instanceof Error ? err.message : String(err);
+      // A stopped pane run ends by having its layer closed, so the resume can
+      // reject with "exited without writing its result file" — a crash report
+      // for a run the user ended on purpose.
+      if (!wasStopped(record)) {
+        record.status = "error";
+        record.error = err instanceof Error ? err.message : String(err);
+      }
       record.completedAt = Date.now();
     }
 

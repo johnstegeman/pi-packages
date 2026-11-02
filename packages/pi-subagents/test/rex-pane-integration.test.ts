@@ -271,6 +271,33 @@ describe("abort", () => {
   });
 });
 
+describe("a resume the user stops", () => {
+  it("is recorded as stopped, not as a child that died without a result", async () => {
+    // The docs promise `stopped`. A resumed child ends by having its layer
+    // closed, so it exits without writing a result file — which the runner used
+    // to report as "exited without writing its result file", turning a user stop
+    // into a crash.
+    managerWith(async () => paneRunner(), inProcessStub());
+    const record = await spawn("Explore", "the only one");
+
+    // The resumed child reports nothing and stays up: only closing its layer
+    // can end it, so nothing races this test with a result file.
+    process.env.STUB_MODE = "hold";
+    expect(manager!.resume(record.id, "go on", undefined, { isBackground: true })).toBeDefined();
+    for (let i = 0; i < 1000 && creates().length < 2; i++) {
+      await new Promise((resolve) => setTimeout(resolve, 10));
+    }
+    expect(creates()).toHaveLength(2);
+    expect(manager!.abort(record.id)).toBe(true);
+    await record.promise.catch(() => {});
+
+    expect(record.status).toBe("stopped");
+    expect(record.error).toBeUndefined();
+    // The resumed pane was closed, not left running behind a stopped record.
+    expect(fake.paneCalls().filter((call) => call[4] === "session.close_layer").length).toBeGreaterThanOrEqual(2);
+  }, 20_000);
+});
+
 describe("detection", () => {
   it("leaves the in-process runner in charge outside Rex, with no pane calls", async () => {
     // The one thing index.ts's provider decides: panes only when detection says

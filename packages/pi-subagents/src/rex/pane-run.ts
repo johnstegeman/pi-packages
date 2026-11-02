@@ -24,7 +24,7 @@
 // cannot get a pane runs in-process instead, and one whose pane cannot be
 // minimized runs in a pane that happens to be visible.
 
-import { mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, readdirSync, readFileSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import type { ManagerRunner, RunResume, RunStart } from "../agent-manager.js";
@@ -54,16 +54,19 @@ import {
   type ChildFiles,
   type ChildSpec,
   type CloseResult,
+  childMayTrustProject,
   childSpecFromSpawn,
   closePane,
   launchPane,
   type PaneHandle,
   type ResolvedResources,
   writeChildFiles,
+  writeStructuredSchema,
 } from "./launcher.js";
 import { PaneSession } from "./pane-session.js";
 import {
   captureTail,
+  failureReason,
   type PaneDeps,
   type ProcessState,
   type RexExec,
@@ -211,13 +214,15 @@ export function createPaneRunner(deps: PaneRunDeps): ManagerRunner {
   };
 
   const start: RunStart = async (ctx, type, prompt, options) => {
-    const inputs = await compose(deps, ctx, type, prompt, options);
-    if (inputs === undefined) {
-      // No model means no `--provider`/`--model`, and the rule that a child is
-      // always told both explicitly has no exception: an in-process run is
-      // better than a child that has to guess what it is.
-      return inProcess(ctx, type, prompt, options, "could not be given a model for its pane");
+    const composed = await compose(deps, ctx, type, prompt, options);
+    if ("fallback" in composed) {
+      // The child's own inputs could not be built — no model to name, or a
+      // schema it could not be trusted to apply — so there is nothing to
+      // launch. In-process is the honest answer: it is a run that works, and
+      // the reason travels on the result as well as to the user.
+      return inProcess(ctx, type, prompt, options, composed.fallback);
     }
+    const { inputs } = composed;
     // Registered BEFORE the launch: that is the window in which a pane exists and
     // the manager has no handle for it yet, so a quit there would leave a live
     // child in an orphan pane.
@@ -409,6 +414,18 @@ interface RunInputs {
   model: NonNullable<RunOptions["model"]>;
   thinkingFlag: string[];
   projectTrusted: boolean;
+  /**
+   * The child's `--name`: the record's handle, or the type when a run has
+   * none (a nested child), exactly as the pane label names it.
+   */
+  name: string;
+  /**
+   * An existing session file the child must open instead of starting a new
+   * conversation (`RunOptions.resumeSessionFile`) — the reopen paths for a
+   * record that was swept out of memory. A relaunch passes its own file
+   * instead (see `childCommand()`).
+   */
+  resumeSessionFile?: string;
 }
 
 /** The live state of one pane-backed run. */
@@ -436,35 +453,51 @@ interface RunState {
 // ---------------------------------------------------------------------------
 
 /**
- * Resolve everything a child needs from the parent's spawn options.
+ * What `compose()` produced: the child's inputs, or the reason this run cannot
+ * be a pane child at all.
  *
- * Undefined means "this run cannot be a pane child", and there is one such case:
- * no `pi` model was resolved, so the command could not name its provider and
- * model. Everything else that can go wrong fails later, where it can be
- * reported.
+ * A fallback is a run the caller turns into an in-process one, with a warning
+ * that says what happened. Both reasons are about the child's *inputs* — no
+ * model to name it with, a schema it could not be handed — not about Rex:
+ * everything that can go wrong later is reported where it happens.
  */
+type Composed = { inputs: RunInputs } | { fallback: string };
+
+/** Resolve everything a child needs from the parent's spawn options. */
 async function compose(
   deps: PaneRunDeps,
   ctx: ExtensionContext,
   type: SubagentType,
   prompt: string,
   options: RunOptions,
-): Promise<RunInputs | undefined> {
+): Promise<Composed> {
   const agentConfig = getAgentConfig(type);
   const cwd = options.cwd ?? ctx.cwd;
   const configCwd = options.configCwd ?? cwd;
   const model = options.model ?? resolveDefaultModel(ctx.model, ctx.modelRegistry, agentConfig?.model);
-  if (model === undefined) return undefined;
+  if (model === undefined) return { fallback: "could not be given a model for its pane" };
 
   const isolated = options.isolated;
   const thinking = options.thinkingLevel ?? agentConfig?.thinking;
   const agentId = options.agentId ?? type;
-  const rootSessionId = options.rootSessionId ?? ctx.sessionManager.getSessionId();
+  // The runner's own root session is the fallback, not this `ctx`'s: the
+  // transcript store this runner writes to is keyed by the former, and a
+  // grandchild's `ctx` is its own session rather than the cascade's root.
+  const rootSessionId = options.rootSessionId ?? deps.rootSessionId;
   const taskDir = sessionTaskDir(configCwd, rootSessionId);
   // The schema travels as a file: the child recompiles it with the same
   // validator the parent used, so `agent({ schema })` behaves in a pane exactly
   // as it does in-process.
   const schemaPath = options.structuredOutput ? join(taskDir, agentId, "schema.json") : undefined;
+  if (schemaPath !== undefined && options.structuredOutput !== undefined) {
+    // Written here, before anything is launched, so a schema that will not
+    // survive the round trip falls back in-process instead of leaving the
+    // child without the tool its caller asked for.
+    const problem = writeStructuredSchema(schemaPath, options.structuredOutput);
+    if (problem !== undefined) {
+      return { fallback: `could not be handed its structured-output schema (${problem})` };
+    }
+  }
 
   const spec = childSpecFromSpawn({
     agentId,
@@ -492,9 +525,6 @@ async function compose(
   // the file it receives is the whole of what the parent said.
   const task = taskFor(ctx, prompt, options.inheritContext);
   const files = writeChildFiles({ taskDir, systemPrompt, prompt: task, spec });
-  if (schemaPath !== undefined && options.structuredOutput !== undefined) {
-    writeFileSync(schemaPath, JSON.stringify(options.structuredOutput.schema, null, 2), "utf-8");
-  }
   mkdirSync(deps.agentSessionDir, { recursive: true });
 
   const inputs: RunInputs = {
@@ -511,9 +541,22 @@ async function compose(
     resolved: resolvedResources(options.pi, configCwd, agentConfig),
     model,
     thinkingFlag: thinking === undefined ? [] : ["--thinking", thinking],
-    projectTrusted: ctx.isProjectTrusted(),
+    // The parent's answer, narrowed to the directories it actually covers: a
+    // child pointed at another repo is `-na`, not given a free pass for that
+    // repo's project-local `.pi` files.
+    projectTrusted: childMayTrustProject({
+      parentTrusted: ctx.isProjectTrusted(),
+      // The parent's own directory — the project the user was actually asked
+      // about — not the config root, which a bare `cwd:` spawn moves with it.
+      projectRoot: ctx.cwd,
+      childCwd: cwd,
+      // A worktree spawn is the parent's own copy of its project.
+      projectCopy: options.worktreeBase !== undefined,
+    }),
+    name: options.handle ?? type,
   };
-  return inputs;
+  if (options.resumeSessionFile !== undefined) inputs.resumeSessionFile = options.resumeSessionFile;
+  return { inputs };
 }
 
 /**
@@ -530,7 +573,13 @@ function taskFor(ctx: ExtensionContext, prompt: string, inheritContext: boolean 
   return parentContext === "" ? prompt : parentContext + prompt;
 }
 
-/** The argv that runs the child under the launcher's documented form. */
+/**
+ * The argv that runs the child under the launcher's documented form.
+ *
+ * `sessionFile` is a relaunch's own transcript and wins over the inputs': a
+ * resume continues the conversation the run actually had, which is not always
+ * the one the spawn was pointed at.
+ */
 function childCommand(inputs: RunInputs, deps: PaneRunDeps, sessionFile?: string): string[] {
   return buildChildCommand({
     files: inputs.files,
@@ -549,7 +598,8 @@ function childCommand(inputs: RunInputs, deps: PaneRunDeps, sessionFile?: string
     toolFlags: [],
     agentSessionDir: deps.agentSessionDir,
     projectTrusted: inputs.projectTrusted,
-    sessionFile,
+    name: inputs.name,
+    sessionFile: sessionFile ?? inputs.resumeSessionFile,
   });
 }
 
@@ -582,7 +632,13 @@ async function systemPromptFor(
   // is told about, not something pi can be handed by flag.
   const memory = inputs.agentConfig?.memory;
   if (memory) {
-    const tools = new Set(inputs.spec.toolScope.tools);
+    // The *effective* scope, not the type's raw `tools:` list: the spec already
+    // carries the memory widening `runAgent()` applies before it chooses this
+    // block, and the denylist still binds. An agent whose `write` is disallowed
+    // must be told to read memory, not handed a block that tells it to write
+    // files it cannot write.
+    const denied = new Set(inputs.spec.toolScope.excludeTools);
+    const tools = new Set(inputs.spec.toolScope.tools.filter((name) => !denied.has(name)));
     // The agent's own name, as the in-process path passes it: a memory block
     // headed with the type would file a named agent's notes under the wrong
     // heading.
@@ -656,9 +712,15 @@ async function watch(args: {
   const paneDepsHere = paneDeps(deps);
   reportMinimize(warn, inputs, pane);
 
-  // The child writes its own session file, and pi names it with a timestamp —
-  // so it is discovered by the id it was launched with rather than predicted.
-  const location = await findSessionFile(deps.agentSessionDir, inputs.agentId);
+  // A reopened conversation is a file the parent already knows, and the child is
+  // told to append to it (`--session <file>`), so nothing is discovered: a
+  // guess at a fresh path would leave the live view watching a file the child
+  // never writes, and the handle naming it.
+  const known = inputs.resumeSessionFile;
+  const location =
+    known !== undefined
+      ? { file: known, found: true }
+      : await findSessionFile(deps.agentSessionDir, inputs.agentId);
   const tail = new SessionTail(location.file);
   const state: RunState = { inputs, pane, tail, sessionFile: location.file };
   const session = new PaneSession({
@@ -823,7 +885,12 @@ async function relaunchWatch(args: {
   const stopActivity = feedActivity(state.tail, options, true);
 
   const stop = runStop();
+  // Recorded here for the same reason `watch()` records it: an aborted resume
+  // ends when the layer closes, so its child exits without ever writing a
+  // result file — and that is a stop, not a crash.
+  let aborted = options.signal?.aborted === true;
   const unlisten = forwardAbort(options.signal, () => {
+    aborted = true;
     void closeRunPane(paneDepsHere, state);
   });
   try {
@@ -837,6 +904,9 @@ async function relaunchWatch(args: {
     if ("exitCode" in outcome) {
       const late = readResultFile(inputs.spec.resultPath);
       if (late !== undefined) return { text: late.text, failure: late.failure };
+      // A stopped run has nothing to report and nothing to throw: the caller
+      // asked for it to end, and the manager keeps its own "stopped" status.
+      if (aborted) return { text: lastAssistantText(state.tail) };
       const message = await exitFailureMessage(paneDepsHere, state.pane.blockId, outcome.exitCode, state.tail);
       throw new Error(message);
     }
@@ -966,7 +1036,8 @@ async function watchExit(
     if (!warned) {
       warned = true;
       warn(
-        `the pane for "${inputs.label}" could not be reached while watching it (${failureDetail(waited)});` +
+        `the pane for "${inputs.label}" could not be reached while watching it` +
+        ` (${failureReason(waited.stderr, `rex exited with status ${waited.code}`)});` +
           " the run will be settled from the child's result file",
       );
     }
@@ -1192,14 +1263,33 @@ async function steerPane(deps: PaneDeps, state: RunState, message: string): Prom
       `agent "${state.inputs.label}" ${why} — answer it in the pane, or abort the agent; the message was not sent`,
     );
   }
-  const sent = await deps.exec(["send", "-s", deps.sessionId, "-b", blockId, message]);
+  if (UNTYPEABLE.test(message)) {
+    // A newline submits the prompt in the pane, and every remaining control
+    // character either does something to the terminal or changes what `rex`
+    // parses — either way the message that lands is not the one that was
+    // sent. Refused rather than rewritten: a steer quietly flattened into one
+    // line is the same defect as one quietly dropped.
+    throw new Error(
+      `the steering message for agent "${state.inputs.label}" contains a line break or a control` +
+        " character, which a pane cannot take as one prompt; the message was not sent",
+    );
+  }
+  // `--` ends the CLI's option parsing: the message is one positional, and a
+  // message that begins with `-` (`-b other`, `--help`) must not be read as
+  // another flag for `rex send`.
+  const sent = await deps.exec(["send", "-s", deps.sessionId, "-b", blockId, "--", message]);
   if (sent.code !== 0) {
-    throw new Error(`the steering message could not be typed into the pane: ${failureDetail(sent)}`);
+    throw new Error(
+      `the steering message could not be typed into the pane: ${failureReason(sent.stderr, `rex exited with status ${sent.code}`)}`,
+    );
   }
   // The text arrives without a newline, so it sits on pi's prompt until Enter.
   const entered = await deps.exec(["send-key", "-s", deps.sessionId, "-b", blockId, "enter"]);
   if (entered.code !== 0) {
-    throw new Error(`the steering message was typed but not submitted: ${failureDetail(entered)}`);
+    throw new Error(
+      "the steering message was typed but not submitted: " +
+        failureReason(entered.stderr, `rex exited with status ${entered.code}`),
+    );
   }
 }
 
@@ -1212,6 +1302,19 @@ async function steerPane(deps: PaneDeps, state: RunState, message: string): Prom
  * one to type into.
  */
 const STEERABLE_PROGRAM_STATES = new Set(["working", "idle"]);
+
+/**
+ * What a typed steer may never carry.
+ *
+ * `rex send` types its text into a live terminal, so a newline submits the
+ * prompt on the spot — a three-line message arrives as three prompts, and the
+ * `enter` this runner sends afterwards submits a fourth, empty one. The rest of
+ * the C0 controls (and DEL) are equally untypeable: some move the cursor, some
+ * are eaten by the terminal, and none of them can be verified from here.
+ * Tab is allowed — it is ordinary text in a prompt — and nothing above ASCII
+ * is touched, so unicode and emoji steer normally.
+ */
+const UNTYPEABLE = /[\u0000-\u0008\u000a-\u001f\u007f]/;
 
 /**
  * The child's state, waited for while it has reported none at all.
@@ -1358,12 +1461,6 @@ function replyBody(result: RexExecResult): Record<string, unknown> | undefined {
 /** True when Rex said the block is not there — the exit status went with it. */
 function paneIsGone(result: RexExecResult): boolean {
   return /not found/i.test(result.stderr);
-}
-
-/** Why a `rex` call failed, as it should be shown to a user. */
-function failureDetail(result: RexExecResult): string {
-  const detail = result.stderr.trim().replace(/^Error:\s*/i, "").trim();
-  return detail === "" ? `rex exited with status ${result.code}` : detail;
 }
 
 function delay(ms: number): Promise<void> {

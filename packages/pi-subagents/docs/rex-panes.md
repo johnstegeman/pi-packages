@@ -6,7 +6,7 @@ Inside Rex, a subagent is a **real `pi` process in a minimized floating pane** r
 
 ## What a pane subagent is, and is not
 
-It **is** the session you would get if you had opened a pane and typed the task into `pi` yourself. Same binary as the parent (`process.execPath`), same provider and model, same thinking level, same confined tool set, same project trust decision, and the same system prompt the in-process runner would have built.
+It **is** the session you would get if you had opened a pane and typed the task into `pi` yourself. Same binary as the parent (`process.execPath`), same provider and model, same thinking level, same confined tool set, the same project trust decision (see the trust flag below), and the same system prompt the in-process runner would have built.
 
 It is **not**:
 
@@ -25,13 +25,17 @@ One pane per spawn, created in the parent's own Rex session and window, never in
 |---|---|
 | Label | `<handle> · <description>`, truncated to 60 characters of description with a trailing `…`. The handle is what `@`, `steer_subagent` and `resume` accept — `explore-2` for a second Explore, or the agent type when a record has no handle (nested children) |
 | Layout | A floating layer above the parent's tiled one, `focus: false`, so it never steals the keyboard. Bounds cascade in a right-hand column: six lanes, each a little lower and further right, then the column repeats — by then the earlier panes are minimized and overlap costs nothing |
-| Command | `<pi> --session-id <agent id> --session-dir <store> --name <agent id> <trust flag> <system-prompt flag> <system file> <confinement flags> --provider <p> --model <m> [--thinking <level>] @<prompt file>`, run verbatim in the block's `cwd`. argv stays a few hundred bytes however large the task or system prompt is |
+| Command | `<pi> --session-id <agent id> --session-dir <store> --name <handle> <trust flag> <system-prompt flag> <system file> <confinement flags> --provider <p> --model <m> [--thinking <level>] @<prompt file>`, run verbatim in the block's `cwd`. argv stays a few hundred bytes however large the task or system prompt is. The session id is the durable agent id — it is what finds the transcript the parent tails — while `--name` is the handle, so the pane's own session is named the way the user reaches it |
 | Environment | `PI_SUBAGENTS_CHILD_SPEC=<spec file>` rides in the argv, because a terminal block's options have no `env` field. The child deletes the variable once read, so nothing it starts can inherit the wrong spec |
 | `shell` | Deliberately **absent**. Measured on Rex `0.0.1793420730`: `"shell": "none"` with the default `login: true` runs the command under `/usr/bin/login`, which then reports `exit_code: 0` for every outcome. Leaving the key out keeps argv verbatim and reports the real status, which is what tells a crash from a clean exit |
 | Minimize | A second call, `session.set_layer_state { state: "minimized" }`, made immediately after creation — the pane can be on screen for the 21–29 ms between the two. Create and minimize are serialized in one queue, so a fan-out does not flicker twenty panes on screen in whatever order the server answers |
 | Exit | `exit.on_completion` (Rex's default) closes the pane when the child exits. A failing `pi` therefore closes its own pane within a second or two: the run never depends on a surviving pane, and a pane still on screen is not evidence that a run is still alive |
 | Program status | pi emits OSC 7501 program status, which Rex surfaces per pane, so `working` / `idle` / `blocked` is there for free. That state is how the parent tells a working child from one sitting at a prompt |
 | Result | The child writes `<task dir>/<agent id>.result.json` before shutting itself down — atomically, by rename, so a reader never sees half a result |
+
+### The trust flag
+
+`-a` or `-na` answers the question pi would otherwise ask a human — "do you trust this project?" — and a pane has nobody to ask. `-a` is passed only when the parent session trusts its own project *and* the child works in it (a worktree spawn counts: it is the parent's own copy), because the flag trusts the project-local `.pi` files of the directory the child starts in. A spawn whose `cwd` is some other repo gets `-na`, so that repo's `.pi` files are not trusted on the parent's behalf; that child sees what an untrusted session sees, which confines it more rather than less.
 
 ## How a run settles
 
@@ -59,6 +63,8 @@ Closing a pane by hand is the same event as a crash: the child dies, no result f
 | Already exited | `agent "…" has already exited; the message was not sent` |
 
 A refused steer is never silently dropped: `steer_subagent` reports it in its own result, and a steer queued before the session existed is reported as a warning — `the steering message for agent "…" was not delivered: …` — rather than counted as delivered.
+
+The message is typed as one line: a message carrying a newline or any other control character is refused rather than sent, because a pane submits on every newline and the Enter that finishes the steer would submit a second, empty prompt. It is also passed after `--`, so a message that begins with `-` is text rather than a flag for `rex send`.
 
 **From the pane**, you are typing into a normal `pi` session: any prompt, any slash command. Extra turns you cause are counted and reported like any others.
 
@@ -168,7 +174,7 @@ The agent is unaffected: it is running in a visible pane instead of a capsule. T
 
 ### The agent ended as an error with no result
 
-Read the message: `the agent's pi exited with <status> without writing its result file`, then the child's last assistant message and, when the pane still existed, its last lines. The common causes are a bad `--provider`/`--model` combination (see the provider note), a project it was told not to trust (`-na` — the child then sees only the files its parent was allowed to), and the pane being closed by hand.
+Read the message: `the agent's pi exited with <status> without writing its result file`, then the child's last assistant message and, when the pane still existed, its last lines. The common causes are a bad `--provider`/`--model` combination (see the provider note), a project it was told not to trust (`-na` — what a child gets when the parent session does not trust its project, or when the spawn's `cwd` lies outside it, so a foreign repo's project-local `.pi` files are never vouched for; such a child sees only the files its parent was allowed to), and the pane being closed by hand.
 
 ## Where this lives in the code
 

@@ -13,7 +13,7 @@
  * between the two must surface as a failing test rather than as a quietly
  * less-confined child (design §Risks 6).
  */
-import { mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -26,19 +26,24 @@ import {
   buildNewLayerArgs,
   type ChildFiles,
   type ChildSpec,
+  childMayTrustProject,
   childSpecFromSpawn,
   confinementFlags,
   paneBoundsForIndex,
   type ResolvedResources,
   writeChildFiles,
+  writeStructuredSchema,
 } from "../src/rex/launcher.js";
 import type { AgentConfig } from "../src/types.js";
+import { compileJsonSchema } from "../src/workflow/json-schema.js";
 
 const FIXTURES_DIR = resolve(fileURLToPath(new URL("./fixtures", import.meta.url)));
 const EXT_ALPHA = join(FIXTURES_DIR, "ext-alpha.mjs");
 const EXT_BETA = join(FIXTURES_DIR, "ext-beta.mjs");
 const PROBE_SKILL = join(FIXTURES_DIR, ".pi", "skills", "probe-skill.md");
 const PI_BINARY = "/fake/bin/pi";
+/** The record's handle, which is what pi is told to call this session. */
+const HANDLE = "explore-2";
 
 /**
  * The discovered-resource maps a caller hands the builders. Both fixture
@@ -312,6 +317,7 @@ describe("buildChildCommand — the child pi launch", () => {
       resolved: resources(),
       piBinary: PI_BINARY,
       projectTrusted: true,
+      name: HANDLE,
       modelFlag: ["--provider", "anthropic", "--model", "claude-sonnet-4"],
       thinkingFlag: ["--thinking", "medium"],
       toolFlags: ["-t", "read"],
@@ -335,6 +341,7 @@ describe("buildChildCommand — the child pi launch", () => {
       resolved: resources(),
       piBinary: PI_BINARY,
       projectTrusted: true,
+      name: HANDLE,
       modelFlag: ["--provider", "anthropic", "--model", "claude-sonnet-4"],
       thinkingFlag: ["--thinking", "medium"],
       toolFlags: ["-t", "read"],
@@ -350,7 +357,7 @@ describe("buildChildCommand — the child pi launch", () => {
       "--session-dir",
       "/tmp/subagent-sessions/root-session",
       "--name",
-      "0f8a4b7c-2d3e-4a5b",
+      HANDLE,
       "-a",
       "--system-prompt",
       f.systemFile,
@@ -386,6 +393,7 @@ describe("buildChildCommand — the child pi launch", () => {
       resolved: resources(),
       piBinary: PI_BINARY,
       projectTrusted: true,
+      name: HANDLE,
       modelFlag: ["--provider", "anthropic", "--model", "claude-sonnet-4"],
       thinkingFlag: [],
       toolFlags: ["-t", "read", "-xt", "bash"],
@@ -401,7 +409,7 @@ describe("buildChildCommand — the child pi launch", () => {
       "--session-dir",
       "/tmp/subagent-sessions/root-session",
       "--name",
-      "0f8a4b7c-2d3e-4a5b",
+      HANDLE,
       "-a",
       "--system-prompt",
       f.systemFile,
@@ -431,6 +439,7 @@ describe("buildChildCommand — the child pi launch", () => {
       resolved: resources(),
       piBinary: PI_BINARY,
       projectTrusted: true,
+      name: HANDLE,
       modelFlag: ["--provider", "anthropic", "--model", "claude-sonnet-4"],
       thinkingFlag: [],
       toolFlags: [],
@@ -465,6 +474,7 @@ describe("buildChildCommand — the child pi launch", () => {
       resolved: resources(),
       piBinary: PI_BINARY,
       projectTrusted: true,
+      name: HANDLE,
       modelFlag: ["--provider", "anthropic", "--model", "claude-sonnet-4"],
       thinkingFlag: [],
       toolFlags: [],
@@ -494,6 +504,7 @@ describe("buildChildCommand — the child pi launch", () => {
         resolved: resources(),
         piBinary: PI_BINARY,
         projectTrusted: true,
+        name: HANDLE,
         modelFlag: ["--provider", "anthropic", "--model", "claude-sonnet-4"],
         thinkingFlag: [],
         toolFlags: [],
@@ -547,6 +558,7 @@ describe("buildChildCommand — the child pi launch", () => {
       resolved: resources(),
       piBinary: PI_BINARY,
       projectTrusted: true,
+      name: HANDLE,
       modelFlag: ["--provider", "anthropic", "--model", "claude-sonnet-4"],
       thinkingFlag: [],
       toolFlags: [],
@@ -562,6 +574,103 @@ describe("buildChildCommand — the child pi launch", () => {
     expect(argv[1]).toBe(`PI_SUBAGENTS_CHILD_SPEC=${f.specFile}`);
     expect(argv).toContain("-a");
     expect(argv[argv.length - 1]).toBe(`@${f.promptFile}`);
+  });
+});
+
+describe("buildChildCommand — the names a child is given", () => {
+  it("names the session with the handle while the session id stays the agent id", () => {
+    // Two different names on purpose: `--session-id` is what finds the transcript
+    // the parent tails, `--name` is what the user types to reach the agent.
+    const argv = buildChildCommand({
+      files: files(),
+      spec: spec(),
+      agentConfig: undefined,
+      isolated: false,
+      resolved: resources(),
+      piBinary: PI_BINARY,
+      projectTrusted: true,
+      name: HANDLE,
+      modelFlag: ["--provider", "anthropic", "--model", "claude-sonnet-4"],
+      thinkingFlag: [],
+      toolFlags: [],
+      agentSessionDir: "/tmp/subagent-sessions/root-session",
+    });
+
+    expect(argv[argv.indexOf("--session-id") + 1]).toBe("0f8a4b7c-2d3e-4a5b");
+    expect(argv[argv.indexOf("--name") + 1]).toBe(HANDLE);
+  });
+});
+
+describe("childMayTrustProject — whose `.pi` files the child is trusted with", () => {
+  const project = "/repos/mine";
+
+  it("trusts the parent's own project and anything inside it", () => {
+    const base = { parentTrusted: true, projectRoot: project, projectCopy: false };
+    expect(childMayTrustProject({ ...base, childCwd: project })).toBe(true);
+    expect(childMayTrustProject({ ...base, childCwd: join(project, "packages", "a") })).toBe(true);
+    // A sibling whose name merely starts with the project's is not inside it.
+    expect(childMayTrustProject({ ...base, childCwd: "/repos/mine-other" })).toBe(false);
+  });
+
+  it("refuses a child working in another repo, which pi would have prompted a human about", () => {
+    expect(
+      childMayTrustProject({
+        parentTrusted: true,
+        projectRoot: project,
+        childCwd: "/repos/somebody-else",
+        projectCopy: false,
+      }),
+    ).toBe(false);
+  });
+
+  it("trusts a worktree spawn, which is the parent's own copy of the project", () => {
+    expect(
+      childMayTrustProject({
+        parentTrusted: true,
+        projectRoot: project,
+        childCwd: join(tmpdir(), "pi-agent-abc123"),
+        projectCopy: true,
+      }),
+    ).toBe(true);
+  });
+
+  it("never trusts anything when the parent session does not", () => {
+    const base = { parentTrusted: false, projectRoot: project, projectCopy: false };
+    expect(childMayTrustProject({ ...base, childCwd: project })).toBe(false);
+    expect(childMayTrustProject({ ...base, childCwd: project, projectCopy: true })).toBe(false);
+  });
+});
+
+describe("writeStructuredSchema — the file the child recompiles", () => {
+  it("writes the schema the caller compiled, so the child's recompile agrees", () => {
+    const dir = mkdtempSync(join(tmpdir(), "rex-launcher-schema-"));
+    try {
+      const path = join(dir, "schema.json");
+      const compiled = compileJsonSchema({ type: "object", properties: { answer: { type: "string" } } });
+      if (!compiled.ok) throw new Error(compiled.message);
+
+      expect(writeStructuredSchema(path, compiled.compiled)).toBeUndefined();
+      expect(JSON.parse(readFileSync(path, "utf-8"))).toEqual(compiled.compiled.schema);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("reports the problem instead of launching a child with no schema behind it", () => {
+    const dir = mkdtempSync(join(tmpdir(), "rex-launcher-schema-"));
+    try {
+      // A directory where the file should go: the write fails, and the caller
+      // has to hear about it before a child is launched pointing at a path that
+      // holds no schema.
+      const path = join(dir, "schema.json");
+      mkdirSync(path);
+      const compiled = compileJsonSchema({ type: "object" });
+      if (!compiled.ok) throw new Error(compiled.message);
+
+      expect(writeStructuredSchema(path, compiled.compiled)).toBeTruthy();
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
   });
 });
 
@@ -594,6 +703,41 @@ describe("writeChildFiles — the child's inputs on disk", () => {
 });
 
 describe("childSpecFromSpawn — what the child needs to know", () => {
+  it("widens a memory agent's tool scope exactly as the in-process runner does", () => {
+    // `runAgent()` completes the memory tool set before choosing the block, so a
+    // pane child has to arrive with the same scope: otherwise it is told to
+    // write memory with `write` but no `edit`, or (write denied) told it can
+    // write at all.
+    const taskDir = mkdtempSync(join(tmpdir(), "rex-launcher-memory-"));
+    try {
+      const spec = (type: string) =>
+        childSpecFromSpawn({
+          agentId: `${type}-1`,
+          rootSessionId: "root-session",
+          depth: 1,
+          maxSubagentDepth: 2,
+          agentConfig: configOf(type),
+          type,
+          cwd: taskDir,
+          model: "claude-sonnet-4",
+          thinking: "medium",
+          pane: { sessionId: "session:pane", windowId: "window:1" },
+        });
+
+      // `tools: read, write` and no denylist: `edit` is auto-added.
+      expect(spec("memory-readwrite").toolScope.tools).toEqual(["read", "write", "edit"]);
+      // `tools: read, grep` — no write capability, so nothing is added.
+      expect(spec("memory-readonly").toolScope.tools).toEqual(["read", "grep"]);
+      // `tools: read, write` with `write` denied: the denylist decides, and a
+      // read-only agent needs no widening beyond the read it already has.
+      const denied = spec("memory-denied-write").toolScope;
+      expect(denied.tools).toEqual(["read", "write"]);
+      expect(denied.excludeTools).toEqual(["write"]);
+    } finally {
+      rmSync(taskDir, { recursive: true, force: true });
+    }
+  });
+
   it("carries identity, depth, tool scope, model and pane ids", () => {
     const configCwd = mkdtempSync(join(tmpdir(), "rex-launcher-spec-"));
     try {
@@ -614,7 +758,6 @@ describe("childSpecFromSpawn — what the child needs to know", () => {
         cwd: configCwd,
         configCwd,
         maxTurns: 12,
-        graceTurns: 3,
         model: "claude-sonnet-4",
         thinking: "high",
         pane: { sessionId: "session:pane", windowId: "window:1" },
@@ -631,7 +774,8 @@ describe("childSpecFromSpawn — what the child needs to know", () => {
         cwd: configCwd,
         configCwd,
         maxTurns: 12,
-        graceTurns: 3,
+        // No `graceTurns`: the spec does not carry one. The grace comes from the
+        // project's settings, which the child loads itself.
         toolScope: { tools: ["read", "grep"], excludeTools: ["grep"] },
         model: "claude-sonnet-4",
         thinking: "high",

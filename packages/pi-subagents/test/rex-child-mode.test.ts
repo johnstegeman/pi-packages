@@ -8,18 +8,13 @@
  * is written exactly once.
  */
 
-import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { AgentManager } from "../src/agent-manager.js";
 import subagentsExtension from "../src/index.js";
-import {
-  installChildMode,
-  isChildMode,
-  readChildSpec,
-  resetChildModeForTests,
-  writeChildResult,
-} from "../src/rex/child-mode.js";
+import { installChildMode, readChildSpec, writeChildResult } from "../src/rex/child-mode.js";
 import type { ChildSpec } from "../src/rex/launcher.js";
 import { ctx, hermeticDir, makePi } from "./helpers/boot-extension.js";
 import { installFakeRex } from "./helpers/rex-pane-harness.js";
@@ -49,9 +44,6 @@ let cleanup: (() => void) | undefined;
 afterEach(() => {
   cleanup?.();
   cleanup = undefined;
-  // The flag is module state for the life of the process; without this the
-  // "was not a child before" precondition would depend on test order.
-  resetChildModeForTests();
   vi.restoreAllMocks();
 });
 
@@ -85,6 +77,11 @@ function specFor(dir: string, overrides: Partial<ChildSpec> = {}): ChildSpec {
  */
 function makeChildPi() {
   const { pi, tools, commands } = makePi();
+  // What pi's registry holds: the two built-ins this suite's children can use,
+  // plus whatever an extension registered. Real pi's `getActiveTools()` returns
+  // only names that are in here, which is the whole point of the scope
+  // comparison — a name the child does not have can never come back.
+  pi.getAllTools = vi.fn(() => [toolInfo("read", "builtin:read"), toolInfo("codemode", "builtin:codemode"), ...tools.values()]);
   const handlers = new Map<string, ((event: any, c: any) => any)[]>();
   pi.on = vi.fn((event: string, handler: (e: any, c: any) => any) => {
     const list = handlers.get(event) ?? [];
@@ -247,18 +244,6 @@ describe("writeChildResult", () => {
 });
 
 describe("installChildMode", () => {
-  it("marks the process as a child", () => {
-    const dir = hermetic();
-    const { pi } = makeChildPi();
-    // `afterEach` resets the module flag, so this is a precondition rather than a
-    // claim about test order.
-    expect(isChildMode()).toBe(false);
-
-    installChildMode(pi, specFor(dir));
-
-    expect(isChildMode()).toBe(true);
-  });
-
   it("registers the delegation tools inside the depth cap, and no command", async () => {
     const dir = hermetic();
     const { pi, tools, commands, send } = makeChildPi();
@@ -271,14 +256,15 @@ describe("installChildMode", () => {
     expect(commands.size).toBe(0);
     expect(pi.registerCommand).not.toHaveBeenCalled();
     // The injected tools survive the tool scope even though `tools: read` never
-    // named them — the in-process scope re-admits them for the same reason.
+    // named them — the in-process scope re-admits them for the same reason. The
+    // order is the registry's, which is what pi activates: `codemode` is a
+    // built-in here, and the three delegation tools were registered above.
     expect(pi.setActiveTools).toHaveBeenCalledWith([
       "read",
+      "codemode",
       "Agent",
       "get_subagent_result",
       "steer_subagent",
-      // `codemode` is re-admitted unconditionally, as the in-process scope does.
-      "codemode",
     ]);
   });
 
@@ -381,7 +367,9 @@ describe("installChildMode", () => {
     installChildMode(pi, specFor(dir, { allowedSubagents: false }));
     await send("session_start");
 
-    expect(pi.setActiveTools).toHaveBeenCalledWith(["read", "query", "codemode"]);
+    // `codemode` is in scope but this child's registry has no such tool, so it
+    // is not activated — pi would drop the name anyway.
+    expect(pi.setActiveTools).toHaveBeenCalledWith(["read", "query"]);
   });
 
   it("drops a denied tool even when an extension registered it", async () => {
@@ -398,12 +386,23 @@ describe("installChildMode", () => {
     }));
     await send("session_start");
 
-    expect(pi.setActiveTools).toHaveBeenCalledWith(["read", "codemode"]);
+    expect(pi.setActiveTools).toHaveBeenCalledWith(["read"]);
   });
 
   it("does not re-set an active list that has not changed", async () => {
     const dir = hermetic();
     const { pi, send } = makeChildPi();
+    // The case that made the guard dead: `codemode` is always re-admitted into
+    // the scope, and this child's registry has no such tool — which is what
+    // `-ne` and `isolated: true` children look like. pi drops unknown names on
+    // the way in, so the phantom can never come back from `getActiveTools()`,
+    // and comparing the unfiltered scope would find a difference on every turn.
+    pi.getAllTools = vi.fn(() => [toolInfo("read", "builtin:read")]);
+    const applied: string[][] = [];
+    pi.setActiveTools = vi.fn((names: string[]) => {
+      applied.push(names.filter((name) => name === "read"));
+    });
+    pi.getActiveTools = vi.fn(() => applied[applied.length - 1] ?? []);
     installChildMode(pi, specFor(dir, { allowedSubagents: false }));
 
     await send("session_start");
@@ -412,6 +411,7 @@ describe("installChildMode", () => {
     await send("turn_end", {});
     await send("turn_end", {});
 
+    expect(applied).toEqual([["read"]]);
     expect(pi.setActiveTools).toHaveBeenCalledTimes(1);
   });
 
@@ -482,6 +482,82 @@ describe("installChildMode", () => {
     await send("agent_settled", SETTLED, c);
 
     expect(JSON.parse(readFileSync(spec.resultPath, "utf-8")).failure).toBe("overloaded");
+  });
+
+  it("reports a length stop that produced nothing as a failure, even with text before it", async () => {
+    // The #144 shape: an earlier turn answered, and the FINAL message died at
+    // the output token limit without emitting anything. Deciding from the run's
+    // last non-empty text would call that a completion whose answer is the
+    // previous turn's — the silent max-token death `finalTurnError()` guards
+    // against in-process.
+    const dir = hermetic();
+    const spec = specFor(dir, { allowedSubagents: false });
+    const { pi, send } = makeChildPi();
+    const c = childCtx();
+    installChildMode(pi, spec);
+
+    await send("message_end", assistantEnd("the earlier answer"), c);
+    await send("message_end", {
+      message: {
+        role: "assistant",
+        content: [{ type: "text", text: "" }],
+        stopReason: "length",
+        usage: { input: 0, output: 0, cacheWrite: 0 },
+      },
+    }, c);
+    await send("agent_settled", SETTLED, c);
+
+    const written = JSON.parse(readFileSync(spec.resultPath, "utf-8"));
+    expect(written.failure).toMatch(/output token limit/i);
+    // The text stays the earlier turn's: it is what the run did say.
+    expect(written.text).toBe("the earlier answer");
+  });
+
+  it("does not fail a length stop that did produce text", async () => {
+    const dir = hermetic();
+    const spec = specFor(dir, { allowedSubagents: false });
+    const { pi, send } = makeChildPi();
+    const c = childCtx();
+    installChildMode(pi, spec);
+
+    await send("message_end", {
+      message: {
+        role: "assistant",
+        content: [{ type: "text", text: "a truncated but real answer" }],
+        stopReason: "length",
+        usage: { input: 0, output: 0, cacheWrite: 0 },
+      },
+    }, c);
+    await send("agent_settled", SETTLED, c);
+
+    const written = JSON.parse(readFileSync(spec.resultPath, "utf-8"));
+    expect("failure" in written).toBe(false);
+    expect(written.text).toBe("a truncated but real answer");
+  });
+
+  it("reports a schema it cannot apply as the run's failure instead of answering in prose", async () => {
+    // The parent validated the schema before launching, so this is the case
+    // where the file changed under the child: without a failure the caller's
+    // `agent({ schema })` would resolve to prose it cannot read.
+    const dir = hermetic();
+    const schemaPath = join(dir, "schema.json");
+    writeFileSync(schemaPath, "{ not a schema", "utf-8");
+    const spec = specFor(dir, { allowedSubagents: false, structuredSchemaPath: schemaPath });
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const { pi, tools, send } = makeChildPi();
+    const c = childCtx();
+    installChildMode(pi, spec);
+
+    expect(tools.has("StructuredOutput")).toBe(false);
+    expect(warn.mock.calls[0][0]).toContain("could not be applied");
+
+    await send("message_end", assistantEnd("prose instead"), c);
+    await send("agent_settled", SETTLED, c);
+
+    const written = JSON.parse(readFileSync(spec.resultPath, "utf-8"));
+    expect(written.failure).toContain("could not be applied");
+    expect(written.text).toBe("prose instead");
+    expect(c.shutdown).toHaveBeenCalledTimes(1);
   });
 
   it("reports the spec's thinking level when the context carries none", async () => {
@@ -575,6 +651,26 @@ describe("installChildMode", () => {
     await send("turn_end", {}, c);
 
     expect(pi.sendUserMessage).toHaveBeenCalledTimes(1);
+  });
+
+  it("takes the turn cap from config_cwd, the project the agent belongs to", async () => {
+    // `cwd` is an empty directory and `config_cwd` holds the project: the cap
+    // has to come from the latter, exactly as the pools and the pane provider
+    // already do. Reading the cap from `cwd` would leave this run uncapped.
+    const project = hermetic({ defaultMaxTurns: 1, graceTurns: 1 });
+    const elsewhere = mkdtempSync(join(tmpdir(), "pi-child-elsewhere-"));
+    try {
+      const { pi, send } = makeChildPi();
+      const c = childCtx();
+      installChildMode(pi, specFor(elsewhere, { configCwd: project }));
+
+      await send("turn_end", {}, c);
+
+      expect(pi.sendUserMessage).toHaveBeenCalledTimes(1);
+      expect(pi.sendUserMessage.mock.calls[0][0]).toContain("turn limit");
+    } finally {
+      rmSync(elsewhere, { recursive: true, force: true });
+    }
   });
 
   it("warns once about a config_cwd it cannot reproduce", () => {

@@ -15,18 +15,19 @@
 // fixture agent files the in-process template tests use, so a divergence shows
 // up as a failing test rather than as a quietly less-confined child.
 
-import { mkdirSync, writeFileSync } from "node:fs";
-import { join } from "node:path";
+import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { join, resolve, sep } from "node:path";
 import {
   extensionCanonicalName,
   extensionCanonicalNames,
   normalizeMaxTurns,
   parseExtensionsSpec,
 } from "../agent-runner.js";
-import { getToolNamesForType } from "../agent-types.js";
+import { getMemoryToolNames, getReadOnlyMemoryToolNames, getToolNamesForType } from "../agent-types.js";
 import { sessionTaskDir } from "../output-file.js";
 import type { AgentConfig } from "../types.js";
-import { type PaneDeps, type RexExecResult, rexReply } from "./rex-cli.js";
+import { type CompiledSchema, compileJsonSchema } from "../workflow/json-schema.js";
+import { failureReason, type PaneDeps, type RexExecResult, rexReply } from "./rex-cli.js";
 
 /** The `pi` flags' documented file forms: `--system-prompt <text|path>`. */
 const REPLACE_PROMPT_FLAG = "--system-prompt";
@@ -58,7 +59,6 @@ export interface ChildSpec {
   /** Where the type's config was discovered, when that is not `cwd`. */
   configCwd?: string;
   maxTurns?: number;
-  graceTurns?: number;
   /** Compiled structured-output schema the child must satisfy, when the caller asked for one. */
   structuredSchemaPath?: string;
   /**
@@ -284,6 +284,52 @@ export function writeChildFiles(input: {
 }
 
 /**
+ * Write the schema the child recompiles, and prove the round trip works.
+ *
+ * The child reads this file and runs the same validator over it, so a file it
+ * cannot compile leaves it with no `StructuredOutput` tool at all — a run that
+ * answers in prose its caller cannot read. Reading the file back here is the
+ * parent's half of that contract: a schema that survives the write echoes the
+ * caller's compiled one, and anything else is reported while the in-process
+ * path is still available rather than discovered by a child that has already
+ * started.
+ *
+ * Returns the problem, or undefined when the file is good.
+ */
+export function writeStructuredSchema(path: string, schema: CompiledSchema): string | undefined {
+  try {
+    writeFileSync(path, JSON.stringify(schema.schema, null, 2), "utf-8");
+    const verdict = compileJsonSchema(JSON.parse(readFileSync(path, "utf-8")));
+    return verdict.ok ? undefined : verdict.message;
+  } catch (error) {
+    return error instanceof Error ? error.message : String(error);
+  }
+}
+
+/**
+ * The built-in tool names a child is scoped to, with the memory tools its scope
+ * needs added — the same widening `runAgent()` does before it builds the memory
+ * block (`agent-runner.ts:746-767`), so a pane child and its in-process sibling
+ * are told the same thing about the same set.
+ *
+ * The capability question is asked of the *effective* set: a `tools: read,
+ * write` agent whose `disallowed_tools` denies `write` cannot write, and gets
+ * the read-only widening (and, in the prompt, the read-only block).
+ */
+function memoryAwareToolNames(type: string, config: AgentConfig | undefined): string[] {
+  const names = config?.builtinToolNames ?? getToolNamesForType(type);
+  if (config?.memory === undefined) return names;
+  const existing = new Set(names);
+  const denied = config.disallowedTools === undefined ? undefined : new Set(config.disallowedTools);
+  const effectivelyHas = (name: string) => existing.has(name) && denied?.has(name) !== true;
+  const extra =
+    effectivelyHas("write") || effectivelyHas("edit")
+      ? getMemoryToolNames(existing)
+      : getReadOnlyMemoryToolNames(existing);
+  return extra.length === 0 ? names : [...names, ...extra];
+}
+
+/**
  * The spec for one pane child, resolved from the parent's spawn options.
  *
  * Not pure in the strictest sense: it calls `sessionTaskDir()`, which creates
@@ -299,6 +345,10 @@ export function writeChildFiles(input: {
  * `description` is likewise absent: it is the pane's label, not the child's
  * input — `buildNewLayerArgs()` takes it as `label`, and the task text reaches
  * the child as `prompt.md`.
+ *
+ * `toolScope.tools` is the *effective* set, not the type's raw `tools:` list:
+ * `memoryAwareToolNames()` applies the same widening `runAgent()` does, so a
+ * memory agent's pane child has the tools its memory block tells it to use.
  */
 export function childSpecFromSpawn(input: {
   agentId: string;
@@ -312,7 +362,6 @@ export function childSpecFromSpawn(input: {
   configCwd?: string;
   isolated?: boolean;
   maxTurns?: number;
-  graceTurns?: number;
   structuredSchemaPath?: string;
   model: string;
   thinking: string;
@@ -337,7 +386,7 @@ export function childSpecFromSpawn(input: {
     resultPath: join(taskDir, `${input.agentId}.result.json`),
     cwd: input.cwd,
     toolScope: {
-      tools: config?.builtinToolNames ?? getToolNamesForType(input.type),
+      tools: memoryAwareToolNames(input.type, config),
       excludeTools: config?.disallowedTools ?? [],
     },
     model: input.model,
@@ -349,7 +398,6 @@ export function childSpecFromSpawn(input: {
   if (input.parentAgentId !== undefined) spec.parentAgentId = input.parentAgentId;
   if (input.configCwd !== undefined) spec.configCwd = input.configCwd;
   if (maxTurns !== undefined) spec.maxTurns = maxTurns;
-  if (input.graceTurns !== undefined) spec.graceTurns = input.graceTurns;
   if (input.structuredSchemaPath !== undefined) spec.structuredSchemaPath = input.structuredSchemaPath;
   // `ext:` selectors are dropped when the run is isolated, exactly as
   // `parseExtSelectors()` receives nothing in that case in-process.
@@ -357,15 +405,50 @@ export function childSpecFromSpawn(input: {
   if (extSelectors && extSelectors.length > 0) spec.extSelectors = extSelectors;
   return spec;
 }
-
 /**
  * The trust answer a pane child is launched with. `-a` trusts the project's
  * `.pi` files for the run, `-na` ignores them — the same two answers pi offers a
  * human, so the child runs under the trust decision the parent session made
  * rather than stopping to ask in a pane nobody is reading.
+ *
+ * `-a` is only ever passed for a child whose working directory is the parent's
+ * own project (or the parent's own worktree copy of it) — see
+ * `childMayTrustProject()`. A spawn pointed at another repo gets `-na`, which is
+ * what a human would have answered after seeing the trust prompt rather than a
+ * free pass for files this session was never trusted with.
  */
 const TRUST_FLAG = "-a";
 const NO_TRUST_FLAG = "-na";
+
+/**
+ * Whether a child's `cwd` is covered by the parent's trust answer.
+ *
+ * `-a`/`-na` is a statement about the project-local `.pi` files of the
+ * directory the child starts in. The parent was asked about *its* project, so
+ * that answer covers a child working there — and a worktree spawn, which is the
+ * parent's own copy of it (`options.worktreeBase` names what it was copied
+ * from). Anywhere else is a different project with its own `.pi` files, and
+ * vouching for them would grant a child what pi would have asked a human about.
+ *
+ * Lexical, not `realpath`: a symlinked path to the same tree is a trust
+ * question pi itself cannot answer better, and `-na` on a doubt confines more.
+ */
+export function childMayTrustProject(input: {
+  /** The parent session's own answer, from `ctx.isProjectTrusted()`. */
+  parentTrusted: boolean;
+  /** The parent session's own directory — the project it was trusted for. */
+  projectRoot: string;
+  /** The directory the child starts in. */
+  childCwd: string;
+  /** True when the child's `cwd` is a worktree copy of `projectRoot`. */
+  projectCopy: boolean;
+}): boolean {
+  if (!input.parentTrusted) return false;
+  if (input.projectCopy) return true;
+  const root = resolve(input.projectRoot);
+  const child = resolve(input.childCwd);
+  return child === root || child.startsWith(root.endsWith(sep) ? root : root + sep);
+}
 
 /**
  * The argv the pane runs: `pi` as the parent's own build, told which spec it is
@@ -380,7 +463,9 @@ const NO_TRUST_FLAG = "-na";
  * The child's pi session id is the agent id. That is what lets the parent find
  * the transcript it tails (`<agentSessionDir>/…<id>.jsonl`) and reopen it from
  * `/agents` after the pane is gone; a uuid slice starts and ends alphanumeric,
- * which is what pi requires of a session id.
+ * which is what pi requires of a session id. `--name` is the record's handle
+ * instead — what a person types, and the only name the agent answers to inside
+ * the pane's own session.
  *
  * A resume passes `sessionFile` instead, and then pi is told to open that file:
  * the same transcript continues under a second process, which is the only way
@@ -402,8 +487,9 @@ export function buildChildCommand(input: {
   /** `<getAgentDir()>/subagent-sessions/<rootSessionId>/`, outside the user's `/resume` list. */
   agentSessionDir: string;
   /**
-   * Whether the parent session trusts this project — the child is told `-a`
-   * when it does and `-na` when it does not.
+   * What to tell the child about this project's trust — already narrowed by
+   * `childMayTrustProject()` to "the parent trusts the project *and* the child
+   * works in it".
    *
    * Not optional: a child that inherits no answer stops on a trust prompt in a
    * pane nobody is looking at, and each of the two answers is wrong for the
@@ -411,6 +497,13 @@ export function buildChildCommand(input: {
    * child sees exactly the project-local files its parent was allowed to.
    */
   projectTrusted: boolean;
+  /**
+   * What pi calls the child's session in its own UI: the record's handle
+   * (`explore-2`), which is the name the user types to reach the agent. The
+   * durable id stays in `--session-id` — a session is found by that, not by
+   * this.
+   */
+  name: string;
   /**
    * The child's session file, when it is being relaunched on an existing one
    * (a resume). Replaces `--session-id`/`--session-dir`: `--session <path>`
@@ -439,7 +532,7 @@ export function buildChildCommand(input: {
     input.piBinary,
     ...sessionFlags,
     "--name",
-    input.spec.agentId,
+    input.name,
     input.projectTrusted ? TRUST_FLAG : NO_TRUST_FLAG,
     systemPromptFlag,
     input.files.systemFile,
@@ -666,21 +759,6 @@ async function setLayerMinimized(deps: PaneDeps, layerId: string): Promise<Minim
     const message = error instanceof Error ? error.message : String(error);
     return { minimized: false, reason: failureReason(message, "rex call failed") };
   }
-}
-
-/**
- * Why a `rex` call failed, as it should be shown to a user.
- *
- * The CLI prefixes its diagnostics with `Error: `, which is its own
- * decoration rather than the message; after it is what went wrong
- * (`bad_request: a window must keep a visible pane`, a missing binary, a
- * timeout). A failure that said nothing gets the caller's `fallback`: an empty
- * diagnostic is no evidence of any particular cause, and naming one would be a
- * guess dressed as an answer.
- */
-function failureReason(text: string, fallback: string): string {
-  const detail = text.trim().replace(/^Error:\s*/i, "").trim();
-  return detail === "" ? fallback : detail;
 }
 
 /**
