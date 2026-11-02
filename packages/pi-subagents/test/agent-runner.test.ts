@@ -134,7 +134,6 @@ import {
   getGraceTurns,
   parseExtensionsSpec,
   parseExtSelectors,
-  resolveDefaultModel,
   resolveEffectiveMaxTurns,
   resumeAgent,
   runAgent,
@@ -143,6 +142,7 @@ import {
   setGraceTurns,
   setRememberAgents,
 } from "../src/agent-runner.js";
+import { resolveDefaultModel } from "../src/model-resolver.js";
 import { compileJsonSchema } from "../src/workflow/json-schema.js";
 
 /** The most recent session built by `createSession` — read by `lastToolsPassed()`. */
@@ -2776,8 +2776,9 @@ describe("agent-runner abort signal forwarding", () => {
 // through observed behavior — a broken check just means every model-pinned agent
 // quietly runs on the parent's model, costing whatever the parent costs.
 //
-// Exported for this (the file already exports normalizeMaxTurns/setGraceTurns
-// purely for test/agent-runner-settings.test.ts).
+// Imported from `model-resolver.ts`, where it lives now that the manager
+// resolves the same model at spawn time (to snapshot `record.invocation`
+// without a live session).
 describe("resolveDefaultModel", () => {
   const parent = { provider: "anthropic", id: "parent-model" } as any;
   const haiku = { provider: "anthropic", id: "claude-haiku-4-5" } as any;

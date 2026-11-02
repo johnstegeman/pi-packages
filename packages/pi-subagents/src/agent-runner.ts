@@ -29,11 +29,12 @@ import { buildParentContext, extractText } from "./context.js";
 import { DEFAULT_AGENTS } from "./default-agents.js";
 import { detectEnv } from "./env.js";
 import { buildMemoryBlock, buildReadOnlyMemoryBlock } from "./memory.js";
+import { resolveDefaultModel } from "./model-resolver.js";
 import { createNestedSubagentTools, getMaxSubagentDepth, type NestedAgentManager } from "./nested-tools.js";
 import { buildAgentPrompt, type PromptExtras } from "./prompts.js";
 import { preloadSkills } from "./skill-loader.js";
 import { createStructuredCapture, createStructuredOutputTool, structuredRetryPrompt } from "./structured-output.js";
-import type { SubagentType, ThinkingLevel } from "./types.js";
+import type { RunHandle, SubagentType, ThinkingLevel } from "./types.js";
 import type { LifetimeUsage } from "./usage.js";
 import type { CompiledSchema } from "./workflow/json-schema.js";
 
@@ -454,37 +455,6 @@ export function getGraceTurns(): number { return graceTurns; }
 /** Set the grace turns value (minimum 1). */
 export function setGraceTurns(n: number): void { graceTurns = Math.max(1, n); }
 
-/**
- * Try to find the right model for an agent type.
- * Priority: explicit option > config.model > parent model.
- */
-export function resolveDefaultModel(
-  parentModel: Model<any> | undefined,
-  registry: { find(provider: string, modelId: string): Model<any> | undefined; getAvailable?(): Model<any>[] },
-  configModel?: string,
-): Model<any> | undefined {
-  if (configModel) {
-    const slashIdx = configModel.indexOf("/");
-    if (slashIdx !== -1) {
-      const provider = configModel.slice(0, slashIdx);
-      const modelId = configModel.slice(slashIdx + 1);
-
-      // Build a set of available model keys for fast lookup
-      const available = registry.getAvailable?.();
-      const availableKeys = available
-        ? new Set(available.map((m: any) => `${m.provider}/${m.id}`))
-        : undefined;
-      const isAvailable = (p: string, id: string) =>
-        !availableKeys || availableKeys.has(`${p}/${id}`);
-
-      const found = registry.find(provider, modelId);
-      if (found && isAvailable(provider, modelId)) return found;
-    }
-  }
-
-  return parentModel;
-}
-
 /** Info about a tool event in the subagent. */
 export interface ToolActivity {
   type: "start" | "end";
@@ -553,7 +523,8 @@ export interface RunOptions {
   onToolActivity?: (activity: ToolActivity) => void;
   /** Called on streaming text deltas from the assistant response. */
   onTextDelta?: (delta: string, fullText: string) => void;
-  onSessionCreated?: (session: AgentSession) => void;
+  /** Called once the run's handle exists (a live session today). */
+  onSessionCreated?: (session: RunHandle) => void;
   /** Called at the end of each agentic turn with the cumulative count. */
   onTurnEnd?: (turnCount: number) => void;
   /**
@@ -591,7 +562,12 @@ export interface RunOptions {
 
 export interface RunResult {
   responseText: string;
-  session: AgentSession;
+  /**
+   * The run itself. A live `AgentSession` for the in-process runner; for any
+   * other runner, whatever handle it can supply — only {@link RunHandle}'s
+   * members are ever read off it.
+   */
+  session: RunHandle;
   /** True if the agent was hard-aborted (max_turns + grace exceeded). */
   aborted: boolean;
   /** True if the agent was steered to wrap up (hit soft turn limit) but finished in time. */
@@ -624,7 +600,7 @@ export interface RunResult {
  * Subscribe to a session and collect the last assistant message text.
  * Returns an object with a `getText()` getter and an `unsubscribe` function.
  */
-function collectResponseText(session: AgentSession) {
+function collectResponseText(session: RunHandle) {
   let text = "";
   const unsubscribe = session.subscribe((event: AgentSessionEvent) => {
     // message_start also fires for user and toolResult messages — resetting on
@@ -647,7 +623,7 @@ function collectResponseText(session: AgentSession) {
  * this returns "" instead of the prior turn's answer (#144). Defaults to 0 (a
  * fresh spawn, where the whole history belongs to this run).
  */
-function getLastAssistantText(session: AgentSession, startIndex = 0): string {
+function getLastAssistantText(session: RunHandle, startIndex = 0): string {
   for (let i = session.messages.length - 1; i >= startIndex; i--) {
     const msg = session.messages[i];
     if (msg.role !== "assistant") continue;
@@ -671,7 +647,7 @@ function getLastAssistantText(session: AgentSession, startIndex = 0): string {
  * Bounded by `startIndex` (like the text fallback) so a resume that produced no
  * assistant message of its own never inherits a PRIOR turn's stop reason.
  */
-function finalTurnError(session: AgentSession, startIndex = 0): string | undefined {
+function finalTurnError(session: RunHandle, startIndex = 0): string | undefined {
   for (let i = session.messages.length - 1; i >= startIndex; i--) {
     const msg = session.messages[i];
     if (msg.role !== "assistant") continue;
@@ -690,7 +666,7 @@ function finalTurnError(session: AgentSession, startIndex = 0): string | undefin
  * Wire an AbortSignal to abort a session.
  * Returns a cleanup function to remove the listener.
  */
-function forwardAbortSignal(session: AgentSession, signal?: AbortSignal): () => void {
+function forwardAbortSignal(session: RunHandle, signal?: AbortSignal): () => void {
   if (!signal) return () => {};
   const onAbort = () => session.abort();
   signal.addEventListener("abort", onAbort, { once: true });
@@ -1264,21 +1240,34 @@ export async function runAgent(
   };
 }
 
+/** Options for one resumed turn of an existing run. */
+export interface ResumeAgentOptions {
+  onToolActivity?: (activity: ToolActivity) => void;
+  onAssistantUsage?: (usage: LifetimeUsage) => void;
+  onCompaction?: (info: { reason: "manual" | "threshold" | "overflow"; tokensBefore: number }) => void;
+  /** Called at the end of each resumed turn, for liveness reporting. */
+  onTurnEnd?: (turnCount: number) => void;
+  signal?: AbortSignal;
+}
+
+/** What one resumed turn produced. */
+export interface ResumeAgentResult {
+  text: string;
+  failure?: string;
+}
+
 /**
  * Send a new prompt to an existing session (resume).
+ *
+ * Takes a {@link RunHandle}, not an `AgentSession`: a resume IS a prompt on a
+ * run that already exists, and the record's handle is the only thing the
+ * manager has — an in-process session today, a child `pi` in a pane otherwise.
  */
 export async function resumeAgent(
-  session: AgentSession,
+  session: RunHandle,
   prompt: string,
-  options: {
-    onToolActivity?: (activity: ToolActivity) => void;
-    onAssistantUsage?: (usage: LifetimeUsage) => void;
-    onCompaction?: (info: { reason: "manual" | "threshold" | "overflow"; tokensBefore: number }) => void;
-    /** Called at the end of each resumed turn, for liveness reporting. */
-    onTurnEnd?: (turnCount: number) => void;
-    signal?: AbortSignal;
-  } = {},
-): Promise<{ text: string; failure?: string }> {
+  options: ResumeAgentOptions = {},
+): Promise<ResumeAgentResult> {
   // Boundary for the history fallback: the session already holds prior turns,
   // so only assistant text produced by THIS resume prompt counts as its output
   // — a failed resume must not surface the previous turn's answer (#144).
@@ -1329,7 +1318,7 @@ export async function resumeAgent(
  * The message will interrupt the agent after its current tool execution.
  */
 export async function steerAgent(
-  session: AgentSession,
+  session: RunHandle,
   message: string,
 ): Promise<void> {
   await session.steer(message);
@@ -1338,7 +1327,7 @@ export async function steerAgent(
 /**
  * Get the subagent's conversation messages as formatted text.
  */
-export function getAgentConversation(session: AgentSession): string {
+export function getAgentConversation(session: RunHandle): string {
   const parts: string[] = [];
 
   for (const msg of session.messages) {

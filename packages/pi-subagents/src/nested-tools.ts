@@ -1,6 +1,5 @@
 import type { Model } from "@earendil-works/pi-ai";
 import {
-  type AgentSession,
   defineTool,
   type ExtensionAPI,
   type ExtensionContext,
@@ -32,6 +31,7 @@ import type {
   AgentInvocation,
   AgentRecord,
   IsolationMode,
+  RunHandle,
   ThinkingLevel,
 } from "./types.js";
 import { addUsage } from "./usage.js";
@@ -62,7 +62,7 @@ interface NestedSpawnOptions {
   invocation?: AgentInvocation;
   signal?: AbortSignal;
   onAssistantUsage?: (usage: { input: number; output: number; cacheWrite: number }) => void;
-  onSessionCreated?: (session: AgentSession) => void;
+  onSessionCreated?: (session: RunHandle) => void;
   depth: number;
   parentAgentId: string;
   maxSubagentDepth: number;

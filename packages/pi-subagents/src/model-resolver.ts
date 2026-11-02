@@ -2,6 +2,8 @@
  * Model resolution: exact match ("provider/modelId") with fuzzy fallback.
  */
 
+import type { Model } from "@earendil-works/pi-ai";
+
 export interface ModelEntry {
   id: string;
   name: string;
@@ -19,9 +21,10 @@ export interface ModelRegistry {
  * the Agent tool result), the canonical one where there is room to disambiguate
  * two providers serving a similarly-named model (the conversation viewer).
  *
- * One function, because `index.ts` labels the model it resolved before the run
- * and `agent-manager.ts` relabels it from the live session afterwards — the two
- * must agree or the label would visibly change the moment the session starts.
+ * One function, because `index.ts` labels the model it resolved before the run,
+ * `agent-manager.ts` snapshots the same labels at spawn and refines them from
+ * whatever the run reports afterwards — all three must agree, or the label
+ * would visibly change the moment the run starts.
  */
 export function describeModel(
   model: { provider: string; id: string; name?: string },
@@ -115,4 +118,39 @@ export function resolveModel(
     .sort()
     .join("\n");
   return `Model not found: "${input}".\n\nAvailable models:\n${modelList}`;
+}
+
+/**
+ * Try to find the right model for an agent type.
+ * Priority: explicit option > config.model > parent model.
+ *
+ * Lives here rather than in `agent-runner.ts` because the manager resolves it
+ * too: `record.invocation` is snapshotted at spawn, for every modality,
+ * instead of read back off a live session.
+ */
+export function resolveDefaultModel(
+  parentModel: Model<any> | undefined,
+  registry: { find(provider: string, modelId: string): Model<any> | undefined; getAvailable?(): Model<any>[] },
+  configModel?: string,
+): Model<any> | undefined {
+  if (configModel) {
+    const slashIdx = configModel.indexOf("/");
+    if (slashIdx !== -1) {
+      const provider = configModel.slice(0, slashIdx);
+      const modelId = configModel.slice(slashIdx + 1);
+
+      // Build a set of available model keys for fast lookup
+      const available = registry.getAvailable?.();
+      const availableKeys = available
+        ? new Set(available.map((m: any) => `${m.provider}/${m.id}`))
+        : undefined;
+      const isAvailable = (p: string, id: string) =>
+        !availableKeys || availableKeys.has(`${p}/${id}`);
+
+      const found = registry.find(provider, modelId);
+      if (found && isAvailable(provider, modelId)) return found;
+    }
+  }
+
+  return parentModel;
 }

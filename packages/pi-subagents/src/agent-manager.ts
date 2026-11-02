@@ -18,11 +18,20 @@ import { randomUUID } from "node:crypto";
 import { statSync } from "node:fs";
 import { isAbsolute } from "node:path";
 import type { Model } from "@earendil-works/pi-ai";
-import type { AgentSession, ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
-import { resumeAgent, runAgent, type ToolActivity } from "./agent-runner.js";
+import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
+import {
+  type ResumeAgentOptions,
+  type ResumeAgentResult,
+  type RunOptions,
+  type RunResult,
+  resumeAgent,
+  runAgent,
+  type ToolActivity,
+} from "./agent-runner.js";
+import { getAgentConfig } from "./agent-types.js";
 import { assignHandle, handleBase } from "./mention.js";
-import { describeModel } from "./model-resolver.js";
-import type { AgentInvocation, AgentRecord, AgentTombstone, IsolationMode, MentionResolution, SubagentType, ThinkingLevel } from "./types.js";
+import { describeModel, resolveDefaultModel } from "./model-resolver.js";
+import type { AgentInvocation, AgentRecord, AgentTombstone, IsolationMode, MentionResolution, RunHandle, SubagentType, ThinkingLevel } from "./types.js";
 import { addUsage, type LifetimeUsage } from "./usage.js";
 import type { CompiledSchema } from "./workflow/json-schema.js";
 import { cleanupWorktree, createWorktree, isWorktreeIsolationEnabled, pruneWorktrees, } from "./worktree.js";
@@ -41,6 +50,39 @@ export type OnAgentCompact = (record: AgentRecord, info: CompactionInfo) => void
  */
 export type OnAgentUsage = (record: AgentRecord, usage: LifetimeUsage) => void;
 export type CompactionInfo = { reason: "manual" | "threshold" | "overflow"; tokensBefore: number };
+
+/**
+ * A run's entry points: create a run (`start`), or prompt an existing one again
+ * (`resume`).
+ *
+ * Injection exists so the manager need not know which modality a spawn takes.
+ * `runAgent`/`resumeAgent` are the default and, today, the only implementation;
+ * the second one — a real `pi` in a Rex pane, tailed from its own session file —
+ * supplies the same two entry points and nothing else has to change. Both
+ * receive the manager's per-run wiring on `options` (tool activity, usage,
+ * turn ends, compaction, the abort signal, the handle), which is why the types
+ * here are the runners' own rather than a reduced copy of them.
+ */
+export type RunStart = (
+  ctx: ExtensionContext,
+  type: SubagentType,
+  prompt: string,
+  options: RunOptions,
+) => Promise<RunResult>;
+
+export type RunResume = (
+  session: RunHandle,
+  prompt: string,
+  options?: ResumeAgentOptions,
+) => Promise<ResumeAgentResult>;
+
+export interface ManagerRunner {
+  start: RunStart;
+  resume: RunResume;
+}
+
+/** The default runner: one in-process pi session per run. */
+const IN_PROCESS_RUNNER: ManagerRunner = { start: runAgent, resume: resumeAgent };
 
 /**
  * Default max concurrent background agents.
@@ -283,8 +325,8 @@ interface SpawnOptions {
   onToolActivity?: (activity: ToolActivity) => void;
   /** Called on streaming text deltas from the assistant response. */
   onTextDelta?: (delta: string, fullText: string) => void;
-  /** Called when the agent session is created (for accessing session stats). */
-  onSessionCreated?: (session: AgentSession) => void;
+  /** Called when the run's handle exists (for accessing session stats). */
+  onSessionCreated?: (session: RunHandle) => void;
   /** Called at the end of each agentic turn with the cumulative count. */
   onTurnEnd?: (turnCount: number) => void;
   /** Called once per assistant message_end with that message's usage delta. */
@@ -343,11 +385,12 @@ const CHILD_SHUTDOWN_TIMEOUT_MS = 3_000;
  * extension armed in `session_start` leaks once per spawn, and its next tick throws
  * `assertActive()` from a bare timer callback — an uncaughtException that kills pi (#242).
  */
-async function shutdownChildSession(session: AgentSession | undefined): Promise<void> {
+async function shutdownChildSession(session: RunHandle | undefined): Promise<void> {
   try {
     const runner = session?.extensionRunner;
-    // Optional all the way down: on a pi without the getter, or a stubbed session from a
-    // partial `onSessionCreated`, skip the emit — the same degrade as before this fix.
+    // Optional all the way down: a handle backed by a file has no extension runner at
+    // all, and one from a partial `onSessionCreated` may lack it — skip the emit and
+    // fall through to the dispose, the same degrade as before this fix.
     if (runner?.hasHandlers?.("session_shutdown")) {
       // Raced, not awaited outright. `emit` runs every handler serially with no timeout of
       // its own, and dispose() is reached from pi's own `session_shutdown` with the TUI
@@ -371,6 +414,8 @@ export class AgentManager {
   private onUsage?: OnAgentUsage;
   private maxConcurrent: number;
   private maxConcurrentForeground = DEFAULT_MAX_CONCURRENT_FOREGROUND;
+  /** How a run actually runs — see {@link ManagerRunner}. */
+  private runner: ManagerRunner;
   /** Base repos worktrees were created from — so dispose() can prune them all,
    *  not just the parent repo (caller-supplied cwd can target other repos). */
   private worktreeRepos = new Set<string>();
@@ -420,7 +465,9 @@ export class AgentManager {
     onStart?: OnAgentStart,
     onCompact?: OnAgentCompact,
     onUsage?: OnAgentUsage,
+    options: { runner?: ManagerRunner } = {},
   ) {
+    this.runner = options.runner ?? IN_PROCESS_RUNNER;
     this.onComplete = onComplete;
     this.onStart = onStart;
     this.onCompact = onCompact;
@@ -743,6 +790,22 @@ export class AgentManager {
       }
     }
 
+    // The model and thinking level this run will use, resolved EXACTLY as the
+    // in-process runner resolves them (explicit option > agent file > parent),
+    // and written to the record BEFORE anything can read it. The record is the
+    // one place every surface reads its labels from, and a pane-backed run has
+    // no session the parent can read them off afterwards — so they cannot wait
+    // for `onSessionCreated`.
+    const runModel = options.model
+      ?? resolveDefaultModel(ctx.model, ctx.modelRegistry, getAgentConfig(type)?.model);
+    const runThinking = options.thinkingLevel ?? getAgentConfig(type)?.thinking;
+    if (runModel || runThinking) {
+      const invocation: AgentInvocation = { ...record.invocation };
+      if (runModel) Object.assign(invocation, describeModel(runModel));
+      if (runThinking) invocation.thinking = runThinking;
+      record.invocation = invocation;
+    }
+
     this.onStart?.(record);
 
     // Wire parent abort signal to stop the subagent when the parent is interrupted
@@ -760,7 +823,7 @@ export class AgentManager {
     }
     const detach = () => { detachParentSignal?.(); detachParentSignal = undefined; };
 
-    const promise = runAgent(ctx, type, prompt, {
+    const promise = this.runner.start(ctx, type, prompt, {
       pi,
       agentId: id,
       model: options.model,
@@ -807,20 +870,17 @@ export class AgentManager {
       },
       onSessionCreated: (session) => {
         record.session = session;
-        // Capture now, while the session object exists: after eviction this
-        // path is the only thing that can reopen the conversation, and an
-        // in-memory session reports undefined, which correctly means
-        // "nothing to come back to".
-        // Optional chaining, not defensiveness for its own sake: this is the
-        // only field read off the session at creation, so an older pi or a
-        // stubbed session must degrade to "not resumable" rather than throw
-        // and take the whole spawn down with it.
-        record.sessionFile = session.sessionManager?.getSessionFile?.();
-        // Same reason, different field: the model and thinking level are only
-        // knowable once pi has resolved its defaults and clamped the level to
-        // what the model supports. Writing them back here makes the record
-        // authoritative, so every surface reads one place instead of each
-        // re-deriving "session, else the request" for itself.
+        // Capture now, while the handle exists: after eviction this path is
+        // the only thing that can reopen the conversation, and an in-memory
+        // run reports undefined, which correctly means "nothing to come back
+        // to". A field on the handle rather than a session-manager call, so a
+        // run the parent cannot inspect still reports its transcript.
+        record.sessionFile = session.sessionFile;
+        // Refinement, not the source: `record.invocation` was already filled at
+        // spawn (see `startAgent`), which is all a pane-backed run can offer.
+        // These two members are optional on the handle, and a run that reports
+        // them corrects the snapshot — a live session knows the level pi
+        // clamped to, which the request alone never does.
         if (session.model) {
           record.invocation ??= {};
           // Read the kept request first: a caller's level survives being clamped
@@ -1176,7 +1236,7 @@ export class AgentManager {
     record.error = undefined;
 
     try {
-      const { text, failure } = await resumeAgent(record.session, prompt, {
+      const { text, failure } = await this.runner.resume(record.session, prompt, {
         onToolActivity: (activity) => {
           if (activity.type === "end") record.toolUses++;
           options?.onToolActivity?.(activity);
@@ -1270,7 +1330,7 @@ export class AgentManager {
       this.drainQueue();
     };
 
-    const promise = resumeAgent(record.session, prompt, {
+    const promise = this.runner.resume(record.session, prompt, {
       onToolActivity: (activity) => {
         if (activity.type === "end") record.toolUses++;
         options.onToolActivity?.(activity);
@@ -1567,7 +1627,7 @@ export class AgentManager {
     // Clear queue — via dequeue, so anyone blocked in spawnAndWait is woken
     // rather than left awaiting a gate nothing will ever resolve.
     this.dequeue(() => true);
-    const sessions = [...this.agents.values()].map(record => record.session);
+    const handles = [...this.agents.values()].map(record => record.session);
     this.agents.clear();
     this.startups.clear();
     if (pi) {
@@ -1584,6 +1644,6 @@ export class AgentManager {
     // Awaited, unlike the eviction path: pi awaits this extension's `session_shutdown`
     // handler and the process exits right after it returns, so anything left unawaited
     // here never runs at all. Bounded — each call carries its own ceiling, concurrently.
-    await Promise.all(sessions.map(session => shutdownChildSession(session)));
+    await Promise.all(handles.map(handle => shutdownChildSession(handle)));
   }
 }
