@@ -346,6 +346,13 @@ function childDelegationManager(spec: ChildSpec): AgentManager {
     // one does: a grandchild should be a real `pi` in a pane, not a second
     // in-process session hiding inside this one.
     runnerFor: childPaneProvider(spec),
+    // A refusal the root would notify about — a queued steering message the
+    // grandchild would not take — has to reach somebody here too, or the defect
+    // it was reported for reappears one level down. There is no `ctx` yet (the
+    // child is not a session when its tools are registered), so the sink is the
+    // child's own terminal: that is the pane the user is watching, and the same
+    // channel this module's other warnings use.
+    onWarning: (_record, message) => console.warn(`[pi-subagents] ${message}`),
   });
   const settings = loadSettings(spec.configCwd ?? spec.cwd);
   if (typeof settings.maxConcurrent === "number") manager.setMaxConcurrent(settings.maxConcurrent);

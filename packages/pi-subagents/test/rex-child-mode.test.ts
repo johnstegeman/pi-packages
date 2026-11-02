@@ -741,6 +741,33 @@ describe("a child's own children", () => {
   }, 20_000);
 });
 
+describe("a child's delegation manager warns", () => {
+  it("through a sink, so a refusal is not swallowed one level down", () => {
+    // The child's manager has no `ctx` yet (it is built before the child is a
+    // session), so the sink is the child's own terminal — the pane the user is
+    // watching. Without one, a queued steer the grandchild refuses would vanish
+    // exactly as it did at the root before finding 3.
+    const dir = hermetic({ maxConcurrent: 3 });
+    let own: AgentManager | undefined;
+    const pools = vi.spyOn(AgentManager.prototype, "setMaxConcurrent").mockImplementation(function (this: AgentManager) {
+      own = this;
+    });
+    const warned = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    try {
+      installChildMode(makeChildPi().pi, specFor(dir));
+
+      const sink = (own as unknown as { onWarning?: (record: unknown, message: string) => void }).onWarning;
+      expect(sink).toBeDefined();
+      sink?.(undefined, "the steering message was not delivered");
+
+      expect(warned).toHaveBeenCalledWith(expect.stringContaining("the steering message was not delivered"));
+    } finally {
+      warned.mockRestore();
+      pools.mockRestore();
+    }
+  });
+});
+
 describe("a child shutting down", () => {
   it("disposes its own manager, so no grandchild outlives the run that made it", async () => {
     const dir = hermetic();

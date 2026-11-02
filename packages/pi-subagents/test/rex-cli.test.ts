@@ -87,6 +87,9 @@ function fakeRexSource(): string {
     "    out({ revision: 2 });",
     '  } else if (method === "session.close_layer") {',
     '    if (env.REX_FAKE_CLOSE_LAYER === "not_found") fail("not_found: no layer", 1);',
+    '    if (env.REX_FAKE_CLOSE_LAYER === "error") fail("internal: the server is wedged", 1);',
+    // A server that takes the request and never answers.
+    '    if (env.REX_FAKE_CLOSE_LAYER === "hang") Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 5000);',
     "    out({ revision: 3 });",
     '  } else fail("unknown method " + method, 2);',
     "}",
@@ -465,17 +468,44 @@ describe("the queue — one spawn's create and minimize never interleave with an
 
 describe("closePane — cleanup that tolerates a pane already gone", () => {
   it("closes the layer it created", async () => {
-    await expect(closePane(deps(), "layer:a")).resolves.toBeUndefined();
+    await expect(closePane(deps(), "layer:a")).resolves.toEqual({ closed: true });
 
     expect(calls()).toEqual([
       ["api", "call", "-s", SESSION, "session.close_layer", JSON.stringify({ layer_id: "layer:a" })],
     ]);
   });
 
-  it("resolves when the layer is already closed", async () => {
+  it("reports a layer that is already gone as closed", async () => {
+    // The ordinary answer: `exit.on_completion` closes a pane with its child, so
+    // `not found` is the state the caller wanted, not a failure to report.
     process.env.REX_FAKE_CLOSE_LAYER = "not_found";
 
-    await expect(closePane(deps(), "layer:a")).resolves.toBeUndefined();
+    await expect(closePane(deps(), "layer:a")).resolves.toEqual({ closed: true });
+  });
+
+  it("reports a close the server refused, with its own words", async () => {
+    // The only honest way to say "a child may still be running in there": the
+    // caller of a close that failed has to be able to tell, and a shutdown must
+    // not claim a cleanup it did not perform.
+    process.env.REX_FAKE_CLOSE_LAYER = "error";
+
+    await expect(closePane(deps(), "layer:a")).resolves.toEqual({
+      closed: false,
+      reason: "internal: the server is wedged",
+    });
+  });
+
+  it("gives up on a wedged server when the close is a shutdown's best effort", async () => {
+    // A quit passes a short allowance: the pane is worth a try, not ten seconds
+    // of a wedged server while the process is trying to exit. What it must not do
+    // is claim the pane is gone.
+    process.env.REX_FAKE_CLOSE_LAYER = "hang";
+    const started = Date.now();
+
+    const result = await closePane(deps(), "layer:a", { timeoutMs: 150 });
+
+    expect(result).toEqual({ closed: false, reason: expect.stringContaining("timed out") });
+    expect(Date.now() - started).toBeLessThan(3_000);
   });
 });
 

@@ -341,10 +341,37 @@ describe("a refused queued steer", () => {
   });
 });
 
+/** The layer ids the run asked to minimize and to close, in call order. */
+function lifecycles(method: string): string[] {
+  return fake
+    .paneCalls()
+    .filter((call) => call[4] === method)
+    .map((call) => JSON.parse(call[5]).layer_id);
+}
+
+/** Wait for the fake to have recorded a call, without assuming when it happens. */
+async function waitForCall(method: string): Promise<void> {
+  for (let i = 0; i < 1000 && lifecycles(method).length === 0; i++) {
+    await new Promise((resolve) => setTimeout(resolve, 10));
+  }
+}
+
+/** Dispose with a ceiling, so a hanging teardown fails here rather than at the suite timeout. */
+async function disposeWithin(ms: number): Promise<"disposed" | "hung"> {
+  const disposing = manager!.dispose().then(() => "disposed" as const);
+  manager = undefined;
+  return Promise.race([
+    disposing,
+    new Promise<"hung">((resolve) => setTimeout(() => resolve("hung"), ms)),
+  ]);
+}
+
 describe("shutting down with a run still in its pane", () => {
   it("closes the layer and waits for it before dispose returns", async () => {
-    // The child stays up for 30 s: only a shutdown that closes the layer ends it.
-    process.env.STUB_MODE = "result-early";
+    // The child never reports and stays up for 30 s, so only a shutdown that
+    // closes the layer ends it — and nothing can race this test by landing a
+    // result file first.
+    process.env.STUB_MODE = "hold";
     managerWith(async () => paneRunner(), inProcessStub());
 
     const { pi, ctx } = harness();
@@ -360,28 +387,75 @@ describe("shutting down with a run still in its pane", () => {
     }
     expect(record.session).toBeDefined();
 
-    const disposed = await Promise.race([
-      manager!.dispose().then(() => "disposed" as const),
-      new Promise<"hung">((resolve) => setTimeout(() => resolve("hung"), 5_000)),
-    ]);
-    manager = undefined;
+    expect(await disposeWithin(5_000)).toBe("disposed");
 
-    expect(disposed).toBe("disposed");
     // One pane was created, minimized and closed — no more, no less: the layer
     // the shutdown closed is the one this run was given.
-    const created = fake.paneCalls().filter((call) => call[4] === "session.new_layer");
-    expect(created).toHaveLength(1);
-    const minimized = fake
-      .paneCalls()
-      .filter((call) => call[4] === "session.set_layer_state")
-      .map((call) => JSON.parse(call[5]).layer_id);
-    const closed = fake
-      .paneCalls()
-      .filter((call) => call[4] === "session.close_layer")
-      .map((call) => JSON.parse(call[5]).layer_id);
+    expect(lifecycles("session.new_layer")).toHaveLength(1);
+    const minimized = lifecycles("session.set_layer_state");
     expect(minimized).toHaveLength(1);
-    expect(closed).toEqual(minimized);
+    expect(lifecycles("session.close_layer")).toEqual(minimized);
     // And the record is terminal, so nothing reports it as still running.
     expect(record.status).toBe("stopped");
   }, 20_000);
+
+  it("says so when the pane would not close, instead of claiming it did", async () => {
+    // Rex refusing the close is the one failure that means a live child outlives
+    // its parent, so a shutdown reports it rather than counting the close as done.
+    process.env.STUB_MODE = "result-early";
+    process.env.REX_FAKE_CLOSE_LAYER = "error";
+    managerWith(async () => paneRunner(), inProcessStub());
+
+    const { pi, ctx } = harness();
+    const id = manager!.spawn(pi, ctx, "Explore", "do it", {
+      description: "the only one",
+      isBackground: true,
+      model: MODEL,
+    });
+    const record = manager!.getRecord(id)!;
+    await manager!.awaitStartup(id);
+    await waitForCall("session.new_layer");
+
+    expect(await disposeWithin(5_000)).toBe("disposed");
+
+    expect(warnings.some((message) => /could not be closed/.test(message))).toBe(true);
+    expect(warnings.join("\n")).toContain("internal: the server is wedged");
+    // The run is still terminal: the record is not left looking like it is live.
+    expect(record.status).toBe("stopped");
+    // Let the result file settle the run before the next test reuses the harness.
+    await record.promise.catch(() => {});
+  }, 20_000);
+
+  it("closes a pane whose child has not produced a session file yet", async () => {
+    // The window the manager cannot reach: the pane exists, but the handle is
+    // announced only once the child's session file is found — 2 s of grace, then
+    // a path the child is still not writing (`slow-start` writes at 3 s). A quit
+    // in here used to leave the layer open with a live child in it.
+    process.env.STUB_MODE = "slow-start";
+    managerWith(async () => paneRunner(), inProcessStub());
+
+    const { pi, ctx } = harness();
+    const id = manager!.spawn(pi, ctx, "Explore", "do it", {
+      description: "the only one",
+      isBackground: true,
+      model: MODEL,
+    });
+    const record = manager!.getRecord(id)!;
+    await manager!.awaitStartup(id);
+    await waitForCall("session.new_layer");
+    expect(lifecycles("session.new_layer")).toHaveLength(1);
+    // The precondition of this test, not an incidental fact: no handle yet.
+    expect(record.session).toBeUndefined();
+
+    expect(await disposeWithin(15_000)).toBe("disposed");
+
+    // The layer the run created was closed by a runner that was never handed a
+    // handle for it, and the child it was running is gone.
+    const minimized = lifecycles("session.set_layer_state");
+    expect(minimized).toHaveLength(1);
+    expect(lifecycles("session.close_layer")).toEqual(minimized);
+    expect(record.status).toBe("stopped");
+    // Let the run finish settling before the next test reuses the harness.
+    await record.promise.catch(() => {});
+  }, 30_000);
 });

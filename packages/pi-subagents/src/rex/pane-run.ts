@@ -53,6 +53,7 @@ import {
   buildChildCommand,
   type ChildFiles,
   type ChildSpec,
+  type CloseResult,
   childSpecFromSpawn,
   closePane,
   launchPane,
@@ -109,6 +110,16 @@ const SESSION_FILE_GRACE_MS = 2_000;
  * would drop a steer that arrived at exactly the moment a run became steerable.
  */
 const STEER_STATUS_GRACE_MS = 2_000;
+
+/**
+ * How long a close gets on the shutdown path.
+ *
+ * Shorter than the default allowance because this one is best-effort by nature: a
+ * quit that spent ten seconds on a wedged Rex would delay the exit it is trying
+ * to make clean, and a pane left behind by a process that is going away is the
+ * lesser evil. Long enough for a healthy server, which answers in milliseconds.
+ */
+const SHUTDOWN_CLOSE_TIMEOUT_MS = 2_000;
 
 /** The pane label's task slice: enough to tell two agents apart, short enough for a capsule. */
 const LABEL_DESCRIPTION_CHARS = 60;
@@ -173,6 +184,11 @@ export function createPaneRunner(deps: PaneRunDeps): ManagerRunner {
    * handle from another runner is simply not here and falls through to it.
    */
   const states = new WeakMap<RunHandle, RunState>();
+  /**
+   * Runs this runner can close but the manager cannot reach yet — see
+   * {@link InFlightRun}. Keyed by the agent id the run was launched for.
+   */
+  const inFlight = new Map<string, InFlightRun>();
 
   /**
    * Run this agent in-process instead, saying so on the result as well as out
@@ -202,23 +218,34 @@ export function createPaneRunner(deps: PaneRunDeps): ManagerRunner {
       // better than a child that has to guess what it is.
       return inProcess(ctx, type, prompt, options, "could not be given a model for its pane");
     }
-    // The place in the cascade is taken BEFORE the launch, not after: two
-    // spawns that both read the size while their panes are being created would
-    // be handed the same bounds and stack on top of each other.
-    const ticket = Symbol(inputs.agentId);
-    live.add(ticket);
-    const pane = await launchPane({
-      deps: paneDeps(deps),
-      label: inputs.label,
-      command: childCommand(inputs, deps),
-      cwd: inputs.cwd,
-      index: live.size - 1,
-    });
-    if (pane === undefined) {
-      live.delete(ticket);
-      return inProcess(ctx, type, prompt, options, "could not get a pane (creating it failed)");
+    // Registered BEFORE the launch: that is the window in which a pane exists and
+    // the manager has no handle for it yet, so a quit there would leave a live
+    // child in an orphan pane.
+    const run = trackRun(inFlight, inputs.agentId, inputs.label);
+    try {
+      // The place in the cascade is taken BEFORE the launch, not after: two
+      // spawns that both read the size while their panes are being created would
+      // be handed the same bounds and stack on top of each other.
+      const ticket = Symbol(inputs.agentId);
+      live.add(ticket);
+      const pane = await launchPane({
+        deps: paneDeps(deps),
+        label: inputs.label,
+        command: childCommand(inputs, deps),
+        cwd: inputs.cwd,
+        index: live.size - 1,
+      });
+      if (pane === undefined) {
+        live.delete(ticket);
+        return inProcess(ctx, type, prompt, options, "could not get a pane (creating it failed)");
+      }
+      return await watch({ deps, warn, live, states, inputs, pane, options, ticket, run });
+    } finally {
+      // Both a no-op when `watch()` already registered the way out, and the
+      // reason a run that threw before it got that far cannot strand a dispose.
+      run.settle();
+      inFlight.delete(inputs.agentId);
     }
-    return watch({ deps, warn, live, states, inputs, pane, options, ticket });
   };
 
   const resume: RunResume = async (session, prompt, options) => {
@@ -228,7 +255,7 @@ export function createPaneRunner(deps: PaneRunDeps): ManagerRunner {
       // is being resumed, which its own runner knows how to continue.
       return fallback.resume(session, prompt, options);
     }
-    return relaunch({ deps, warn, live, state, prompt, options: options ?? {} });
+    return relaunch({ deps, warn, live, inFlight, state, prompt, options: options ?? {} });
   };
 
   /**
@@ -242,16 +269,124 @@ export function createPaneRunner(deps: PaneRunDeps): ManagerRunner {
    *
    * Idempotent, because the settle path closes the same layer: the promise is
    * memoized per run, so a dispose that races a settle joins it rather than
-   * asking Rex twice.
+   * asking Rex twice. A run still in `inFlight` (a resume whose new pane is
+   * being created) is closed through its register instead, so the close lands on
+   * the pane that actually exists rather than the one that was replaced.
    */
   const close = async (session: RunHandle): Promise<void> => {
     const state = states.get(session);
     // Not ours: an in-process handle, or a run another runner owns.
     if (state === undefined) return;
-    await closeRunPane(paneDeps(deps), state);
+    const unclosed = await closeRun(state, inFlight.get(state.inputs.agentId), paneDeps(deps));
+    if (unclosed !== undefined) reportUnclosed(warn, state.inputs.label, unclosed);
   };
 
-  return { start, resume, close };
+  /**
+   * Close every pane this runner still has open and resolve when they are gone.
+   *
+   * The manager's own lever on a run is its record's handle, which the pane path
+   * announces only after the child's session file is found. `close(session)`
+   * therefore cannot see a run in that window — and neither can it see a run whose
+   * launch never got that far — so the shutdown path drains this register too.
+   * Best-effort per pane: one that will not close is reported and does not stop
+   * the rest.
+   */
+  const closeAll = async (): Promise<void> => {
+    const runs = [...inFlight.values()];
+    await Promise.all(
+      runs.map(async (run) => {
+        const unclosed = await closeRun(undefined, run, paneDeps(deps));
+        if (unclosed !== undefined) reportUnclosed(warn, run.label, unclosed);
+      }),
+    );
+  };
+
+  return { start, resume, close, closeAll };
+}
+
+/**
+ * The way out of one run, once it has a pane to close.
+ *
+ * A thunk rather than the ids, because a resume replaces the pane: the close has
+ * to read whichever pane the run has when somebody asks, not the one it had when
+ * the thunk was made. `options.timeoutMs` is for the shutdown path.
+ */
+type CloseThunk = (options?: { timeoutMs?: number }) => Promise<CloseResult>;
+
+/**
+ * One run between "its pane exists" and "its layer is closed".
+ *
+ * The manager's only handle is `record.session`, assigned when `watch()`
+ * announces the run — which waits for the child's session file, up to
+ * `SESSION_FILE_GRACE_MS` after the pane was created. A quit inside that window
+ * would neither stop the child nor close the layer, so the runner keeps its own
+ * register: created before the launch, resolved with the close thunk as soon as
+ * there is one, and walked by `closeAll()`.
+ */
+interface InFlightRun {
+  /** The pane label, for a report that cannot name a record. */
+  label: string;
+  /** Resolves with this run's way out, or with undefined when it has no pane. */
+  closable: Promise<CloseThunk | undefined>;
+  /** Resolve {@link closable}, once. */
+  settle(close?: CloseThunk): void;
+}
+
+/**
+ * Register a run that is about to create a pane.
+ *
+ * `settle()` is idempotent, so a caller can call it unconditionally in its
+ * `finally`: the first resolution wins, and no dispose is left waiting for a run
+ * that fell through to in-process, threw, or already said how to close itself.
+ */
+function trackRun(inFlight: Map<string, InFlightRun>, agentId: string, label: string): InFlightRun {
+  let resolve!: (close: CloseThunk | undefined) => void;
+  const closable = new Promise<CloseThunk | undefined>((settle) => {
+    resolve = settle;
+  });
+  let settled = false;
+  const run: InFlightRun = {
+    label,
+    closable,
+    settle(close) {
+      if (settled) return;
+      settled = true;
+      resolve(close);
+    },
+  };
+  inFlight.set(agentId, run);
+  return run;
+}
+
+/**
+ * Close one run: through its register when it has one, else through its state.
+ *
+ * Returns the failure to report, or undefined when the pane is gone (or never
+ * existed). Deliberately not called by the settle and abort paths, which close
+ * directly and treat the same failure as the ordinary end of a run — by then the
+ * child is gone and the pane usually with it, so the only path where a failed
+ * close means a live orphan is this one.
+ */
+async function closeRun(
+  state: RunState | undefined,
+  run: InFlightRun | undefined,
+  deps: PaneDeps,
+): Promise<CloseResult | undefined> {
+  const close = run === undefined ? undefined : await run.closable;
+  if (close !== undefined) return await close({ timeoutMs: SHUTDOWN_CLOSE_TIMEOUT_MS });
+  if (state === undefined) return undefined;
+  return await closeRunPane(deps, state, { timeoutMs: SHUTDOWN_CLOSE_TIMEOUT_MS });
+}
+
+/**
+ * Say so when a pane would not close at shutdown.
+ *
+ * Only the shutdown path reports this: there, a layer that is still open means a
+ * child that outlives its parent, and nobody will look again.
+ */
+function reportUnclosed(warn: (message: string) => void, label: string, result: CloseResult): void {
+  if (result.closed) return;
+  warn(`the pane for "${label}" could not be closed (${result.reason}); its child may still be running`);
 }
 
 /** Everything the child is launched with, resolved once per spawn. */
@@ -289,9 +424,11 @@ interface RunState {
    *
    * An abort and the settle path both want the layer gone, and a dispose that
    * races them wants to wait for it — so the close is started once and every
-   * caller waits on the same promise rather than asking Rex twice.
+   * caller waits on the same promise rather than asking Rex twice. The result
+   * carries whether the layer is in fact gone, which only the shutdown path
+   * reports (see `reportUnclosed()`).
    */
-  closing?: Promise<void>;
+  closing?: Promise<CloseResult>;
 }
 
 // ---------------------------------------------------------------------------
@@ -512,8 +649,10 @@ async function watch(args: {
   options: RunOptions;
   /** This run's place in the cascade, taken before the launch; given back when it settles. */
   ticket: symbol;
+  /** The register a shutdown reaches this run through before it has a handle. */
+  run: InFlightRun;
 }): Promise<RunResult> {
-  const { deps, warn, live, states, inputs, pane, options, ticket } = args;
+  const { deps, warn, live, states, inputs, pane, options, ticket, run } = args;
   const paneDepsHere = paneDeps(deps);
   reportMinimize(warn, inputs, pane);
 
@@ -525,9 +664,14 @@ async function watch(args: {
   const session = new PaneSession({
     tail,
     steer: (message) => steerPane(paneDepsHere, state, message),
-    abort: () => closeRunPane(paneDepsHere, state),
+    abort: async () => {
+      await closeRunPane(paneDepsHere, state);
+    },
   });
   states.set(session, state);
+  // The pane exists and the manager has no handle for it yet: this is the way a
+  // shutdown closes it. Registered before the handle is announced, deliberately.
+  run.settle((options) => closeRunPane(paneDepsHere, state, options));
   // A child slower than the grace window writes its file later, and the path
   // this run announced is a guess until it does: keep looking, so the live view
   // fills in and the handle names the file the child actually wrote.
@@ -535,8 +679,10 @@ async function watch(args: {
     location.found
       ? () => {}
       : followSessionFile(deps.agentSessionDir, inputs.agentId, (file) => {
-          state.sessionFile = file;
-          tail.retarget(file);
+          // Only once the tail is actually reading it: a record that named a file
+          // the live view was not following would be worse than one that named
+          // the path it was still waiting for.
+          if (tail.retarget(file)) state.sessionFile = file;
         });
   tail.start();
   const stopActivity = feedActivity(tail, options, false);
@@ -600,11 +746,12 @@ async function relaunch(args: {
   deps: PaneRunDeps;
   warn: (message: string) => void;
   live: Set<symbol>;
+  inFlight: Map<string, InFlightRun>;
   state: RunState;
   prompt: string;
   options: ResumeAgentOptions;
 }): Promise<ResumeAgentResult> {
-  const { deps, warn, live, state, prompt, options } = args;
+  const { deps, warn, live, inFlight, state, prompt, options } = args;
   const paneDepsHere = paneDeps(deps);
   const { inputs } = state;
 
@@ -619,25 +766,57 @@ async function relaunch(args: {
     prompt,
     spec: inputs.spec,
   });
-  // The cascade slot is taken before the launch, for the same reason as on a
-  // spawn: a resume that read the size while its pane was being made would be
-  // handed the bounds its neighbour already took.
-  const ticket = Symbol(inputs.agentId);
-  live.add(ticket);
-  const pane = await launchPane({
-    deps: paneDepsHere,
-    label: inputs.label,
-    command: childCommand({ ...inputs, files }, deps, state.sessionFile),
-    cwd: inputs.cwd,
-    index: live.size - 1,
-  });
-  if (pane === undefined) {
-    live.delete(ticket);
-    throw new Error(`the pane for "${inputs.label}" could not be created; the agent was not resumed`);
+  // Registered before the launch, as a spawn is: between the new layer existing and
+  // `state.pane` naming it, a close would otherwise close the pane this resume has
+  // just replaced.
+  const run = trackRun(inFlight, inputs.agentId, inputs.label);
+  try {
+    // The cascade slot is taken before the launch, for the same reason as on a
+    // spawn: a resume that read the size while its pane was being made would be
+    // handed the bounds its neighbour already took.
+    const ticket = Symbol(inputs.agentId);
+    live.add(ticket);
+    const pane = await launchPane({
+      deps: paneDepsHere,
+      label: inputs.label,
+      command: childCommand({ ...inputs, files }, deps, state.sessionFile),
+      cwd: inputs.cwd,
+      index: live.size - 1,
+    });
+    if (pane === undefined) {
+      live.delete(ticket);
+      throw new Error(`the pane for "${inputs.label}" could not be created; the agent was not resumed`);
+    }
+    reportMinimize(warn, inputs, pane);
+    state.pane = pane;
+    // A new layer, so a new close: the previous run's promise has settled.
+    state.closing = undefined;
+    run.settle((options) => closeRunPane(paneDepsHere, state, options));
+    return await relaunchWatch({ deps, warn, live, inputs, state, options, ticket });
+  } finally {
+    run.settle();
+    inFlight.delete(inputs.agentId);
   }
-  reportMinimize(warn, inputs, pane);
-  state.pane = pane;
-  state.closing = undefined;
+}
+
+/**
+ * Watch a relaunched pane until it settles.
+ *
+ * Split from `relaunch()` so the launch, the register and the watch share one
+ * `finally`: a resume that threw between the two would otherwise leave a pane
+ * open that nothing in this process names.
+ */
+async function relaunchWatch(args: {
+  deps: PaneRunDeps;
+  warn: (message: string) => void;
+  live: Set<symbol>;
+  inputs: RunInputs;
+  state: RunState;
+  options: ResumeAgentOptions;
+  ticket: symbol;
+}): Promise<ResumeAgentResult> {
+  const { deps, warn, live, inputs, state, options, ticket } = args;
+  const paneDepsHere = paneDeps(deps);
   // The child appends to the same file, so the same tail keeps following it, and
   // what is already there belongs to the previous run.
   state.tail.start();
@@ -678,16 +857,6 @@ async function relaunch(args: {
 // ---------------------------------------------------------------------------
 
 /**
- * Whichever comes first: the child's result file, or its exit.
- *
- * The two are genuinely independent — a child can write its result and keep
- * running, or die without writing one — so both are watched and the winner
- * decides how the run settles. `stop` is the caller's flag, set in its `finally`;
- * everything watching checks it, so a run that settled one way leaves nothing
- * running the other way.
- */
-
-/**
  * What a watching loop is asked to stop: a flag to check, and a controller for
  * the `rex` call already in flight.
  *
@@ -704,6 +873,15 @@ function runStop(): RunStop {
   return { requested: false, cancel: new AbortController() };
 }
 
+/**
+ * Whichever comes first: the child's result file, or its exit.
+ *
+ * The two are genuinely independent — a child can write its result and keep
+ * running, or die without writing one — so both are watched and the winner
+ * decides how the run settles. `stop` is the caller's flag, set in its `finally`;
+ * everything watching checks it, so a run that settled one way leaves nothing
+ * running the other way.
+ */
 function firstOutcome(args: {
   deps: PaneDeps;
   warn: (message: string) => void;
@@ -1064,9 +1242,16 @@ async function steerableState(deps: PaneDeps, blockId: string): Promise<ProcessS
  * wasted round trip and, worse, a second chance to interleave with another
  * agent's pane creation. A resume clears the promise, because its pane is a new
  * one.
+ *
+ * The first caller's `timeoutMs` is the one that applies — the promise is shared,
+ * and a shutdown close is the only caller that asks for a short one.
  */
-function closeRunPane(deps: PaneDeps, state: RunState): Promise<void> {
-  state.closing ??= closePane(deps, state.pane.layerId);
+function closeRunPane(
+  deps: PaneDeps,
+  state: RunState,
+  options: { timeoutMs?: number } = {},
+): Promise<CloseResult> {
+  state.closing ??= closePane(deps, state.pane.layerId, options);
   return state.closing;
 }
 

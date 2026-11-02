@@ -682,26 +682,56 @@ function failureReason(text: string, fallback: string): string {
 }
 
 /**
+ * What one close attempt achieved.
+ *
+ * `closed: true` also covers the ordinary case of a layer that was already gone:
+ * `exit.on_completion` closes a pane with its child, so `not found` is the
+ * success answer on the cleanup path rather than a failure. A real failure — a
+ * server that stopped answering, a request it rejected — means the child may
+ * still be running, which the caller has to be able to say out loud instead of
+ * reporting a cleanup that did not happen.
+ */
+export type CloseResult = { closed: true } | { closed: false; reason: string };
+
+/**
  * Close one pane and everything running in it.
  *
  * Tolerant by design: the pane closes itself when its child exits
  * (`exit.on_completion`), so the common case is a layer that is already gone
- * and a `not_found` from the server. Only layers this module created are ever
- * named here — `close_layer` ends the programs in a pane, and closing a layer
- * the user owns is not cleanup.
+ * and a `not_found` from the server — reported as closed, because that is the
+ * state the caller wanted. Only layers this module created are ever named here
+ * — `close_layer` ends the programs in a pane, and closing a layer the user owns
+ * is not cleanup.
+ *
+ * `timeoutMs` is for the shutdown path, where the pane is best-effort: a quit
+ * cannot spend the whole default allowance waiting on a wedged server, and a
+ * pane left behind by a process that is exiting anyway is the lesser evil.
  */
-export async function closePane(deps: PaneDeps, layerId: string): Promise<void> {
+export async function closePane(
+  deps: PaneDeps,
+  layerId: string,
+  options: { timeoutMs?: number } = {},
+): Promise<CloseResult> {
   try {
-    await deps.exec([
-      "api",
-      "call",
-      "-s",
-      deps.sessionId,
-      "session.close_layer",
-      JSON.stringify({ layer_id: layerId }),
-    ]);
-  } catch {
-    // Nothing left to do about a pane that will not close from here: the
-    // program ends with its child, and this is already the cleanup path.
+    const result = await deps.exec(
+      [
+        "api",
+        "call",
+        "-s",
+        deps.sessionId,
+        "session.close_layer",
+        JSON.stringify({ layer_id: layerId }),
+      ],
+      options.timeoutMs === undefined ? undefined : { timeoutMs: options.timeoutMs },
+    );
+    if (result.code === 0) return { closed: true };
+    // Already gone: the outcome this call exists to produce, whichever side
+    // closed it first.
+    if (/not[_ ]?found/i.test(result.stderr)) return { closed: true };
+    return { closed: false, reason: failureReason(result.stderr, `rex exited with status ${result.code}`) };
+  } catch (error) {
+    // `execRex` never rejects, but the seam is injectable.
+    const message = error instanceof Error ? error.message : String(error);
+    return { closed: false, reason: failureReason(message, "rex call failed") };
   }
 }

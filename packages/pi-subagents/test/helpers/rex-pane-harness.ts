@@ -38,6 +38,7 @@ export const FAKE_REX_ENV_KEYS = [
   "REX_FAKE_CAPTURE_TEXT",
   "REX_FAKE_UNAVAILABLE",
   "REX_FAKE_FAST_CLOSE",
+  "REX_FAKE_CLOSE_LAYER",
 ] as const;
 
 /** The stub child's own knobs. */
@@ -139,6 +140,9 @@ function fakeRexSource(): string {
     "    return out({ revision: 2 });",
     "  }",
     '  if (method === "session.close_layer") {',
+    // A close the server refuses: the pane is still there, and a shutdown has to
+    // be able to say so instead of reporting a cleanup it did not perform.
+    '    if (env.REX_FAKE_CLOSE_LAYER === "error") fail("internal: the server is wedged", 1);',
     '    const blockId = "block-" + String(JSON.parse(body).layer_id).replace(/^layer-/, "");',
     "    const record = recordFor(blockId);",
     "    if (record) {",
@@ -277,6 +281,9 @@ function stubChildSource(): string {
     // Writes its result while staying alive: a run that waited for the exit
     // would never come back inside a test.
     'else if (mode === "result-early") { Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 1500); writeResult(); Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 30000); }',
+    // Never reports, and stays alive: only something closing its pane ends it, so a
+    // test that relies on that cannot race a result landing first.
+    'else if (mode === "hold") { Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 30000); process.exit(0); }',
     'else if (mode !== "no-result") writeResult();',
     'if (mode === "no-result") process.stderr.write("the child died before reporting\\n");',
     'process.exit(mode === "no-result" ? 3 : 0);',

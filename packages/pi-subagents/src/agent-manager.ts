@@ -55,8 +55,10 @@ export type OnAgentUsage = (record: AgentRecord, usage: LifetimeUsage) => void;
  *
  * Separate from `error` because the run is not failing: the agent is fine, the
  * one thing that did not happen is the thing the caller should be told about.
+ * `record` is undefined for a message about the manager itself — a shutdown that
+ * could not drain a runner, which belongs to no one agent.
  */
-export type OnAgentWarning = (record: AgentRecord, message: string) => void;
+export type OnAgentWarning = (record: AgentRecord | undefined, message: string) => void;
 export type CompactionInfo = { reason: "manual" | "threshold" | "overflow"; tokensBefore: number };
 
 /**
@@ -100,6 +102,18 @@ export interface ManagerRunner {
    * a shutdown that waits forever is worse than a pane left open.
    */
   close?: (session: RunHandle) => Promise<void>;
+  /**
+   * End every run this runner still has in flight, and resolve when they are
+   * gone — including one the manager has no handle for yet.
+   *
+   * `close()` is reached through `record.session`, which a runner may only
+   * announce part-way into a run: the pane path assigns it once the child's
+   * session file is found. A shutdown in that window has a live child in a layer
+   * that no record names, so a runner that can outlive this process also says how
+   * to drain whatever it is holding. Optional, and absent means "nothing outside
+   * this process".
+   */
+  closeAll?: () => Promise<void>;
 }
 
 /**
@@ -1783,7 +1797,6 @@ export class AgentManager {
     // rather than left awaiting a gate nothing will ever resolve.
     this.dequeue(() => true);
     const records = [...this.agents.values()];
-    const handles = records.map(record => record.session);
     this.agents.clear();
     this.startups.clear();
     if (pi) {
@@ -1804,30 +1817,56 @@ export class AgentManager {
     // not produce, and the sweep is what would otherwise leave the tail stopped
     // while the child kept working.
     await Promise.all(records.map(record => this.stopExternalRun(record)));
+    // Then the runs no record names yet: a pane is created before its agent's
+    // handle is announced (the pane path waits for the child's session file), so
+    // `stopExternalRun` cannot reach a run that started moments before the quit.
+    // Each distinct runner is asked once, so a fan-out does not drain the same
+    // register twenty times.
+    await Promise.all([...new Set(records.map(record => this.runnerForRecord(record)))].map(async (runner) => {
+      if (runner.closeAll === undefined) return;
+      try {
+        await runner.closeAll();
+      } catch (error) {
+        // A runner is caller code; a shutdown reports rather than throws.
+        const reason = error instanceof Error ? error.message : String(error);
+        this.onWarning?.(undefined, `a runner could not be drained at shutdown: ${reason}`);
+      }
+    }));
     // Awaited, unlike the eviction path: pi awaits this extension's `session_shutdown`
     // handler and the process exits right after it returns, so anything left unawaited
     // here never runs at all. Bounded — each call carries its own ceiling, concurrently.
-    await Promise.all(handles.map(handle => shutdownChildSession(handle)));
+    // Re-read from the records rather than from the snapshot above: a handle announced
+    // while the runs above were being stopped still has to be swept.
+    await Promise.all(records.map(record => record.session).map(handle => shutdownChildSession(handle)));
   }
 
   /**
-   * Stop a run that lives outside this process and wait for it to be gone.
+   * Stop a run that lives outside this process, and close it if it has a handle.
    *
-   * Only runners that implement {@link ManagerRunner.close} have one — the
+   * Only runners that implement {@link ManagerRunner.close} are touched — the
    * in-process runner has nothing outside this process to end, and is left
-   * exactly as it was. Aborting first is what makes the child stop; awaiting the
-   * close is what proves the pane is gone before the process exits. A close that
-   * throws is reported and swallowed: a shutdown must not fail because Rex did.
+   * exactly as it was.
+   *
+   * The abort comes first and does NOT depend on the handle: `record.session` is
+   * assigned by the run itself, and the pane path assigns it only once the child's
+   * session file is found — up to two seconds after the pane exists. Aborting an
+   * abandoned run is right in every case, and it is what makes the runner close
+   * what it already has; a handle-less run is then drained by `closeAll()`.
+   *
+   * The catch is a backstop for a runner that throws; a pane that simply will not
+   * close is reported by the runner itself, which is the only party that can tell
+   * "already gone" from "still there".
    */
   private async stopExternalRun(record: AgentRecord): Promise<void> {
-    const session = record.session;
     const runner = this.runnerForRecord(record);
-    if (session === undefined || runner.close === undefined) return;
+    if (runner.close === undefined) return;
     if (record.status === "running" || record.status === "queued") {
       record.abortController?.abort();
       record.status = "stopped";
       record.completedAt ??= Date.now();
     }
+    const session = record.session;
+    if (session === undefined) return;
     try {
       await runner.close(session);
     } catch (error) {
