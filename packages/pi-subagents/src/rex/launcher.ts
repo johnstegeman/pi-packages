@@ -14,7 +14,12 @@
 
 import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { extensionCanonicalName, parseExtensionsSpec } from "../agent-runner.js";
+import {
+  extensionCanonicalName,
+  extensionCanonicalNames,
+  normalizeMaxTurns,
+  parseExtensionsSpec,
+} from "../agent-runner.js";
 import { getToolNamesForType } from "../agent-types.js";
 import { sessionTaskDir } from "../output-file.js";
 import type { AgentConfig } from "../types.js";
@@ -52,6 +57,13 @@ export interface ChildSpec {
   graceTurns?: number;
   /** Compiled structured-output schema the child must satisfy, when the caller asked for one. */
   structuredSchemaPath?: string;
+  /**
+   * The type's `ext:` tool selectors, verbatim. The in-process path narrows which
+   * extension TOOLS surface with them (`parseExtSelectors()`); a pane child
+   * cannot re-derive that from its tools, so it carries them here. Absent under
+   * `isolated` and for a type that names none.
+   */
+  extSelectors?: string[];
   /** The active tool set and denylist, resolved from the type by the parent. */
   toolScope: { tools: string[]; excludeTools: string[] };
   model: string;
@@ -200,6 +212,11 @@ export function confinementFlags(input: {
 /**
  * The absolute paths of the extensions that survive the include set and the
  * denylist, in the order the agent file named them.
+ *
+ * An exclude binds an extension however it is spelled: `exclude_extensions` is
+ * matched against every canonical name of the resolved path, exactly as the
+ * in-process override does (`agent-runner.ts:827-829`), so an extension named by
+ * a path and an exclude naming its package short name still meet.
  */
 function survivingExtensionPaths(
   extensions: true | string[],
@@ -211,21 +228,28 @@ function survivingExtensionPaths(
   const add = (path: string | undefined) => {
     if (path && !paths.includes(path)) paths.push(path);
   };
+  const isExcluded = (name: string, path: string | undefined) =>
+    excludeNames.has(name) ||
+    (path !== undefined && extensionCanonicalNames(path).some((alias) => excludeNames.has(alias)));
   // Path entries carry their own absolute path; they are also the only source of
   // one for an entry written as a path.
   const byCanonicalName = new Map<string, string>();
   for (const path of spec?.paths ?? []) byCanonicalName.set(extensionCanonicalName(path), path);
 
   // `extensions: true` with excludes, or a "*" wildcard, means "everything
-  // discovered" — which only the caller's discovery pass can enumerate.
+  // discovered" — which only the caller's discovery pass can enumerate. Two map
+  // keys pointing at one path are one extension, so `add` de-duplicates the path.
   if (!spec || spec.wildcard) {
     for (const [name, path] of resolved.extensionPaths) {
-      if (!excludeNames.has(name)) add(path);
+      if (!isExcluded(name, path)) add(path);
     }
   }
   for (const name of spec?.names ?? []) {
-    if (excludeNames.has(name)) continue; // exclude wins
-    add(byCanonicalName.get(name) ?? resolved.extensionPaths.get(name));
+    // Resolve the path first: the exclude answers to the extension, not to the
+    // spelling the include list happened to use.
+    const path = byCanonicalName.get(name) ?? resolved.extensionPaths.get(name);
+    if (isExcluded(name, path)) continue; // exclude wins
+    add(path);
   }
   return paths;
 }
@@ -257,6 +281,11 @@ export function writeChildFiles(input: {
 
 /**
  * The spec for one pane child, resolved from the parent's spawn options.
+ *
+ * Not pure in the strictest sense: it calls `sessionTaskDir()`, which creates
+ * `<tmp>/pi-subagents-<uid>/<cwd>/<rootSessionId>/tasks` if it is missing. That is
+ * the same directory the parent's own transcript and workflow scripts live in,
+ * and the one call that guarantees it exists.
  *
  * `isolated` is not in the design's list of spawn options, but it has to be
  * here: `runAgent()` only injects the nested delegation tools when the type opted
@@ -290,6 +319,11 @@ export function childSpecFromSpawn(input: {
   // parent that reads the result back still lives where the config was found.
   const taskDir = sessionTaskDir(input.configCwd ?? input.cwd, input.rootSessionId);
   const config = input.agentConfig;
+  // Same precedence as the in-process runner (`resolveEffectiveMaxTurns`): the
+  // caller's override, else the type's own `max_turns`, with 0 meaning unlimited.
+  // The project default is not carried here — the child loads the same settings
+  // and applies it itself, so copying it would only risk disagreeing.
+  const maxTurns = normalizeMaxTurns(input.maxTurns ?? config?.maxTurns);
   const spec: ChildSpec = {
     agentId: input.agentId,
     rootSessionId: input.rootSessionId,
@@ -310,9 +344,13 @@ export function childSpecFromSpawn(input: {
   // as "explicitly unset" to anyone debugging it.
   if (input.parentAgentId !== undefined) spec.parentAgentId = input.parentAgentId;
   if (input.configCwd !== undefined) spec.configCwd = input.configCwd;
-  if (input.maxTurns !== undefined) spec.maxTurns = input.maxTurns;
+  if (maxTurns !== undefined) spec.maxTurns = maxTurns;
   if (input.graceTurns !== undefined) spec.graceTurns = input.graceTurns;
   if (input.structuredSchemaPath !== undefined) spec.structuredSchemaPath = input.structuredSchemaPath;
+  // `ext:` selectors are dropped when the run is isolated, exactly as
+  // `parseExtSelectors()` receives nothing in that case in-process.
+  const extSelectors = input.isolated ? undefined : config?.extSelectors;
+  if (extSelectors && extSelectors.length > 0) spec.extSelectors = extSelectors;
   return spec;
 }
 
@@ -341,7 +379,7 @@ export function buildChildCommand(input: {
   piBinary: string;
   /** `["--provider", <name>, "--model", <id>]`, from the resolved model. */
   modelFlag: string[];
-  /** `["--thinking", <level>]`, or empty when the type and caller inherited it. */
+  /** `["--thinking", <level>]`, or empty when nothing set it. Must mirror `spec.thinking`: the spec is what the child reads for its own turn loop, this is what pi starts with. */
   thinkingFlag: string[];
   toolFlags: string[];
   /** `<getAgentDir()>/subagent-sessions/<rootSessionId>/`, outside the user's `/resume` list. */
@@ -349,7 +387,12 @@ export function buildChildCommand(input: {
 }): string[] {
   // A terminal block's options have no `env` field, so the marker rides in the
   // command; child mode deletes it from `process.env` once read.
-  const systemPromptFlag = input.agentConfig?.promptMode === "append" ? APPEND_PROMPT_FLAG : REPLACE_PROMPT_FLAG;
+  // An unknown type keeps the in-process fallback's mode: `getConfig()` resolves
+  // it to the general-purpose agent, whose `prompt_mode` is `append`
+  // (`default-agents.ts`), so the parent prompt flows in exactly as it would
+  // have in an SDK session. A known type that omits the field is `replace`.
+  const promptMode = input.agentConfig?.promptMode ?? "append";
+  const systemPromptFlag = promptMode === "append" ? APPEND_PROMPT_FLAG : REPLACE_PROMPT_FLAG;
   return [
     "/usr/bin/env",
     `PI_SUBAGENTS_CHILD_SPEC=${input.files.specFile}`,

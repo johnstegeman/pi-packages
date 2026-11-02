@@ -38,7 +38,7 @@ const FIXTURES_DIR = resolve(fileURLToPath(new URL("./fixtures", import.meta.url
 const EXT_ALPHA = join(FIXTURES_DIR, "ext-alpha.mjs");
 const EXT_BETA = join(FIXTURES_DIR, "ext-beta.mjs");
 const PROBE_SKILL = join(FIXTURES_DIR, ".pi", "skills", "probe-skill.md");
-const PI_BINARY = "/opt/m/pi/latest/pi/pi";
+const PI_BINARY = "/fake/bin/pi";
 
 /**
  * The discovered-resource maps a caller hands the builders. Both fixture
@@ -102,27 +102,34 @@ function files(overrides: Partial<ChildFiles> = {}): ChildFiles {
     ...overrides,
   };
 }
+let agents: Map<string, AgentConfig> = new Map();
+let hermeticAgentDir = "";
+let previousAgentDir: string | undefined;
+
+// Hermetic discovery for the whole file, and the map outlives one describe so
+// every case reads the same configs: the developer's own ~/.pi/agents must not
+// bleed in, and nothing may reload the agents after the environment is restored.
+beforeAll(() => {
+  hermeticAgentDir = mkdtempSync(join(tmpdir(), "subagents-launcher-"));
+  previousAgentDir = process.env.PI_CODING_AGENT_DIR;
+  process.env.PI_CODING_AGENT_DIR = hermeticAgentDir;
+  agents = loadCustomAgents(FIXTURES_DIR);
+});
+
+afterAll(() => {
+  if (previousAgentDir === undefined) delete process.env.PI_CODING_AGENT_DIR;
+  else process.env.PI_CODING_AGENT_DIR = previousAgentDir;
+  rmSync(hermeticAgentDir, { recursive: true, force: true });
+});
+
+/** A fixture agent file, loaded above. */
+function configOf(name: string): AgentConfig {
+  const config = agents.get(name);
+  if (!config) throw new Error(`fixture agent "${name}" was not loaded`);
+  return config;
+}
 
 describe("confinementFlags — the agent type's restrictions, as CLI flags", () => {
-  let agents: Map<string, AgentConfig>;
-
-  beforeAll(() => {
-    // Hermetic discovery: the dev's own ~/.pi/agents must not leak into the map.
-    const hermeticDir = mkdtempSync(join(tmpdir(), "subagents-launcher-"));
-    process.env.PI_CODING_AGENT_DIR = hermeticDir;
-    agents = loadCustomAgents(FIXTURES_DIR);
-  });
-
-  afterAll(() => {
-    delete process.env.PI_CODING_AGENT_DIR;
-  });
-
-  function configOf(name: string): AgentConfig {
-    const config = agents.get(name);
-    if (!config) throw new Error(`fixture agent "${name}" was not loaded`);
-    return config;
-  }
-
   it("isolated: true forces -ne -ns -nc --no-mcp, overriding extensions: and ext: selectors", () => {
     const config = configOf("isolated-overrides-all");
     // The file sets extensions: and an ext: selector; isolation outranks both.
@@ -241,6 +248,44 @@ describe("confinementFlags — the agent type's restrictions, as CLI flags", () 
     ]);
   });
 
+  it("excludes an extension under every name it answers to, not just the one the map key used", () => {
+    // One file, two names: `ext-alpha.mjs` is the path-derived canonical name and
+    // `alpha-pkg` is the short name of the package that declares it. The in-process
+    // override matches every canonical name of the loaded path, so an exclude
+    // naming the canonical form must bind even when discovery filed it under the
+    // package name (or vice versa).
+    // The include list names the package; the denylist names the file's canonical
+    // form. They are the same extension, so the exclude has to bind.
+    const config = agentConfig({ extensions: ["alpha-pkg"], excludeExtensions: ["ext-alpha.mjs"] });
+    const resolved = resources({
+      extensionPaths: new Map([["alpha-pkg", EXT_ALPHA]]),
+    });
+
+    expect(confinementFlags({ agentConfig: config, isolated: false, resolved })).toEqual([
+      "-ne",
+      "-e",
+      "builtin:codemode",
+    ]);
+  });
+
+  it("loads a path listed under two discovered names once", () => {
+    const config = agentConfig({ extensions: ["*", "alpha-pkg"] });
+    const resolved = resources({
+      extensionPaths: new Map([
+        ["alpha-pkg", EXT_ALPHA],
+        ["ext-alpha.mjs", EXT_ALPHA],
+      ]),
+    });
+
+    expect(confinementFlags({ agentConfig: config, isolated: false, resolved })).toEqual([
+      "-ne",
+      "-e",
+      EXT_ALPHA,
+      "-e",
+      "builtin:codemode",
+    ]);
+  });
+
   it("skills: false yields -ns without any --skill", () => {
     const config = agentConfig({ skills: false });
     expect(confinementFlags({ agentConfig: config, isolated: false, resolved: resources() })).toEqual(["-ns"]);
@@ -284,7 +329,7 @@ describe("buildChildCommand — the child pi launch", () => {
     const argv = buildChildCommand({
       files: f,
       spec: spec(),
-      agentConfig: undefined,
+      agentConfig: agentConfig(),
       isolated: false,
       resolved: resources(),
       piBinary: PI_BINARY,
@@ -374,7 +419,6 @@ describe("buildChildCommand — the child pi launch", () => {
   });
 
   it("uses --system-prompt for prompt_mode: replace and --append-system-prompt for append", () => {
-    const agents = loadCustomAgents(FIXTURES_DIR);
     const base = {
       files: files(),
       spec: spec(),
@@ -388,8 +432,7 @@ describe("buildChildCommand — the child pi launch", () => {
     };
 
     for (const name of ["prompt-mode-replace", "minimal"]) {
-      const config = agents.get(name);
-      if (!config) throw new Error(`fixture agent "${name}" was not loaded`);
+      const config = configOf(name);
       const argv = buildChildCommand({ ...base, agentConfig: config });
       expect(argv.slice(argv.indexOf("--system-prompt"), argv.indexOf("--system-prompt") + 2)).toEqual([
         "--system-prompt",
@@ -398,8 +441,7 @@ describe("buildChildCommand — the child pi launch", () => {
       expect(argv).not.toContain("--append-system-prompt");
     }
 
-    const append = agents.get("prompt-mode-append");
-    if (!append) throw new Error('fixture agent "prompt-mode-append" was not loaded');
+    const append = configOf("prompt-mode-append");
     const argv = buildChildCommand({ ...base, agentConfig: append });
     expect(argv.slice(argv.indexOf("--append-system-prompt"), argv.indexOf("--append-system-prompt") + 2)).toEqual([
       "--append-system-prompt",
@@ -408,7 +450,7 @@ describe("buildChildCommand — the child pi launch", () => {
     expect(argv).not.toContain("--system-prompt");
   });
 
-  it("defaults to --system-prompt when the agent type is unknown", () => {
+  it("defaults to --append-system-prompt when the agent type is unknown, matching getConfig()'s fallback", () => {
     const argv = buildChildCommand({
       files: files(),
       spec: spec(),
@@ -421,8 +463,10 @@ describe("buildChildCommand — the child pi launch", () => {
       toolFlags: [],
       agentSessionDir: "/tmp/subagent-sessions/root-session",
     });
-    expect(argv).toContain("--system-prompt");
-    expect(argv).not.toContain("--append-system-prompt");
+    // The unknown type resolves to the general-purpose fallback in-process, whose
+    // prompt_mode is `append` — so the parent prompt is appended, not replaced.
+    expect(argv).toContain("--append-system-prompt");
+    expect(argv).not.toContain("--system-prompt");
   });
 
   it("keeps every argument small for a 1 MB prompt, which travels as @file", () => {
@@ -612,6 +656,80 @@ describe("childSpecFromSpawn — what the child needs to know", () => {
       rmSync(parentCwd, { recursive: true, force: true });
       rmSync(worktree, { recursive: true, force: true });
     }
+  });
+
+  it("carries the type's ext: selectors so the child can narrow extension tools", () => {
+    const config = configOf("narrow-alpha-read");
+    expect(config.extSelectors).toEqual(["ext:ext-alpha.mjs/alpha_read"]);
+
+    const out = childSpecFromSpawn({
+      agentId: "child-1",
+      rootSessionId: "root-session",
+      depth: 1,
+      maxSubagentDepth: 2,
+      agentConfig: config,
+      type: "narrow-alpha-read",
+      cwd: FIXTURES_DIR,
+      model: "claude-sonnet-4",
+      thinking: "",
+      pane: { sessionId: "session:pane", windowId: "window:1" },
+    });
+
+    expect(out.extSelectors).toEqual(["ext:ext-alpha.mjs/alpha_read"]);
+
+    // And it survives the trip through spec.json, which is how the child reads it.
+    const taskDir = mkdtempSync(join(tmpdir(), "rex-launcher-extsel-"));
+    try {
+      const written = writeChildFiles({ taskDir, systemPrompt: "s", prompt: "p", spec: out });
+      const onDisk = JSON.parse(readFileSync(written.specFile, "utf-8")) as ChildSpec;
+      expect(onDisk.extSelectors).toEqual(["ext:ext-alpha.mjs/alpha_read"]);
+    } finally {
+      rmSync(taskDir, { recursive: true, force: true });
+    }
+  });
+
+  it("drops ext: selectors under isolated, where the in-process path drops them too", () => {
+    const config = configOf("isolated-overrides-all");
+    expect(config.extSelectors?.length).toBeGreaterThan(0);
+
+    const out = childSpecFromSpawn({
+      agentId: "child-1",
+      rootSessionId: "root-session",
+      depth: 1,
+      maxSubagentDepth: 2,
+      agentConfig: config,
+      type: "isolated-overrides-all",
+      cwd: FIXTURES_DIR,
+      isolated: true,
+      model: "claude-sonnet-4",
+      thinking: "",
+      pane: { sessionId: "session:pane", windowId: "window:1" },
+    });
+
+    expect(out.extSelectors).toBeUndefined();
+  });
+
+  it("takes the caller's max_turns first, the type's own second, and neither as unlimited", () => {
+    const base = {
+      agentId: "child-1",
+      rootSessionId: "root-session",
+      depth: 1,
+      maxSubagentDepth: 2,
+      type: "probe",
+      cwd: FIXTURES_DIR,
+      model: "claude-sonnet-4",
+      thinking: "",
+      pane: { sessionId: "session:pane", windowId: "window:1" },
+    };
+    const typed = agentConfig({ maxTurns: 7 });
+
+    // Caller's override wins over the type's cap.
+    expect(childSpecFromSpawn({ ...base, agentConfig: typed, maxTurns: 12 }).maxTurns).toBe(12);
+    // A caller that passes nothing keeps the type's frontmatter cap.
+    expect(childSpecFromSpawn({ ...base, agentConfig: typed }).maxTurns).toBe(7);
+    // 0 means unlimited, as it does in-process, so the key is dropped entirely.
+    expect(childSpecFromSpawn({ ...base, agentConfig: typed, maxTurns: 0 }).maxTurns).toBeUndefined();
+    expect(childSpecFromSpawn({ ...base, agentConfig: agentConfig() }).maxTurns).toBeUndefined();
   });
 });
 
