@@ -34,33 +34,63 @@ export function preloadSkills(skillNames: string[], cwd: string): PreloadedSkill
   return skillNames.map((name) => ({ name, content: loadSkillContent(name, cwd) }));
 }
 
-function loadSkillContent(name: string, cwd: string): string {
-  if (isUnsafeName(name)) {
-    return `(Skill "${name}" skipped: name contains path traversal characters)`;
+/**
+ * Where a named skill lives, or undefined when nothing loads under it.
+ *
+ * The same discovery `preloadSkills()` does, stopping one step earlier: a flat
+ * `<root>/<name>.md` is that file, and a directory skill is the path pi loads
+ * for `--skill <path>` (the directory, not its `SKILL.md`). A pane child is told
+ * its skills by path — the in-process path preloads their text into the prompt
+ * instead — so this is the one place both carriers agree on which file a name
+ * means.
+ */
+export function findSkillPath(name: string, cwd: string): string | undefined {
+  // A name that could escape the roots is not a name a skill can have;
+  // `preloadSkills()` reports it rather than resolving it.
+  if (isUnsafeName(name)) return undefined;
+  for (const root of skillRoots(cwd)) {
+    const found = findInRoot(root, name);
+    if (found !== undefined) return found.path;
   }
-  const roots = [
+  return undefined;
+}
+
+/**
+ * The roots a skill is looked up in, in precedence order. Shared so a skill's
+ * content and its path can never be discovered from different places.
+ */
+function skillRoots(cwd: string): string[] {
+  return [
     join(cwd, ".pi", "skills"), // project — Pi standard
     join(cwd, ".agents", "skills"), // project — Agent Skills spec
     join(getAgentDir(), "skills"), // user — Pi standard
     join(homedir(), ".agents", "skills"), // user — Agent Skills spec
     join(homedir(), ".pi", "skills"), // legacy global, pre-Pi
   ];
-  for (const root of roots) {
-    const content = findInRoot(root, name);
-    if (content !== undefined) return content;
+}
+
+function loadSkillContent(name: string, cwd: string): string {
+  if (isUnsafeName(name)) {
+    return `(Skill "${name}" skipped: name contains path traversal characters)`;
+  }
+  for (const root of skillRoots(cwd)) {
+    const found = findInRoot(root, name);
+    if (found !== undefined) return found.content;
   }
   return `(Skill "${name}" not found in .pi/skills/, .agents/skills/, or global skill locations)`;
 }
 
-function findInRoot(root: string, name: string): string | undefined {
+/** A skill's path and its content: the path is what a `--skill` flag takes. */
+function findInRoot(root: string, name: string): { path: string; content: string } | undefined {
   if (isSymlink(root)) return undefined; // reject symlinked roots entirely
-  const flat = safeReadFile(join(root, `${name}.md`))?.trim();
-  if (flat !== undefined) return flat;
+  const flatPath = join(root, `${name}.md`);
+  const flatContent = safeReadFile(flatPath)?.trim();
+  if (flatContent !== undefined) return { path: flatPath, content: flatContent };
   return findSkillDirectory(root, name);
 }
 
 /** BFS under `root` for a directory named `name` containing `SKILL.md`. Pi-conforming filters. */
-function findSkillDirectory(root: string, name: string): string | undefined {
+function findSkillDirectory(root: string, name: string): { path: string; content: string } | undefined {
   if (!existsSync(root)) return undefined;
   const queue: string[] = [root];
 
@@ -90,7 +120,7 @@ function findSkillDirectory(root: string, name: string): string | undefined {
       if (isSkillDir) {
         if (entry.name === name) {
           const content = safeReadFile(skillMd)?.trim();
-          if (content !== undefined) return content;
+          if (content !== undefined) return { path, content };
         }
         continue; // Pi rule: skills don't nest — don't descend into a skill dir
       }

@@ -11,6 +11,7 @@
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { AgentManager } from "../src/agent-manager.js";
 import subagentsExtension from "../src/index.js";
 import {
   installChildMode,
@@ -294,6 +295,41 @@ describe("installChildMode", () => {
     expect(pi.setActiveTools).toHaveBeenCalledWith(["read", "codemode"]);
     for (const name of ["Agent", "get_subagent_result", "steer_subagent"]) {
       expect(pi.setActiveTools.mock.calls.flat()).not.toContain(name);
+    }
+  });
+
+  // A child is a real pi with its own manager, so its fan-out shape is its own
+  // business — but it must be the PROJECT's shape, not pi's built-in defaults, or
+  // the same agent would run three children in a pane and one in-process.
+  it("gives its own manager the project's pool limits", () => {
+    const dir = hermetic({ maxConcurrent: 3, maxConcurrentForeground: 2 });
+    const { pi } = makeChildPi();
+    const pools = vi.spyOn(AgentManager.prototype, "setMaxConcurrent");
+    const foreground = vi.spyOn(AgentManager.prototype, "setMaxConcurrentForeground");
+    try {
+      installChildMode(pi, specFor(dir));
+
+      expect(pools).toHaveBeenCalledWith(3);
+      expect(foreground).toHaveBeenCalledWith(2);
+    } finally {
+      pools.mockRestore();
+      foreground.mockRestore();
+    }
+  });
+
+  it("leaves its manager at the built-in limits when the project sets none", () => {
+    const dir = hermetic();
+    const { pi } = makeChildPi();
+    const pools = vi.spyOn(AgentManager.prototype, "setMaxConcurrent");
+    const foreground = vi.spyOn(AgentManager.prototype, "setMaxConcurrentForeground");
+    try {
+      installChildMode(pi, specFor(dir));
+
+      expect(pools).not.toHaveBeenCalled();
+      expect(foreground).not.toHaveBeenCalled();
+    } finally {
+      pools.mockRestore();
+      foreground.mockRestore();
     }
   });
 

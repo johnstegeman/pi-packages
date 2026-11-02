@@ -290,7 +290,7 @@ function installDelegation(pi: ExtensionAPI, spec: ChildSpec): string[] {
   // error are worse than none.
   if (spec.depth >= spec.maxSubagentDepth) return [];
   const tools = createNestedSubagentTools({
-    manager: new AgentManager(),
+    manager: childDelegationManager(spec.cwd),
     pi,
     parentAgentId: spec.agentId,
     depth: spec.depth,
@@ -300,6 +300,27 @@ function installDelegation(pi: ExtensionAPI, spec: ChildSpec): string[] {
   });
   for (const tool of tools) pi.registerTool(tool);
   return tools.map((tool) => tool.name);
+}
+
+/**
+ * The manager a pane child delegates through, with the project's own pool limits
+ * applied.
+ *
+ * Child mode deliberately does not run the root manager's `applySettings`:
+ * almost everything in that list binds UI the child must not have (the widget,
+ * the fleet view, mentions, schedules). The two limits that do bind are the
+ * concurrency pools, and they have to match the project's, or the shape of a
+ * fan-out would change with the modality. Turn defaults are read where they are
+ * used (`installTurnLimit()`), not stored, so they need no applier here.
+ */
+function childDelegationManager(cwd: string): AgentManager {
+  const manager = new AgentManager();
+  const settings = loadSettings(cwd);
+  if (typeof settings.maxConcurrent === "number") manager.setMaxConcurrent(settings.maxConcurrent);
+  if (typeof settings.maxConcurrentForeground === "number") {
+    manager.setMaxConcurrentForeground(settings.maxConcurrentForeground);
+  }
+  return manager;
 }
 
 /**

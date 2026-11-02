@@ -311,6 +311,7 @@ describe("buildChildCommand — the child pi launch", () => {
       isolated: false,
       resolved: resources(),
       piBinary: PI_BINARY,
+      projectTrusted: true,
       modelFlag: ["--provider", "anthropic", "--model", "claude-sonnet-4"],
       thinkingFlag: ["--thinking", "medium"],
       toolFlags: ["-t", "read"],
@@ -333,6 +334,7 @@ describe("buildChildCommand — the child pi launch", () => {
       isolated: false,
       resolved: resources(),
       piBinary: PI_BINARY,
+      projectTrusted: true,
       modelFlag: ["--provider", "anthropic", "--model", "claude-sonnet-4"],
       thinkingFlag: ["--thinking", "medium"],
       toolFlags: ["-t", "read"],
@@ -349,6 +351,7 @@ describe("buildChildCommand — the child pi launch", () => {
       "/tmp/subagent-sessions/root-session",
       "--name",
       "0f8a4b7c-2d3e-4a5b",
+      "-a",
       "--system-prompt",
       f.systemFile,
       "--provider",
@@ -382,6 +385,7 @@ describe("buildChildCommand — the child pi launch", () => {
       isolated: false,
       resolved: resources(),
       piBinary: PI_BINARY,
+      projectTrusted: true,
       modelFlag: ["--provider", "anthropic", "--model", "claude-sonnet-4"],
       thinkingFlag: [],
       toolFlags: ["-t", "read", "-xt", "bash"],
@@ -398,6 +402,7 @@ describe("buildChildCommand — the child pi launch", () => {
       "/tmp/subagent-sessions/root-session",
       "--name",
       "0f8a4b7c-2d3e-4a5b",
+      "-a",
       "--system-prompt",
       f.systemFile,
       "-ne",
@@ -425,6 +430,7 @@ describe("buildChildCommand — the child pi launch", () => {
       isolated: false,
       resolved: resources(),
       piBinary: PI_BINARY,
+      projectTrusted: true,
       modelFlag: ["--provider", "anthropic", "--model", "claude-sonnet-4"],
       thinkingFlag: [],
       toolFlags: [],
@@ -458,6 +464,7 @@ describe("buildChildCommand — the child pi launch", () => {
       isolated: false,
       resolved: resources(),
       piBinary: PI_BINARY,
+      projectTrusted: true,
       modelFlag: ["--provider", "anthropic", "--model", "claude-sonnet-4"],
       thinkingFlag: [],
       toolFlags: [],
@@ -486,6 +493,7 @@ describe("buildChildCommand — the child pi launch", () => {
         isolated: false,
         resolved: resources(),
         piBinary: PI_BINARY,
+        projectTrusted: true,
         modelFlag: ["--provider", "anthropic", "--model", "claude-sonnet-4"],
         thinkingFlag: [],
         toolFlags: [],
@@ -500,6 +508,60 @@ describe("buildChildCommand — the child pi launch", () => {
     } finally {
       rmSync(taskDir, { recursive: true, force: true });
     }
+  });
+
+  // A pane child has nobody to answer a trust prompt: it runs under the decision
+  // the parent session already made, or it would sit there forever.
+  it("carries the parent session's trust answer, whichever way it went", () => {
+    const base = {
+      files: files(),
+      spec: spec(),
+      agentConfig: undefined,
+      isolated: false,
+      resolved: resources(),
+      piBinary: PI_BINARY,
+      modelFlag: ["--provider", "anthropic", "--model", "claude-sonnet-4"],
+      thinkingFlag: [],
+      toolFlags: [],
+      agentSessionDir: "/tmp/subagent-sessions/root-session",
+    };
+
+    const trusted = buildChildCommand({ ...base, projectTrusted: true });
+    expect(trusted).toContain("-a");
+    expect(trusted).not.toContain("-na");
+
+    const untrusted = buildChildCommand({ ...base, projectTrusted: false });
+    expect(untrusted).toContain("-na");
+    expect(untrusted).not.toContain("-a");
+  });
+
+  // A resume is a second process on the same transcript, so pi is told to open
+  // the file rather than to reuse an id in a session directory.
+  it("opens the child's session file directly on a resume", () => {
+    const f = files();
+    const base = {
+      files: f,
+      spec: spec(),
+      agentConfig: undefined,
+      isolated: false,
+      resolved: resources(),
+      piBinary: PI_BINARY,
+      projectTrusted: true,
+      modelFlag: ["--provider", "anthropic", "--model", "claude-sonnet-4"],
+      thinkingFlag: [],
+      toolFlags: [],
+      agentSessionDir: "/tmp/subagent-sessions/root-session",
+    };
+
+    const argv = buildChildCommand({ ...base, sessionFile: "/tmp/subagent-sessions/root-session/x_agent.jsonl" });
+
+    expect(argv.slice(3, 5)).toEqual(["--session", "/tmp/subagent-sessions/root-session/x_agent.jsonl"]);
+    expect(argv).not.toContain("--session-id");
+    expect(argv).not.toContain("--session-dir");
+    // Everything else is unchanged: the same spec, name, prompt and confinement.
+    expect(argv[1]).toBe(`PI_SUBAGENTS_CHILD_SPEC=${f.specFile}`);
+    expect(argv).toContain("-a");
+    expect(argv[argv.length - 1]).toBe(`@${f.promptFile}`);
   });
 });
 

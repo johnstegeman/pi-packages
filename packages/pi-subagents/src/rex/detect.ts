@@ -41,18 +41,34 @@ export interface RexDetectDeps {
  * cheapest-first and short-circuit before the probe, which costs a subprocess.
  */
 export async function detectRexPanes(deps: RexDetectDeps): Promise<boolean> {
+  if (!rexTerminalMarkers(deps.env, deps.isTTY)) return false;
+  if (deps.setting === "off") return false;
+  return settleWithin(deps.probe, DEFAULT_REX_PROBE_TIMEOUT_MS);
+}
+
+/**
+ * The cheap half of detection: everything answerable without a subprocess.
+ *
+ * Exported because the spawn path can use it to skip the whole question. A
+ * caller that gets `false` here knows there is no pane to be had, synchronously,
+ * so a spawn outside Rex does not have to wait on a promise to learn it is
+ * running in-process — which keeps the manager's timing exactly as it was for
+ * every session that is not inside Rex.
+ */
+export function rexTerminalMarkers(
+  env: NodeJS.ProcessEnv = process.env,
+  isTTY: boolean = process.stdout.isTTY === true,
+): boolean {
   // A child `pi` launched in a pane inherits REX_SESSION, REX_BLOCK and its own
   // TTY, so without this marker every child would try to spawn panes of its
   // own. `index.ts` sets it on the pane child and the child mode deletes it, so
   // its presence means "I am already somebody's subagent".
-  if (deps.env.PI_SUBAGENTS_CHILD_SPEC) return false;
+  if (env.PI_SUBAGENTS_CHILD_SPEC) return false;
   // Empty counts as absent: `REX_SESSION=` in a wrapper script is not a session.
-  if (!deps.env.REX_SESSION || !deps.env.REX_BLOCK) return false;
+  if (!env.REX_SESSION || !env.REX_BLOCK) return false;
   // A print-mode or RPC-driven parent has nobody watching capsules and may exit
   // mid-run, leaving an orphan pane behind.
-  if (!deps.isTTY) return false;
-  if (deps.setting === "off") return false;
-  return settleWithin(deps.probe, DEFAULT_REX_PROBE_TIMEOUT_MS);
+  return isTTY;
 }
 
 /**

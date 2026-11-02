@@ -239,3 +239,28 @@ function reportedState(reply: Record<string, unknown> | undefined): string | nul
   }
   return null;
 }
+
+
+/**
+ * The window the parent block sits in, which is where its panes float.
+ *
+ * `session.new_layer` wants a window id, and a layer created without one lands
+ * wherever the server decides — measured to be the parent block's window, but
+ * only because nothing else asked. `rex block inspect` reports the block's own
+ * `window_id`, so the answer is the parent's window by construction rather than
+ * by luck.
+ *
+ * Undefined when there is no answer to read: Rex missing, a server that is not
+ * there, or a block that has since closed. A caller that cannot name the window
+ * has no business creating a pane.
+ */
+export async function resolveWindowId(
+  deps: Pick<PaneDeps, "exec" | "sessionId">,
+  blockId: string,
+): Promise<string | undefined> {
+  const reply = rexReply(await deps.exec(["block", "inspect", "-s", deps.sessionId, blockId, "--json"]));
+  const block = reply?.block;
+  if (typeof block !== "object" || block === null) return undefined;
+  const windowId = (block as { window_id?: unknown }).window_id;
+  return typeof windowId === "string" && windowId !== "" ? windowId : undefined;
+}

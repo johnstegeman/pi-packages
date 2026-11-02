@@ -30,6 +30,7 @@ import {
   execRex,
   type PaneDeps,
   readProcessState,
+  resolveWindowId,
   rexReply,
 } from "../src/rex/rex-cli.js";
 
@@ -49,6 +50,8 @@ const FAKE_ENV_KEYS = [
   "REX_FAKE_HOLD_EXIT",
   "REX_FAKE_CAPTURE",
   "REX_FAKE_CAPTURE_TEXT",
+  "REX_FAKE_INSPECT",
+  "REX_FAKE_WINDOW_ID",
 ] as const;
 
 /**
@@ -99,7 +102,10 @@ function fakeRexSource(): string {
     "}",
     'if (args[0] === "api" && args[1] === "call") apiCall(args[4], args[5] ?? "{}");',
     'else if (args[0] === "block" && args[1] === "call") blockCall(args[args.length - 1]);',
-    'else if (args[0] === "capture") {',
+    'else if (args[0] === "block" && args[1] === "inspect") {',
+    '  if (env.REX_FAKE_INSPECT === "missing") fail("block target " + args[2] + " not found", 3);',
+    '  out({ session_id: args[args.indexOf("-s") + 1], block: { block_id: args[2], window_id: env.REX_FAKE_WINDOW_ID ?? "window:9" } });',
+    '} else if (args[0] === "capture") {',
     '  if (env.REX_FAKE_CAPTURE === "missing") fail("block target " + args[4] + " not found", 3);',
     '  process.stdout.write(env.REX_FAKE_CAPTURE_TEXT || "");',
     '} else if (args[0] === "whoami") out({ rex_version: "fake" });',
@@ -521,5 +527,26 @@ describe("captureTail — the pane's last lines, for a run that ended without a 
     process.env.REX_FAKE_CAPTURE_TEXT = "\n\n";
 
     await expect(captureTail(deps(), "block:a")).resolves.toBe("");
+  });
+});
+
+describe("resolveWindowId — the parent block's window, where its panes float", () => {
+  it("reports the window the parent block sits in", async () => {
+    process.env.REX_FAKE_WINDOW_ID = "window:parent";
+
+    await expect(resolveWindowId(deps(), "block:a")).resolves.toBe("window:parent");
+    expect(calls()).toEqual([["block", "inspect", "-s", SESSION, "block:a", "--json"]]);
+  });
+
+  it("is undefined when the block is gone, so no pane is created in a window nobody named", async () => {
+    process.env.REX_FAKE_INSPECT = "missing";
+
+    await expect(resolveWindowId(deps(), "block:a")).resolves.toBeUndefined();
+  });
+
+  it("is undefined when rex is not installed at all", async () => {
+    process.env.PATH = emptyDir;
+
+    await expect(resolveWindowId(deps(), "block:a")).resolves.toBeUndefined();
   });
 });

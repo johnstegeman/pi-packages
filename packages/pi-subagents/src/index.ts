@@ -18,7 +18,7 @@ import { Type } from "@sinclair/typebox";
 import { abortable } from "./abortable.js";
 import { hasAgentBadge, renderAgentName } from "./agent-color.js";
 import { buildNewAgentFile, disableInContent, enableInContent, isEmptyStub, locateAgentFile, personalAgentsDir, projectAgentsDir, serializeAgentFile } from "./agent-file-toggle.js";
-import { AgentManager, isTopLevelAgent } from "./agent-manager.js";
+import { AgentManager, isTopLevelAgent, type ManagerRunner } from "./agent-manager.js";
 import { getAgentConversation, getDefaultMaxTurns, getGraceTurns, getRememberAgents, normalizeMaxTurns, resolveEffectiveMaxTurns, SUBAGENT_TOOL_NAMES, setDefaultMaxTurns, setGraceTurns, setRememberAgents, steerAgent } from "./agent-runner.js";
 import { BUILTIN_TOOL_NAMES, getAgentConfig, getAllTypes, getAvailableTypes, getConfig, getFallbackSubagent, isDefaultsDisabled, NO_FALLBACK, registerAgents, resolveSpawnType, resolveType, setDefaultsDisabled, setFallbackSubagent } from "./agent-types.js";
 import { inChildSessionContext } from "./child-context.js";
@@ -34,7 +34,9 @@ import { checkModelScope, isScopeModelsEnabled, setScopeModelsEnabled } from "./
 import { getMaxSubagentDepth, setMaxSubagentDepth } from "./nested-tools.js";
 import { createOutputFilePath, ensureOutputFile, getOutputTranscriptDefault, sessionTaskDir, setOutputTranscriptDefault, streamToOutputFile, writeInitialEntry } from "./output-file.js";
 import { installChildMode, readChildSpec } from "./rex/child-mode.js";
-import type { RexPanesSetting } from "./rex/detect.js";
+import { type RexPanesSetting, rexPanesEnabled, rexTerminalMarkers } from "./rex/detect.js";
+import { createPaneRunner } from "./rex/pane-run.js";
+import { execRex, resolveWindowId } from "./rex/rex-cli.js";
 import { SubagentScheduler } from "./schedule.js";
 import { resolveStorePath, ScheduleStore } from "./schedule-store.js";
 import { applyAndEmitLoaded, getWorkflowStallTimeoutSecs, loadSettings, parseStallTimeoutSecs, STALL_TIMEOUT_SECS_CEILING, type SubagentsSettings, saveAndEmitChanged, setWorkflowStallTimeout, type ToolDescriptionMode } from "./settings.js";
@@ -607,6 +609,83 @@ export default function (pi: ExtensionAPI) {
     };
   }
 
+  /**
+   * What a pane needs from Rex, discovered once: the parent's session and the
+   * window its block sits in. Both are per-process facts, and the second costs a
+   * Rex call to learn.
+   *
+   * Lazy on purpose. Detection probes the Rex server, and doing that at extension
+   * load would put a subprocess on the startup path of every pi session running
+   * in Rex; on the spawn path it is a cost a user is already waiting out.
+   */
+  let paneTarget: Promise<{ sessionId: string; windowId: string } | undefined> | undefined;
+  /**
+   * One pane runner per root session.
+   *
+   * Per session because the runner carries two things that belong to one: the
+   * cascade its live panes stack in, and the child transcript store keyed by the
+   * root session. `/new` therefore starts with an empty cascade rather than
+   * inheriting the last session's, and a settled agent's transcript is filed
+   * under the session that spawned it.
+   */
+  const paneRunners = new Map<string, ManagerRunner>();
+
+  function getPaneRunner(): ManagerRunner | undefined | Promise<ManagerRunner | undefined> {
+    // The cheap half of detection first, synchronously: outside Rex there is
+    // nothing to ask, and this spawn starts in-process in this tick exactly as
+    // it always has. Inside Rex the probe is a subprocess, so it is awaited.
+    if (!rexTerminalMarkers()) return undefined;
+    const rootSessionId = currentCtx?.sessionManager.getSessionId() ?? process.env.REX_SESSION;
+    if (rootSessionId === undefined) return undefined;
+    const known = paneRunners.get(rootSessionId);
+    if (known !== undefined) return known;
+    paneTarget ??= discoverPaneTarget();
+    return paneTarget.then((target) => {
+      if (target === undefined) return undefined;
+      let runner = paneRunners.get(rootSessionId);
+      if (runner === undefined) {
+        runner = buildPaneRunner(target, rootSessionId);
+        paneRunners.set(rootSessionId, runner);
+      }
+      return runner;
+    });
+  }
+
+  /** Ask Rex whether there are panes to be had, and where this pane would go. */
+  async function discoverPaneTarget(): Promise<{ sessionId: string; windowId: string } | undefined> {
+    if (!(await rexPanesEnabled())) return undefined;
+    const sessionId = process.env.REX_SESSION;
+    const blockId = process.env.REX_BLOCK;
+    // Without both ids there is no session to put a pane in, whatever Rex says.
+    if (sessionId === undefined || blockId === undefined) return undefined;
+    const windowId = await resolveWindowId({ exec: execRex, sessionId }, blockId);
+    return windowId === undefined ? undefined : { sessionId, windowId };
+  }
+
+  function buildPaneRunner(
+    target: { sessionId: string; windowId: string },
+    rootSessionId: string,
+  ): ManagerRunner {
+    return createPaneRunner({
+      exec: execRex,
+      sessionId: target.sessionId,
+      windowId: target.windowId,
+      rootSessionId,
+      // The root session owns the child transcript store, so a fan-out does not
+      // fill the user's `/resume` picker.
+      agentSessionDir: join(getAgentDir(), "subagent-sessions", rootSessionId),
+      // The parent's own build, so the child is the same pi in every respect
+      // that matters.
+      piBinary: process.execPath,
+      onWarning: (message: string) => {
+        // A pane left on screen, or a Rex that stopped answering, is something
+        // the user has to hear about: `ui.notify` is this extension's existing
+        // warning channel, and the run itself is unaffected either way.
+        if (currentCtx?.hasUI) currentCtx.ui.notify(message, "warning");
+      },
+    });
+  }
+
   // Background completion: route through group join or send individual nudge
   const manager = new AgentManager((record) => {
     // Owned children — nested, or a workflow's — report only through their
@@ -687,6 +766,10 @@ export default function (pi: ExtensionAPI) {
     // see `PendingUsagePool`. Skipped entirely when the feature is off, so no
     // pool grows in a session that will never drain it.
     if (reportUsage) pendingUsage.add(usage);
+  }, {
+    // Per spawn, not at construction: inside Rex a subagent is a real `pi` in a
+    // pane, everywhere else the in-process session it has always been.
+    runnerFor: getPaneRunner,
   });
 
   // Expose manager via Symbol.for() global registry for cross-package access.

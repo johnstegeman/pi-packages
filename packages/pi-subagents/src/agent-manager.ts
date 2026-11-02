@@ -81,6 +81,22 @@ export interface ManagerRunner {
   resume: RunResume;
 }
 
+/**
+ * How the manager learns which runner serves a spawn.
+ *
+ * A function rather than a fixed runner because the answer is decided per spawn
+ * and the decision costs a probe: inside Rex a subagent runs as a real `pi` in a
+ * pane, everywhere else as an in-process session. Asking at construction would
+ * put that probe on the extension's startup path, where a slow or hanging `rex`
+ * would delay the session itself; asking per spawn puts it where a user is
+ * already waiting for the agent, and detection memoizes the answer anyway.
+ *
+ * `undefined` means "no preference" and leaves the injected (in-process) runner
+ * in charge, and an answer that is not a promise means "decided without
+ * asking" — so a spawn outside Rex keeps starting its run in the same tick.
+ */
+export type RunnerProvider = () => ManagerRunner | undefined | Promise<ManagerRunner | undefined>;
+
 /** The default runner: one in-process pi session per run. */
 const IN_PROCESS_RUNNER: ManagerRunner = { start: runAgent, resume: resumeAgent };
 
@@ -416,6 +432,14 @@ export class AgentManager {
   private maxConcurrentForeground = DEFAULT_MAX_CONCURRENT_FOREGROUND;
   /** How a run actually runs — see {@link ManagerRunner}. */
   private runner: ManagerRunner;
+  /** Asked once per spawn; see {@link RunnerProvider}. */
+  private runnerFor?: RunnerProvider;
+  /**
+   * The runner that served each record's run, so a resume goes back to the same
+   * one: a pane record resumes as a pane, an in-process record as a session. A
+   * WeakMap because it must not keep a record alive past its own eviction.
+   */
+  private recordRunners = new WeakMap<AgentRecord, ManagerRunner>();
   /** Base repos worktrees were created from — so dispose() can prune them all,
    *  not just the parent repo (caller-supplied cwd can target other repos). */
   private worktreeRepos = new Set<string>();
@@ -465,9 +489,10 @@ export class AgentManager {
     onStart?: OnAgentStart,
     onCompact?: OnAgentCompact,
     onUsage?: OnAgentUsage,
-    options: { runner?: ManagerRunner } = {},
+    options: { runner?: ManagerRunner; runnerFor?: RunnerProvider } = {},
   ) {
     this.runner = options.runner ?? IN_PROCESS_RUNNER;
+    this.runnerFor = options.runnerFor;
     this.onComplete = onComplete;
     this.onStart = onStart;
     this.onCompact = onCompact;
@@ -711,6 +736,62 @@ export class AgentManager {
     return this.startups.get(id) ?? Promise.resolve();
   }
 
+  /**
+   * The runner for a new run: what the provider says, else the default.
+   *
+   * Answers synchronously when there is no provider, which keeps the default
+   * path exactly as it was — the in-process runner is called in the same tick as
+   * `spawn()`, so nothing that reads the record right after a spawn starts
+   * depending on microtask ordering.
+   *
+   * Never rejects. Detection already fails closed, but a provider is caller code
+   * (index.ts), and a spawn that could not answer this question must still run —
+   * in-process, which is the path that always works.
+   */
+  private resolveRunner(): ManagerRunner | Promise<ManagerRunner> {
+    const provider = this.runnerFor;
+    if (provider === undefined) return this.runner;
+    let answer: ManagerRunner | undefined | Promise<ManagerRunner | undefined>;
+    try {
+      answer = provider();
+    } catch {
+      return this.runner;
+    }
+    if (!(answer instanceof Promise)) return answer ?? this.runner;
+    return answer.then(
+      (runner) => runner ?? this.runner,
+      () => this.runner,
+    );
+  }
+
+  /**
+   * Start the run with the chosen runner, remembering which one it was so a
+   * resume goes back to it.
+   */
+  private startWith(
+    record: AgentRecord,
+    runner: ManagerRunner,
+    ctx: ExtensionContext,
+    type: SubagentType,
+    prompt: string,
+    options: RunOptions,
+  ): Promise<RunResult> {
+    this.recordRunners.set(record, runner);
+    return runner.start(ctx, type, prompt, options);
+  }
+
+  /**
+   * The runner that started this record's run, or the default for one that never
+   * started (a queued record whose resume is being replaced).
+   *
+   * A resume is a continuation, so it belongs to whichever runner served the run
+   * being continued: prompting a pane handle through the in-process runner would
+   * call `PaneSession.prompt()`, which refuses by design.
+   */
+  private runnerForRecord(record: AgentRecord): ManagerRunner {
+    return this.recordRunners.get(record) ?? this.runner;
+  }
+
   /** Actually start an agent (called immediately or from queue drain). */
   private async startAgent(
     id: string,
@@ -823,9 +904,15 @@ export class AgentManager {
     }
     const detach = () => { detachParentSignal?.(); detachParentSignal = undefined; };
 
-    const promise = this.runner.start(ctx, type, prompt, {
+    // Per-run wiring, captured once so the runner can be chosen below without
+    // rebuilding it — and so `record.promise` is assigned in THIS tick, which
+    // callers such as `get_subagent_result({ wait: true })` rely on.
+    const runOptions: RunOptions = {
       pi,
       agentId: id,
+      handle: record.handle,
+      description: record.description,
+      rootSessionId: record.rootSessionId,
       model: options.model,
       maxTurns: options.maxTurns,
       isolated: options.isolated,
@@ -907,7 +994,16 @@ export class AgentManager {
         }
         options.onSessionCreated?.(session);
       },
-    })
+    };
+
+    // Which runner serves THIS spawn — an in-process session, or (inside Rex) a
+    // real `pi` in a pane. Chosen here, on the promise chain, so the record gets
+    // its `promise` in this tick whatever the answer turns out to be.
+    const chosen = this.resolveRunner();
+    const started = chosen instanceof Promise
+      ? chosen.then((runner) => this.startWith(record, runner, ctx, type, prompt, runOptions))
+      : this.startWith(record, chosen, ctx, type, prompt, runOptions);
+    const promise = started
       .then(async ({ responseText, session, aborted, steered, failure, structuredJson, structuredRetried }) => {
         // Don't overwrite status if externally stopped via abort()
         if (record.status !== "stopped") {
@@ -1236,7 +1332,7 @@ export class AgentManager {
     record.error = undefined;
 
     try {
-      const { text, failure } = await this.runner.resume(record.session, prompt, {
+      const { text, failure } = await this.runnerForRecord(record).resume(record.session, prompt, {
         onToolActivity: (activity) => {
           if (activity.type === "end") record.toolUses++;
           options?.onToolActivity?.(activity);
@@ -1330,7 +1426,7 @@ export class AgentManager {
       this.drainQueue();
     };
 
-    const promise = this.runner.resume(record.session, prompt, {
+    const promise = this.runnerForRecord(record).resume(record.session, prompt, {
       onToolActivity: (activity) => {
         if (activity.type === "end") record.toolUses++;
         options.onToolActivity?.(activity);

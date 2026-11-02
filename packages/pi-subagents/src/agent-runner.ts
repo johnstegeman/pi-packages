@@ -466,6 +466,20 @@ export interface RunOptions {
   pi: ExtensionAPI;
   /** Manager-assigned id; suffixes session name to disambiguate parallel spawns (e.g. `Explore#a1b2c3d4`). */
   agentId?: string;
+  /**
+   * The record's handle (`explore-2`), which the pane path puts on the capsule's
+   * label so a stack of panes can be told apart by name.
+   */
+  handle?: string;
+  /** The spawn's description — the other half of that label, and what a
+   *  pane-side warning names the agent by. */
+  description?: string;
+  /**
+   * The session that started this cascade, when the spawn was told it. The pane
+   * path files the child's transcript under it (`subagent-sessions/<id>/`) so a
+   * fan-out does not fill the user's `/resume` picker.
+   */
+  rootSessionId?: string;
   model?: Model<any>;
   maxTurns?: number;
   signal?: AbortSignal;

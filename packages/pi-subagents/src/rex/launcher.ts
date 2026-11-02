@@ -359,6 +359,15 @@ export function childSpecFromSpawn(input: {
 }
 
 /**
+ * The trust answer a pane child is launched with. `-a` trusts the project's
+ * `.pi` files for the run, `-na` ignores them — the same two answers pi offers a
+ * human, so the child runs under the trust decision the parent session made
+ * rather than stopping to ask in a pane nobody is reading.
+ */
+const TRUST_FLAG = "-a";
+const NO_TRUST_FLAG = "-na";
+
+/**
  * The argv the pane runs: `pi` as the parent's own build, told which spec it is
  * the child of.
  *
@@ -372,6 +381,10 @@ export function childSpecFromSpawn(input: {
  * the transcript it tails (`<agentSessionDir>/…<id>.jsonl`) and reopen it from
  * `/agents` after the pane is gone; a uuid slice starts and ends alphanumeric,
  * which is what pi requires of a session id.
+ *
+ * A resume passes `sessionFile` instead, and then pi is told to open that file:
+ * the same transcript continues under a second process, which is the only way
+ * a pane run can be continued after its first child has exited.
  */
 export function buildChildCommand(input: {
   files: ChildFiles;
@@ -388,6 +401,23 @@ export function buildChildCommand(input: {
   toolFlags: string[];
   /** `<getAgentDir()>/subagent-sessions/<rootSessionId>/`, outside the user's `/resume` list. */
   agentSessionDir: string;
+  /**
+   * Whether the parent session trusts this project — the child is told `-a`
+   * when it does and `-na` when it does not.
+   *
+   * Not optional: a child that inherits no answer stops on a trust prompt in a
+   * pane nobody is looking at, and each of the two answers is wrong for the
+   * other case. `-na` is what a human gets for an untrusted project, so the
+   * child sees exactly the project-local files its parent was allowed to.
+   */
+  projectTrusted: boolean;
+  /**
+   * The child's session file, when it is being relaunched on an existing one
+   * (a resume). Replaces `--session-id`/`--session-dir`: `--session <path>`
+   * opens the file itself, and passing both would be two answers to one
+   * question.
+   */
+  sessionFile?: string;
 }): string[] {
   // A terminal block's options have no `env` field, so the marker rides in the
   // command; child mode deletes it from `process.env` once read.
@@ -397,16 +427,20 @@ export function buildChildCommand(input: {
   // have in an SDK session. A known type that omits the field is `replace`.
   const promptMode = input.agentConfig?.promptMode ?? "append";
   const systemPromptFlag = promptMode === "append" ? APPEND_PROMPT_FLAG : REPLACE_PROMPT_FLAG;
+  // The child's pi session is the agent id, which is what lets the parent find
+  // the transcript it tails and reopen it from `/agents` after the pane is gone.
+  const sessionFlags =
+    input.sessionFile !== undefined
+      ? ["--session", input.sessionFile]
+      : ["--session-id", input.spec.agentId, "--session-dir", input.agentSessionDir];
   return [
     "/usr/bin/env",
     `PI_SUBAGENTS_CHILD_SPEC=${input.files.specFile}`,
     input.piBinary,
-    "--session-id",
-    input.spec.agentId,
-    "--session-dir",
-    input.agentSessionDir,
+    ...sessionFlags,
     "--name",
     input.spec.agentId,
+    input.projectTrusted ? TRUST_FLAG : NO_TRUST_FLAG,
     systemPromptFlag,
     input.files.systemFile,
     ...confinementFlags({
