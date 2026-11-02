@@ -273,8 +273,9 @@ just delivered as files and flags.
   must also carry the `turn_end` / `compaction_start` / `compaction_end` events
   `streamToOutputFile()` listens for (`output-file.ts:100-155`), so `.output` transcripts keep
   being written from the tail and `record.outputCleanup` keeps its meaning.
-- **Steer**: `rex send -b BLOCK <text>` then `rex send-key -b BLOCK enter`, refused unless the
-  pane's program status says the child is running or idle (never typed into a dialog).
+- **Steer**: `rex send -s <session> -b BLOCK <text>` then `rex send-key -s <session> -b BLOCK enter`,
+  refused unless the pane's program status says the child is running or idle (never typed into a
+  dialog).
 - **Abort**: close the block (`session.close_layer`) — the child dies, status `"stopped"`;
   an aborted child that wrote a result file is `"aborted"`.
 - **dispose**: on parent `session_shutdown`, close any panes this session created and is

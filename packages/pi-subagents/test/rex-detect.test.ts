@@ -18,6 +18,15 @@ import {
   rexPanesEnabled,
   rexProbe,
 } from "../src/rex/detect.js";
+import { loadSettings } from "../src/settings.js";
+
+// `loadSettings` reads files synchronously and can throw on a filesystem that is
+// not cooperating, which no fixture can arrange portably. The module is mocked so
+// one case can make it throw; every other case delegates to the real reader.
+vi.mock("../src/settings.js", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../src/settings.js")>();
+  return { ...actual, loadSettings: vi.fn(actual.loadSettings) };
+});
 
 /** A Rex-hosted parent: both markers set, a terminal, the default setting. */
 function baseDeps(overrides: Partial<RexDetectDeps> = {}): RexDetectDeps {
@@ -167,6 +176,17 @@ describe("rexProbe", () => {
     await expect(rexProbe()).resolves.toBe(false);
   });
 
+  // The 1500 ms ceiling bounds time, not memory: a CLI that chatters for a second
+  // and a half must not be able to grow the captured body without limit, so past
+  // the cap nothing is appended and the shape check rejects what survived.
+  it("is false for a body past the capture cap, which cannot be a whoami answer", async () => {
+    const body = `{"rex_version":"0.0.1793420730","pad":"${"x".repeat(70 * 1024)}"}`;
+    writeFileSync(join(binDir, "body.json"), body);
+    fakeRex(`#!/bin/sh\ncat '${join(binDir, "body.json")}'\n`);
+
+    await expect(rexProbe()).resolves.toBe(false);
+  });
+
   it("is false and gives up when the CLI hangs", async () => {
     // `exec` so the kill reaches the thing that is actually sleeping, which is
     // what makes this test finish instead of leaking a process for five seconds.
@@ -243,5 +263,17 @@ describe("rexPanesEnabled", () => {
     resetRexDetectionForTests();
     await expect(rexPanesEnabled(root)).resolves.toBe(true);
     expect(probeCount()).toBe(2);
+  });
+
+  // The spawn path treats every failure here as a cheap "no". `loadSettings` is
+  // the one call in it that runs synchronously and can throw, so a settings read
+  // that fails has to answer "in-process" rather than reject into the spawn.
+  it("answers in-process, without probing, when the settings cannot be read", async () => {
+    vi.mocked(loadSettings).mockImplementationOnce(() => {
+      throw new Error("EACCES: the agent dir is not readable");
+    });
+
+    await expect(rexPanesEnabled(root)).resolves.toBe(false);
+    expect(probeCount()).toBe(0);
   });
 });

@@ -116,9 +116,11 @@ function fakeRexSource(): string {
     'else if (args[0] === "sleep") Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 5000);',
     // A `rex` that exits 0 at once while a grandchild keeps the inherited pipes
     // open: `'close'` on the parent side then cannot fire until the grandchild is
-    // gone, which is the case the timeout has to settle without.
+    // gone, which is the case the timeout has to settle without. The grandchild is
+    // a short sleep on purpose — nothing kills it, so it holds the pipes `execRex`
+    // gave the fake open for its whole lifetime, and a long one outlives the test.
     'else if (args[0] === "hold") {',
-    '  require("node:child_process").spawn("sleep", [args[1] ?? "3"], { stdio: "inherit" }).unref();',
+    '  require("node:child_process").spawn("sleep", [args[1] ?? "2"], { stdio: "inherit" }).unref();',
     '  if (env.REX_FAKE_HOLD_EXIT === "0") process.exit(0);',
     '  Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 10000);',
     "}",
@@ -233,25 +235,29 @@ describe("execRex — the only place this package spawns rex", () => {
   // promise settles on its own, not on the stream closing.
   it("settles on the timeout even when a grandchild keeps the pipes open", async () => {
     const started = Date.now();
-    // The fake exits 0 at once and leaves `sleep 3` holding the inherited pipes,
-    // so `'close'` cannot fire until the grandchild is gone.
+    // The fake exits 0 at once and leaves `sleep 2` holding the inherited pipes,
+    // so `'close'` cannot fire until the grandchild is gone. Two seconds, not
+    // three: the assertion below needs a margin past the backstop, and the stray
+    // sleep holds the pipes `execRex` opened for as long as it lives.
     process.env.REX_FAKE_HOLD_EXIT = "0";
-    const result = await execRex(["hold", "3"], { timeoutMs: 100 });
+    const result = await execRex(["hold", "2"], { timeoutMs: 100 });
     const elapsed = Date.now() - started;
 
     expect(result.code).toBe(-1);
     expect(result.stderr).toContain("timed out");
-    // Well before the 3 s the pipes stay open: the backstop settled it.
+    // Well before the 2 s the pipes stay open: the backstop settled it.
     expect(elapsed).toBeLessThan(2000);
   });
 
   it("reports a timeout, not success, when the child exits 0 as the timer fires", async () => {
     // Same shape with a grandchild that lets go after the timeout but before the
     // backstop: `'close'` then arrives carrying a clean exit status, which must
-    // not be reported as a successful call.
+    // not be reported as a successful call. 330 ms against a 300 ms timeout puts
+    // `'close'` 30 ms past the kill and 220 ms before the backstop arms, so the
+    // window is the whole point of the case rather than a wide race.
     process.env.REX_FAKE_HOLD_EXIT = "0";
 
-    const result = await execRex(["hold", "0.4"], { timeoutMs: 300 });
+    const result = await execRex(["hold", "0.33"], { timeoutMs: 300 });
 
     expect(result).toMatchObject({ code: -1 });
     expect(result.stderr).toContain("timed out");
@@ -432,6 +438,19 @@ describe("minimizePane — a refusal is an answer, not an exception", () => {
     // Not a `bad_request`: the call never reached a server, and the caller is
     // told what actually went wrong.
     expect(result.minimized === false && result.reason).toContain("rex");
+  });
+
+  // `RexExec` is documented as never rejecting, but the seam is injectable: a deps
+  // object that rejects anyway must still report a refusal with a reason rather
+  // than escape as a rejection the caller has no arm for.
+  it("is false with the thrown error's message when the exec seam rejects", async () => {
+    const refusing: PaneDeps = {
+      exec: () => Promise.reject(new Error("boom")),
+      sessionId: SESSION,
+      windowId: WINDOW,
+    };
+
+    await expect(minimizePane(refusing, "layer:a")).resolves.toEqual({ minimized: false, reason: "boom" });
   });
 });
 

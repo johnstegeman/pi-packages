@@ -96,6 +96,20 @@ export function execRex(
     };
 
     const child = spawn("rex", args, { stdio: ["ignore", "pipe", "pipe"], shell: false });
+    /**
+     * The last resort: stop waiting on `'close'` and settle.
+     *
+     * The pipes are destroyed first. A grandchild that inherited them keeps them
+     * ref'd for as long as it runs, so leaving them open would hold the process —
+     * and the event loop — for the lifetime of a program this call never owned.
+     * Nothing is lost by doing it here: the call is already being reported as -1,
+     * and a body that has not arrived by now is not going to be reported.
+     */
+    const settleAnyway = () => {
+      child.stdout?.destroy();
+      child.stderr?.destroy();
+      finish(-1);
+    };
     timer = setTimeout(() => {
       timedOut = true;
       stderr += `${stderr === "" ? "" : "\n"}rex ${args[0] ?? ""} timed out after ${timeoutMs} ms`;
@@ -104,7 +118,7 @@ export function execRex(
       child.kill("SIGKILL");
       // Settlement must not depend on `'close'`: if the child, or anything it
       // started, still holds the pipes, the stream may not close at all.
-      setTimeout(() => finish(-1), SETTLE_BACKSTOP_MS).unref();
+      setTimeout(settleAnyway, SETTLE_BACKSTOP_MS).unref();
     }, timeoutMs);
     timer.unref();
 
@@ -130,7 +144,7 @@ export function execRex(
     // the caller already knows why it asked.
     const cancel = () => {
       child.kill("SIGKILL");
-      setTimeout(() => finish(-1), SETTLE_BACKSTOP_MS).unref();
+      setTimeout(settleAnyway, SETTLE_BACKSTOP_MS).unref();
     };
     if (signal?.aborted === true) cancel();
     else signal?.addEventListener("abort", cancel, { once: true });

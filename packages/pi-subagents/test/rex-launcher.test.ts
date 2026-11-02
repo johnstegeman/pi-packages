@@ -255,10 +255,10 @@ describe("confinementFlags — the agent type's restrictions, as CLI flags", () 
 
   it("excludes an extension under every name it answers to, not just the one the map key used", () => {
     // One file, two names: `ext-alpha.mjs` is the path-derived canonical name and
-    // `alpha-pkg` is the short name of the package that declares it. The in-process
-    // override matches every canonical name of the loaded path, so an exclude
-    // naming the canonical form must bind even when discovery filed it under the
-    // package name (or vice versa).
+    // `alpha-pkg` is a second spelling a discovery pass may file it under. The
+    // in-process override matches every canonical name of the loaded path, so an
+    // exclude naming the canonical form must bind even when discovery filed it
+    // under that second spelling (or vice versa).
     // The include list names the package; the denylist names the file's canonical
     // form. They are the same extension, so the exclude has to bind.
     const config = agentConfig({ extensions: ["alpha-pkg"], excludeExtensions: ["ext-alpha.mjs"] });
@@ -286,6 +286,26 @@ describe("confinementFlags — the agent type's restrictions, as CLI flags", () 
       "-ne",
       "-e",
       EXT_ALPHA,
+      "-e",
+      "builtin:codemode",
+    ]);
+  });
+
+  // The enumeration loop sees the discovered map's keys, not the include list's
+  // spellings: discovery may file one file under `alpha-pkg` while the denylist
+  // names its canonical `ext-alpha.mjs`. Name-only matching there would let the
+  // `alpha-pkg` key through and load an extension the excludes removed.
+  it("excludes an enumerated extension under an alias the include list never used", () => {
+    const config = agentConfig({ extensions: ["*", "alpha-pkg"], excludeExtensions: ["ext-alpha.mjs"] });
+    const resolved = resources({
+      extensionPaths: new Map([
+        ["alpha-pkg", EXT_ALPHA],
+        ["ext-alpha.mjs", EXT_ALPHA],
+      ]),
+    });
+
+    expect(confinementFlags({ agentConfig: config, isolated: false, resolved })).toEqual([
+      "-ne",
       "-e",
       "builtin:codemode",
     ]);

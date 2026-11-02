@@ -620,6 +620,7 @@ describe("settings persistence", () => {
         setReportUsage: vi.fn(),
         setShowCost: vi.fn(),
         setShowModel: vi.fn(),
+        setRunInRexPanes: vi.fn(),
       };
     });
 
@@ -748,6 +749,13 @@ describe("settings persistence", () => {
       expect(appliers.setAgentMentions).toHaveBeenCalledWith("direct");
       applySettings({}, appliers);
       expect(appliers.setAgentMentions).toHaveBeenCalledTimes(1); // absence is "use default"
+    });
+
+    it("applies runInRexPanes; skips it when absent", () => {
+      applySettings({ runInRexPanes: "off" }, appliers);
+      expect(appliers.setRunInRexPanes).toHaveBeenCalledWith("off");
+      applySettings({}, appliers);
+      expect(appliers.setRunInRexPanes).toHaveBeenCalledTimes(1); // absence is "use default"
     });
 
     it("applies rememberAgents; skips it when absent", () => {
@@ -887,6 +895,7 @@ describe("settings persistence", () => {
         setReportUsage: vi.fn(),
         setShowCost: vi.fn(),
         setShowModel: vi.fn(),
+        setRunInRexPanes: vi.fn(),
       };
     });
 

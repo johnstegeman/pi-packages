@@ -232,9 +232,12 @@ function survivingExtensionPaths(
   const add = (path: string | undefined) => {
     if (path && !paths.includes(path)) paths.push(path);
   };
-  const isExcluded = (name: string, path: string | undefined) =>
-    excludeNames.has(name) ||
-    (path !== undefined && extensionCanonicalNames(path).some((alias) => excludeNames.has(alias)));
+  // `if (path)`, not `path !== undefined`, matching `add`'s guard: an empty path
+  // is no path, and both halves of this function should say so the same way.
+  const isExcluded = (name: string, path: string | undefined): boolean => {
+    if (excludeNames.has(name)) return true;
+    return path ? extensionCanonicalNames(path).some((alias) => excludeNames.has(alias)) : false;
+  };
   // Path entries carry their own absolute path; they are also the only source of
   // one for an entry written as a path.
   const byCanonicalName = new Map<string, string>();

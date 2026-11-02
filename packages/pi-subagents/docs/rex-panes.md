@@ -42,7 +42,7 @@ One pane per spawn, created in the parent's own Rex session and window, never in
 The parent watches two things at once and takes whichever finishes first:
 
 1. **The result file**, polled every 100 ms. A child that writes it has answered: `text`, `failure`, `aborted`, `steered`, `structuredJson` and `structuredRetried` all come from it, and a `failure` makes the run an error rather than a completion.
-2. **The child's exit**, from `rex wait -s <session> <block> --json` in 30-second windows (two round trips a minute per agent, and a server restart still gets noticed), with a 500 ms `block call … process` poll as the fallback when `wait` says nothing.
+2. **The child's exit**, from `rex wait -s <session> <block> --json --for 30000ms` in 30-second windows (two round trips a minute per agent, and a server restart still gets noticed), with a 500 ms `block call … process` poll as the fallback when `wait` says nothing.
 
 A child that exits **without** a result file ends the run as an `error`, and the message carries what is knowable: the exit status (`an exit status that could not be observed (the pane closed first)` when the pane went with it), the child's last assistant message from its session file, and the pane's last lines when the pane still exists. Nothing waits on a pane: by the time a crash is visible, the screen is usually gone already.
 
@@ -61,6 +61,8 @@ Closing a pane by hand is the same event as a crash: the child dies, no result f
 | `blocked` — at a permission, question or login prompt | `agent "…" is waiting on a prompt in its pane — answer it in the pane, or abort the agent; the message was not sent` |
 | `done`, `error`, or a state this build has never seen | Refused; a whitelist, not a blacklist of `blocked` |
 | Already exited | `agent "…" has already exited; the message was not sent` |
+
+Two refusals come after the state gate has already said yes, from the transport itself: `the steering message could not be typed into the pane: …` when the `rex send` that carries the text fails, and `the steering message was typed but not submitted: …` when the text landed but the Enter that submits it did not — in the second case the message is sitting on the child's prompt, unsubmitted, and the child has not seen it.
 
 A refused steer is never silently dropped: `steer_subagent` reports it in its own result, and a steer queued before the session existed is reported as a warning — `the steering message for agent "…" was not delivered: …` — rather than counted as delivered.
 

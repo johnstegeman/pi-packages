@@ -9,15 +9,13 @@
 // once per process (`rexPanesEnabled` memoizes).
 
 import { spawn } from "node:child_process";
-import { loadSettings } from "../settings.js";
+// `RexPanesSetting` is declared in settings.ts, beside the key that holds it, and
+// re-exported here so callers that already import it from the detector keep
+// working. `loadSettings` is the only value this module takes from there, so the
+// layering runs one way: settings.ts knows nothing about Rex.
+import { loadSettings, type RexPanesSetting } from "../settings.js";
 
-/**
- * Settings value for `runInRexPanes`. `"auto"` probes and uses panes where it
- * can; `"off"` never does. There is deliberately no `"on"`: claiming panes
- * outside Rex would create a run nobody can watch, and the probe is what makes
- * the choice safe to leave to the environment.
- */
-export type RexPanesSetting = "auto" | "off";
+export type { RexPanesSetting };
 
 /**
  * How long `rex whoami --json` gets. One subprocess round trip to a local
@@ -25,6 +23,15 @@ export type RexPanesSetting = "auto" | "off";
  * pane path costs more than it saves and the in-process runner wins.
  */
 export const DEFAULT_REX_PROBE_TIMEOUT_MS = 1500;
+
+/**
+ * How much of the probe's stdout is kept. `whoami --json` answers in a few
+ * hundred bytes, so anything past this is not the answer: the body is dropped
+ * and the shape check rejects whatever survived. The 1500 ms ceiling is a bound
+ * on time, not on memory, and a CLI chattering for a second and a half must not
+ * be able to grow this string without limit.
+ */
+const MAX_PROBE_STDOUT_LENGTH = 64 * 1024;
 
 /** Everything detection reads, injected so the matrix is testable without a Rex server. */
 export interface RexDetectDeps {
@@ -126,6 +133,10 @@ export function rexProbe(timeoutMs: number = DEFAULT_REX_PROBE_TIMEOUT_MS): Prom
       killSignal: "SIGKILL",
     });
     child.stdout?.on("data", (chunk: Buffer) => {
+      // Past the cap the body is no longer the answer, so it is not kept — but
+      // the listener stays attached: an unread pipe would fill and block the
+      // child instead of letting the ceiling kill it.
+      if (stdout.length >= MAX_PROBE_STDOUT_LENGTH) return;
       stdout += chunk.toString("utf8");
     });
     child.on("error", () => finish(false));
@@ -156,13 +167,32 @@ let memo: Promise<boolean> | undefined;
 
 /** The spawn path's single question. Memoized — first answer wins for the process. */
 export function rexPanesEnabled(cwd: string = process.cwd()): Promise<boolean> {
-  memo ??= detectRexPanes({
+  memo ??= askTheEnvironment(cwd);
+  return memo;
+}
+
+/**
+ * The detection itself, with the setting read where it can fail safely.
+ *
+ * `loadSettings` runs synchronously and can throw (an agent dir pi cannot read,
+ * a settings file that vanishes between the stat and the read). A throw here
+ * would escape as a rejected promise on the spawn path, where every failure is
+ * supposed to be a cheap "no" — so an unreadable setting is answered with the
+ * in-process runner instead.
+ */
+async function askTheEnvironment(cwd: string): Promise<boolean> {
+  let setting: RexPanesSetting | undefined;
+  try {
+    setting = loadSettings(cwd).runInRexPanes;
+  } catch {
+    return false;
+  }
+  return detectRexPanes({
     env: process.env,
     isTTY: process.stdout.isTTY === true,
-    setting: loadSettings(cwd).runInRexPanes,
+    setting,
     probe: rexProbe,
   });
-  return memo;
 }
 
 /** Test seam: drop the memoized answer so a suite can observe detection again. */

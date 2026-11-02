@@ -6,11 +6,19 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { getAgentDir } from "@earendil-works/pi-coding-agent";
 import { NO_FALLBACK } from "./agent-types.js";
-// Type-only: detect.ts imports `loadSettings` from this module, so a value
-// import here would be a cycle. The shape belongs to the detector, which is
-// the only thing that reads the key.
-import type { RexPanesSetting } from "./rex/detect.js";
 import type { AgentMentionMode, JoinMode, ViewerMarkdownMode, WidgetMode } from "./types.js";
+
+/**
+ * Settings value for `runInRexPanes`. `"auto"` probes and uses panes where it
+ * can; `"off"` never does. There is deliberately no `"on"`: claiming panes
+ * outside Rex would create a run nobody can watch, and the probe is what makes
+ * the choice safe to leave to the environment.
+ *
+ * Declared here, beside the key that holds it, and read from here by
+ * `rex/detect.ts`. The other way round would make the settings module depend on
+ * the detector that depends on it — a cycle, however thin.
+ */
+export type RexPanesSetting = "auto" | "off";
 
 export interface SubagentsSettings {
   maxConcurrent?: number;
