@@ -69,8 +69,8 @@ Verified against the running server (Rex CLI `0.0.1793420730-g6d0d9a`, app `0.1.
 
 | Need | Mechanism | Status |
 |---|---|---|
-| Create a pane running a program | `session.new_layer` with a `com.superlogical.terminal.shell` block, `options: { command: [...], cwd, shell: "none", exit: { on_completion: true } }` | works from the CLI/API |
-| Pane disappears when the program exits | terminal block `exit.on_completion` (default `true`); a quick failure stays open so the error can be read | works |
+| Create a pane running a program | `session.new_layer` with a `com.superlogical.terminal.shell` block, `options: { command: [...], cwd, exit: { on_completion: true } }`. **No `shell` key**: with the default `login: true`, `"shell": "none"` runs the command under `/usr/bin/login` and reports `exit_code: 0` for every outcome, while omitting it keeps argv verbatim and reports the real status | works from the CLI/API |
+| Pane disappears when the program exits | terminal block `exit.on_completion` (default `true`). Measured later: a failing `pi` closes its own pane within a second or two, so a run may never depend on a pane that survived the exit | works |
 | Pane label | `label` on the block in the layout | works |
 | Minimize a pane | `session.set_layer_state { state: "minimized" }` — server-side, no app client involved; `state` then appears in `session.view`, the layer keeps running and keeps its bounds | works, verified |
 | Live "is it working" indicator | pi already emits OSC 7501 program status; Rex surfaces it per pane | works, for free |
@@ -114,8 +114,10 @@ dispose()             extensionRunner.hasHandlers/emit
 ```
 
 Introduce `RunHandle` for exactly those operations and a `Runner` with `start()`/`resume()`,
-constructed in the manager's constructor. `AgentRecord.session?: AgentSession`
-(`src/types.ts:180`) becomes `record.run?: RunHandle`. The call sites are more numerous than
+constructed in the manager's constructor. `AgentRecord.session?: AgentSession` becomes
+`record.session?: RunHandle` — the field keeps its name, which is why every reader that already
+gated on `record.session` (FleetView, the viewer, `/agents`, the result tools, the output
+transcript) needed no change beyond the type. The call sites are more numerous than
 the name change suggests, and each is a place the plan must cover: the widget activity tracker
 (`index.ts:157`, `agent-widget.ts:459`), fleet list (`fleet-list.ts:249,402`), viewer
 (`conversation-viewer.ts:196,513`), `get_subagent_result` (`index.ts:3198,3229`), the
@@ -131,7 +133,7 @@ without redesign, and it is the smallest seam that admits a second execution mod
 `src/rex/detect.ts`, a cached probe evaluated once per process:
 
 - `REX_SESSION` and `REX_BLOCK` present, and
-- the parent's stdin and stdout are terminals (`process.stdout.isTTY`) — a print-mode or
+- the parent's stdout is a terminal (`process.stdout.isTTY`) — a print-mode or
   RPC-driven parent has nobody watching capsules and may exit mid-run, so it keeps the
   in-process runner, and
 - `rex whoami --json` succeeds (exit 0, parseable), and
@@ -149,8 +151,9 @@ unit-testable without a Rex server:
 2. **Create the pane**: `rex api call session.new_layer` with bounds derived from the
    parent's window and the index of this pane in the current stack, layout block
    `com.superlogical.terminal.shell` with
-   `options: { command: [...], cwd, shell: "none", exit: { on_completion: true } }`,
-   `label: "<handle> · <description, truncated>"`, `focus: false`.
+   `options: { command: [...], cwd, exit: { on_completion: true } }` — **no `shell` key**, for the
+   reason measured in the constraints table above — `label: "<handle> · <description, truncated>"`,
+   `focus: false`.
    The command begins with `env` so the child can be told which subagent it is — a terminal
    block's options have no `env` field (`additionalProperties: false` on
    `com.superlogical.terminal.shell`), so the variable rides in the command:
@@ -158,13 +161,17 @@ unit-testable without a Rex server:
    that variable after reading it (§4), so anything it starts itself cannot inherit the wrong
    spec.
    The rest of the command is `[piBinary, "--session-id", childSessionId, "--session-dir",
-   agentSessionDir, "--name", handle, <systemPromptFlag>, systemFile, ...modelFlags,
-   ...toolFlags, ...confinementFlags, "@" + promptFile]`, with the working directory set by
-   the block's `cwd`;
-   `piBinary` is the parent's own executable (`process.execPath`) so the child is the same build,
-   falling back to `pi` on `PATH`; and `<systemPromptFlag>` is `--system-prompt` when the agent
-   type's `prompt_mode` is `replace` (the shipped `Explore` and `Plan` types, and any agent file
-   that omits it) and `--append-system-prompt` when it is `append`.
+   agentSessionDir, "--name", childSessionId, "-a" | "-na", <systemPromptFlag>, systemFile,
+   ...confinementFlags, "--provider", provider, "--model", modelId, ...thinkingFlags,
+   "@" + promptFile]`, with the working directory set by the block's `cwd`;
+   `piBinary` is the parent's own executable (`process.execPath`) so the child is the same build
+   and needs no `pi` on `PATH`; the trust flag is `-a` when the parent session trusts the
+   project and `-na` when it does not, so a child never stops on a trust prompt in a pane nobody is
+   reading; `--provider`/`--model` are always explicit because `-ne` (or an allowlist that omits
+   the provider's extension) makes `--provider` unresolvable; and `<systemPromptFlag>` is
+   `--system-prompt` when the agent type's `prompt_mode` is `replace` (the shipped `Explore` and
+   `Plan` types, and any agent file that omits it) and `--append-system-prompt` when it is
+   `append`. A resume swaps the two session flags for `--session <sessionFile>`.
    `agentSessionDir` is a dedicated store, `<agentDir>/subagent-sessions/<rootSessionId>/`, so a
    fan-out does not fill the user's `/resume` picker while transcripts still outlive the pane.
    `confinementFlags` is where an agent type's restrictions are reproduced, and it must match
@@ -175,7 +182,8 @@ unit-testable without a Rex server:
    - `extensions: false` → `-ne`; `extensions: true` → nothing;
    - `extensions: [names, paths, "*"]` → `-ne` plus `-e <resolved path>` for each survivor,
      resolving names exactly as `parseExtensionsSpec()` does, **plus** `-e builtin:codemode`
-     (and `builtin:tool_search` when it is active), because the in-process path always loads
+     (and `builtin:tool-search`, hyphenated as pi names it, when it is active), because the
+     in-process path always loads
      codemode through an inline factory (`agent-runner.ts:849`, Divergence 4) — dropping it
      from an allowlisted child would silently remove a tool its in-process sibling had;
    - `exclude_extensions: [...]` → resolved the same way and subtracted from the include set
@@ -234,9 +242,14 @@ just delivered as files and flags.
 
 `src/rex/pane-run.ts` implements `RunHandle` for one agent:
 
-- **Completion**: await the result file (`fs.watch` on the task dir with a poll fallback), or
-  the process exit (`rex block call -b BLOCK process` → `last_exit`), whichever comes first;
-  (`rex capture -b BLOCK --trim`) and the exit status.
+- **Completion**: await the result file — polled every 100 ms, because the file appears by
+  rename and there is nothing to watch before it exists — or the process exit
+  (`rex wait -b BLOCK --json`, whose `child_exited` payload carries the code, with
+  `rex block call -b BLOCK process` → `last_exit` as the fallback), whichever comes first. A
+  child that exits without a result file is reported with the exit status and whatever the
+  session tail holds plus `rex capture -b BLOCK --trim` when the pane still exists. `{ lastExit:
+  null, status: null }` means "not yet observable", never "still running", because it is what
+  both a closed block and a live program read as.
 - **Blocked child**: a child that stops on its own prompt (permission, question, login) is
   reported the way Rex reports it — `program_status` says `blocked` — and the run keeps waiting
   for as long as any agent run waits today. There is no timeout and no auto-abort: the human can
@@ -246,15 +259,19 @@ just delivered as files and flags.
   `getSessionStats()`, and to feed `onToolActivity` / `onTextDelta` / `onTurnEnd` /
   `onAssistantUsage` / `onCompaction` into the existing activity tracker. Message objects are
   kept stable across appends (the viewer's Markdown cache is keyed by object identity).
-- **Pane state**: `session.view` reports each floating layer's `state`, so the run knows whether its
-  pane is still minimized, was opened by the user, or is already gone.
-- **Proxy session**: a `PaneSession` implementing the `SessionLike`/`AgentSession` subset the
-  UIs touch (`messages`, `subscribe`, `getSessionStats`, `sessionFile`, `model`,
-  `thinkingLevel`), so `fleet-list.ts:249`, `conversation-viewer.ts:196,513`,
-  `index.ts:3198`, and `usage.ts` keep working unchanged. The `subscribe` surface must also carry
-  the `turn_end` / `compaction_start` / `compaction_end` events `streamToOutputFile()` listens
-  for (`output-file.ts:100-155`), so `.output` transcripts keep being written from the tail and
-  `record.outputCleanup` keeps its meaning.
+- **Pane state**: `session.view` reports each floating layer's `state`, so a run *could* know
+  whether its pane is still minimized, was opened by the user, or is already gone. v1 does not
+  poll it: nothing a run decides depends on the layer's state, and a pane that is gone is
+  visible as a block call that answers `not found`.
+- **Proxy session**: a `PaneSession` implementing the `RunHandle` subset the UIs touch
+  (`messages`, `subscribe`, `getSessionStats`, `sessionFile`, and the injected steer/abort), so
+  `fleet-list.ts:249`, `conversation-viewer.ts:196,513`, `index.ts:3198`, and `usage.ts` keep
+  working unchanged. It deliberately reports no `model`, `thinkingLevel` or `extensionRunner`:
+  the record's invocation snapshot carries the labels, a child's extensions live in the child
+  process, and a handle has to be honest about what a file can tell it. The `subscribe` surface
+  must also carry the `turn_end` / `compaction_start` / `compaction_end` events
+  `streamToOutputFile()` listens for (`output-file.ts:100-155`), so `.output` transcripts keep
+  being written from the tail and `record.outputCleanup` keeps its meaning.
 - **Steer**: `rex send -b BLOCK <text>` then `rex send-key -b BLOCK enter`, refused unless the
   pane's program status says the child is running or idle (never typed into a dialog).
 - **Abort**: close the block (`session.close_layer`) — the child dies, status `"stopped"`;
@@ -267,28 +284,28 @@ just delivered as files and flags.
 | Surface | Today | With panes |
 |---|---|---|
 | Live widget | `AgentRecord` + `agentActivity` | unchanged; activity fed by the JSONL tail |
-| FleetView rows | `record.session` truthiness gate | `record.run` (the `PaneSession` proxy) |
+| FleetView rows | `record.session` truthiness gate | unchanged: `record.session` is the `PaneSession` proxy |
 | Conversation viewer | `session.messages` + `session.subscribe` | same calls, on the proxy |
 | `get_subagent_result` | `record.promise` → `record.result` | unchanged; `record.result` comes from the result file |
 | `get_subagent_result({verbose:true})` | `getAgentConversation(record.session)` | proxy `messages` mapped to the same transcript text |
 | `/agents` → View log | overlay on `record.session` | overlay on the proxy — a finished agent's log still opens, because the child's session file outlives the pane |
-| Context % | `getSessionStats()` | from the tailed messages; `undefined` until the first usage entry (already tolerated) |
+| Context % | `getSessionStats()` | **absent**: the tail reports token totals but no `contextUsage`, because a percentage needs the model's context window and the session file does not name it. Absent rather than wrong, which the widget already tolerates |
 
 ### 7. Lifecycle and failure matrix
 
 | Condition | Behaviour |
 |---|---|
 | Not inside Rex (no env vars, or `rex` missing/unreachable) | in-process runner, today's path |
-| `run_in_rex_panes: "off"` | in-process runner |
-| `session.new_layer` fails | that agent runs in-process; record notes the fallback; a warning reaches the tool result |
+| `runInRexPanes: "off"` | in-process runner |
+| `session.new_layer` fails | that agent runs in-process; the record carries `paneFallback`, which `getModalityNote()` renders as `(ran in-process: could not get a pane (creating it failed))`, and a warning is raised at the same moment |
 | Minimize call fails (`bad_request`, e.g. the window would lose its last visible pane) | agent unaffected; the pane stays visible and the fallback is reported, not hidden |
 | Child exits with no result file | status `error`, message built from exit code and the captured pane tail |
-| User closes the pane | status `stopped` |
+| User closes the pane | status `error` with no result file: closing the layer kills the child, and a hand-closed pane is indistinguishable from a failing one |
 | Rex unreachable mid-run | the run continues; completion is detected from the result file; the warning says the pane could not be watched |
 | Parent not interactive (`pi -p`, RPC/SDK parent) | in-process runner: nobody is watching capsules and the parent may exit mid-run |
-| Parent session shuts down | panes for running agents are closed |
+| Parent session shuts down | panes for running agents are closed, best effort, including one created before the record had a handle; a layer that will not close is reported, because its child may still be running |
 | Queued agent (pool full) | the pane is created when the run actually starts, as the session is created at that point today |
-| Quick failure (child dies in <250 ms) | the pane stays open so the error is readable, per Rex's default |
+| Quick failure (child dies in <250 ms) | measured: the pane closes with the child — a failing `pi` exits and `exit.on_completion` takes the pane with it. Completion and failure are read from the result file and the exit status, never from a surviving pane |
 
 ## Consequences that change today's behaviour
 
@@ -317,8 +334,17 @@ These are accepted, not accidental, and belong in the README:
    allowlisted set of extensions is passed by resolved path rather than filtered inside a shared
    loader, and `skills: [a, b]` loads those skills instead of preloading their text into the
    prompt. The exception is `config_cwd`, which has no equivalent: the child discovers project
-   config from its own working directory, and child mode warns when a type sets it. The agent-file
-   documentation must say both.
+   config from its own working directory, and child mode warns when a type sets it. One
+   consequence of expressing confinement as flags rather than as a loader filter: **provider
+   extensions are extensions.** `-ne`, or an allowlist that omits the model's provider extension,
+   makes `--provider <name>` unresolvable inside the child: pi prints `Unknown provider "<name>"`
+   and exits 1 before writing a result file, so the run reports an exit-without-result error
+   instead of falling back to another model. That is why `--provider`/`--model` are always passed
+   explicitly, and why restricting extensions on a type whose model needs an extension means
+   either keeping that extension in the allowlist or accepting that the type cannot run in a
+   pane. A third thing is not confinement at all but reads like it: the child's transcript
+   always goes to the session store, so `persist_session` and `session_dir` do not move it. The
+   agent-file documentation must say all of it.
 8. **Subagent sessions leave the user's `/resume` list.** They live under
    `<agentDir>/subagent-sessions/<rootSessionId>/`, so transcripts survive the pane and `/agents`
    can reopen them, without a fan-out filling the session picker.
@@ -400,13 +426,14 @@ New coverage:
    closes a real pane, when a child exits on its own versus when it stops on a UI prompt, and how
    long the create→minimize flash lasts. Minimize itself is already verified.
    long the create→minimize flash lasts. Minimize itself is already verified.
-2. `src/rex/detect.ts` + the `run_in_rex_panes` setting, with tests.
+2. `src/rex/detect.ts` + the `runInRexPanes` setting, with tests.
 3. `src/rex/launcher.ts` builders (spec, files, command array, bounds) + the confinement
    mapping of §3 — the task where a wrong guess quietly weakens an agent type — with tests.
 4. Child mode in `index.ts`: spec parsing, tool scope, result file, self-shutdown + tests.
 5. `src/rex/pane-run.ts` + JSONL tail + `PaneSession` proxy + tests.
 6. `RunHandle` seam in `agent-manager.ts`/`types.ts`, both runners wired, fallback matrix.
-7. UI adoption of `record.run` (fleet list, viewer, `/agents`, `get_subagent_result`).
+7. UI adoption of the `RunHandle` contract on `record.session` (fleet list, viewer, `/agents`,
+   `get_subagent_result`).
 8. Docs: README (features, settings, behaviour table), new `docs/rex-panes.md`,
    `docs/rpc.md` note, `CHANGELOG.md`, and a divergence entry in
    `docs/pi-subagents-local-patch.md`.
