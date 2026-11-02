@@ -512,24 +512,42 @@ export interface LaunchPaneInput {
 }
 
 /**
+ * What one minimize attempt achieved.
+ *
+ * A refusal is not a failed spawn: Rex rejects `set_layer_state` with
+ * `bad_request` when the window would lose its last visible pane, and the pane
+ * stays on screen with its child still running. The caller has to be able to
+ * say that in the same breath as "the agent is running", so the failure carries
+ * the reason Rex gave rather than a bare false.
+ */
+export type MinimizeResult = { minimized: true } | { minimized: false; reason: string };
+
+/** A created pane: its ids, and whether it made it off screen. */
+export interface PaneHandle {
+  layerId: string;
+  blockId: string;
+  minimize: MinimizeResult;
+}
+
+/**
  * Create one child's pane and take it off screen.
  *
- * Returns the ids the server assigned, or undefined when no pane was created.
- * Undefined is the caller's signal to run that agent in-process instead; a
- * throw would take down a fan-out because one pane could not be made, so
- * nothing here throws. The minimize is awaited before returning, so a caller
- * that records a pane under these ids is not racing the second call.
+ * Returns the ids the server assigned with the minimize result, or undefined
+ * when no pane was created. Undefined is the caller's signal to run that agent
+ * in-process instead; a throw would take down a fan-out because one pane could
+ * not be made, so nothing here throws. The minimize is awaited before
+ * returning, so a caller that records a pane under these ids is not racing the
+ * second call.
  *
- * A refused minimize is not a failed launch: the child is already running and
- * the pane is merely visible. This return value has nowhere to report that, so
- * the refusal is logged here instead — claiming the pane was minimized would be
- * a lie, and staying silent would leave a pane on screen unexplained.
+ * A refused minimize still returns the ids: the child is running and the pane is
+ * merely visible, which is why `minimize` is part of the value — the caller
+ * reports it, and nothing here claims a pane was minimized when it was not.
  */
-export function launchPane(input: LaunchPaneInput): Promise<{ layerId: string; blockId: string } | undefined> {
+export function launchPane(input: LaunchPaneInput): Promise<PaneHandle | undefined> {
   return enqueue(() => createPane(input));
 }
 
-async function createPane(input: LaunchPaneInput): Promise<{ layerId: string; blockId: string } | undefined> {
+async function createPane(input: LaunchPaneInput): Promise<PaneHandle | undefined> {
   let ids: { layerId: string; blockId: string } | undefined;
   try {
     const result = await input.deps.exec(
@@ -549,14 +567,17 @@ async function createPane(input: LaunchPaneInput): Promise<{ layerId: string; bl
     return undefined;
   }
   if (!ids) return undefined;
-  if (!(await setLayerMinimized(input.deps, ids.layerId))) {
+  const minimize = await setLayerMinimized(input.deps, ids.layerId);
+  if (!minimize.minimized) {
     // Not a failed launch — the child is already running — but the pane is on
-    // screen where a capsule was promised, and nothing else would say so.
+    // screen where a capsule was promised. The reason travels back in
+    // `minimize`; this line is only so a session that never surfaces the tool
+    // result still leaves a trace.
     console.warn(
-      `[pi-subagents] the pane for ${input.label} was created but could not be minimized; it stays visible (${ids.layerId})`,
+      `[pi-subagents] the pane for ${input.label} was created but could not be minimized; it stays visible (${ids.layerId}): ${minimize.reason}`,
     );
   }
-  return ids;
+  return { ...ids, minimize };
 }
 
 /**
@@ -578,18 +599,20 @@ function layerIds(result: RexExecResult): { layerId: string; blockId: string } |
 }
 
 /**
- * Minimize one layer, and report whether the server did it.
+ * Minimize one layer, and report what happened.
  *
- * False means the pane is still on screen, and it is never reported as
- * success: Rex refuses with `bad_request` when the window would lose its last
- * visible pane, and a caller that assumed otherwise would leave a pane on
- * screen it believes is a capsule.
+ * `{ minimized: true }` means the pane is a capsule. `{ minimized: false,
+ * reason }` means it is still on screen, and it is never reported as success:
+ * Rex refuses with `bad_request` when the window would lose its last visible
+ * pane, and a caller that assumed otherwise would leave a pane on screen it
+ * believes is minimized. The reason is Rex's own text, so a user is told why
+ * rather than only that a call failed.
  */
-export function minimizePane(deps: PaneDeps, layerId: string): Promise<boolean> {
+export function minimizePane(deps: PaneDeps, layerId: string): Promise<MinimizeResult> {
   return enqueue(() => setLayerMinimized(deps, layerId));
 }
 
-async function setLayerMinimized(deps: PaneDeps, layerId: string): Promise<boolean> {
+async function setLayerMinimized(deps: PaneDeps, layerId: string): Promise<MinimizeResult> {
   try {
     const result = await deps.exec([
       "api",
@@ -599,10 +622,25 @@ async function setLayerMinimized(deps: PaneDeps, layerId: string): Promise<boole
       "session.set_layer_state",
       JSON.stringify({ layer_id: layerId, state: "minimized" }),
     ]);
-    return result.code === 0;
-  } catch {
-    return false;
+    if (result.code === 0) return { minimized: true };
+    return { minimized: false, reason: failureReason(result.stderr) };
+  } catch (error) {
+    return { minimized: false, reason: failureReason(error instanceof Error ? error.message : String(error)) };
   }
+}
+
+/**
+ * Why a `rex` call failed, as it should be shown to a user.
+ *
+ * The CLI prefixes its diagnostics with `Error: `, which is its own
+ * decoration rather than the message; after it is what went wrong
+ * (`bad_request: a window must keep a visible pane`, a missing binary, a
+ * timeout). A call that failed without saying anything still gets the
+ * documented reason for a refused state change.
+ */
+function failureReason(text: string): string {
+  const detail = text.trim().replace(/^Error:\s*/i, "").trim();
+  return detail === "" ? "bad_request" : detail;
 }
 
 /**

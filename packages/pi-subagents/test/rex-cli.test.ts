@@ -75,6 +75,9 @@ function fakeRexSource(): string {
     '    out({ layer_id: "layer:" + label, block_ids: ["block:" + label], revision: 1 });',
     '  } else if (method === "session.set_layer_state") {',
     '    if (env.REX_FAKE_SET_LAYER_STATE === "bad_request") fail("bad_request: last visible pane", 1);',
+    // A failure with nothing on stderr: the reason has to fall back to the
+    // documented code rather than an empty string.
+    '    if (env.REX_FAKE_SET_LAYER_STATE === "quiet") process.exit(1);',
     "    out({ revision: 2 });",
     '  } else if (method === "session.close_layer") {',
     '    if (env.REX_FAKE_CLOSE_LAYER === "not_found") fail("not_found: no layer", 1);',
@@ -204,6 +207,7 @@ describe("launchPane — create the pane, then minimize it", () => {
     expect(launched).toEqual({
       layerId: "layer:explore · find the pane",
       blockId: "block:explore · find the pane",
+      minimize: { minimized: true },
     });
 
     const [create, minimize] = calls();
@@ -267,19 +271,25 @@ describe("launchPane — create the pane, then minimize it", () => {
     });
   }
 
-  it("still returns the ids when the minimize is refused, and says the pane stayed visible", async () => {
+  it("still returns the ids when the minimize is refused, and carries why in the result", async () => {
     process.env.REX_FAKE_SET_LAYER_STATE = "bad_request";
     const warned = vi.spyOn(console, "warn").mockImplementation(() => undefined);
     try {
       const launched = await launchPane({ deps: deps(), label: "a", command: ["/bin/pi"], cwd: "/w", index: 0 });
 
       // The child is already running, so the launch stands — but the pane is on
-      // screen, and nothing may claim it was minimized.
-      expect(launched).toEqual({ layerId: "layer:a", blockId: "block:a" });
+      // screen, and nothing may claim it was minimized. The reason travels in
+      // the value, so a caller can put it in the tool result.
+      expect(launched).toEqual({
+        layerId: "layer:a",
+        blockId: "block:a",
+        minimize: { minimized: false, reason: "bad_request: last visible pane" },
+      });
       expect(calls().map((call) => call[4])).toEqual(["session.new_layer", "session.set_layer_state"]);
+      // The log line is extra, and repeats the same reason.
       expect(warned).toHaveBeenCalledTimes(1);
       expect(warned.mock.calls[0]?.[0]).toContain("could not be minimized");
-      expect(warned.mock.calls[0]?.[0]).toContain("layer:a");
+      expect(warned.mock.calls[0]?.[0]).toContain("bad_request: last visible pane");
     } finally {
       warned.mockRestore();
     }
@@ -288,7 +298,7 @@ describe("launchPane — create the pane, then minimize it", () => {
 
 describe("minimizePane — a refusal is an answer, not an exception", () => {
   it("is true when the server accepts the state change", async () => {
-    await expect(minimizePane(deps(), "layer:a")).resolves.toBe(true);
+    await expect(minimizePane(deps(), "layer:a")).resolves.toEqual({ minimized: true });
     expect(calls()).toEqual([
       [
         "api",
@@ -301,16 +311,32 @@ describe("minimizePane — a refusal is an answer, not an exception", () => {
     ]);
   });
 
-  it("is false on bad_request — a window that would lose its last visible pane", async () => {
+  it("is false with Rex's own reason on bad_request — a window that would lose its last visible pane", async () => {
     process.env.REX_FAKE_SET_LAYER_STATE = "bad_request";
 
-    await expect(minimizePane(deps(), "layer:a")).resolves.toBe(false);
+    // The reason is the message, not the CLI's `Error: ` decoration: it is
+    // going into a tool result a user reads.
+    await expect(minimizePane(deps(), "layer:a")).resolves.toEqual({
+      minimized: false,
+      reason: "bad_request: last visible pane",
+    });
   });
 
-  it("is false when rex cannot be started at all", async () => {
+  it("falls back to bad_request when the CLI fails without saying why", async () => {
+    process.env.REX_FAKE_SET_LAYER_STATE = "quiet";
+
+    await expect(minimizePane(deps(), "layer:a")).resolves.toEqual({ minimized: false, reason: "bad_request" });
+  });
+
+  it("carries the spawn failure as the reason when rex cannot be started at all", async () => {
     process.env.PATH = emptyDir;
 
-    await expect(minimizePane(deps(), "layer:a")).resolves.toBe(false);
+    const result = await minimizePane(deps(), "layer:a");
+
+    expect(result).toMatchObject({ minimized: false });
+    // Not a `bad_request`: the call never reached a server, and the caller is
+    // told what actually went wrong.
+    expect(result.minimized === false && result.reason).toContain("rex");
   });
 });
 
@@ -325,8 +351,16 @@ describe("the queue — one spawn's create and minimize never interleave with an
       launchPane({ deps: deps(), label: "agent-b", command: ["/bin/pi"], cwd: "/w", index: 1 }),
     ]);
 
-    expect(first).toEqual({ layerId: "layer:agent-a", blockId: "block:agent-a" });
-    expect(second).toEqual({ layerId: "layer:agent-b", blockId: "block:agent-b" });
+    expect(first).toEqual({
+      layerId: "layer:agent-a",
+      blockId: "block:agent-a",
+      minimize: { minimized: true },
+    });
+    expect(second).toEqual({
+      layerId: "layer:agent-b",
+      blockId: "block:agent-b",
+      minimize: { minimized: true },
+    });
 
     expect(calls().map((call) => [call[4], JSON.parse(call[5] ?? "{}").layer_id ?? null])).toEqual([
       ["session.new_layer", null],
