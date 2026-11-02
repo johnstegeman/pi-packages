@@ -1,6 +1,5 @@
 import type { Model } from "@earendil-works/pi-ai";
 import {
-  type AgentSession,
   defineTool,
   type ExtensionAPI,
   type ExtensionContext,
@@ -32,6 +31,7 @@ import type {
   AgentInvocation,
   AgentRecord,
   IsolationMode,
+  RunHandle,
   ThinkingLevel,
 } from "./types.js";
 import { addUsage } from "./usage.js";
@@ -62,7 +62,7 @@ interface NestedSpawnOptions {
   invocation?: AgentInvocation;
   signal?: AbortSignal;
   onAssistantUsage?: (usage: { input: number; output: number; cacheWrite: number }) => void;
-  onSessionCreated?: (session: AgentSession) => void;
+  onSessionCreated?: (session: RunHandle) => void;
   depth: number;
   parentAgentId: string;
   maxSubagentDepth: number;
@@ -414,11 +414,15 @@ export function createNestedSubagentTools(context: NestedToolContext): ToolDefin
         return textResult(`Running nested agent not found or not owned by this parent: "${params.agent_id}".`, true);
       }
       // Session not ready yet — queue the steer. The manager flushes pending
-      // steers when the session is created (same contract as the top-level tool).
+      // steers when the session is created (same contract as the top-level tool),
+      // and a flush it cannot deliver is reported to the manager's warning sink
+      // rather than dropped: the answer below promises only that it was queued.
       if (!record.session) {
         if (!record.pendingSteers) record.pendingSteers = [];
         record.pendingSteers.push(params.message);
-        return textResult(`Steering message queued for nested agent ${params.agent_id}.`);
+        return textResult(
+          `Steering message queued for nested agent ${params.agent_id}. It will be sent once its session is ready; if it cannot be delivered, that refusal is reported rather than swallowed.`,
+        );
       }
       try {
         await record.session.steer(params.message);

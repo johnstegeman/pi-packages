@@ -8,7 +8,8 @@
 import { appendFileSync, chmodSync, mkdirSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import type { AgentSession, AgentSessionEvent } from "@earendil-works/pi-coding-agent";
+import type { AgentSessionEvent } from "@earendil-works/pi-coding-agent";
+import type { RunHandle } from "./types.js";
 
 /**
  * Project/global default for writing a subagent's `.output` transcript; a custom
@@ -94,11 +95,15 @@ export function writeInitialEntry(path: string, agentId: string, prompt: string,
 }
 
 /**
- * Subscribe to session events and flush new messages to the output file on each turn_end.
+ * Subscribe to a run's events and flush new messages to the output file on each turn_end.
  * Returns a cleanup function that does a final flush and unsubscribes.
+ *
+ * Takes the {@link RunHandle} the record carries, not an `AgentSession`: an
+ * in-process session and a child `pi` in a Rex pane expose the same two things
+ * a transcript needs — the message array and the event stream.
  */
 export function streamToOutputFile(
-  session: AgentSession,
+  session: RunHandle,
   path: string,
   agentId: string,
   cwd: string,

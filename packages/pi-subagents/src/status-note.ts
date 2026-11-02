@@ -87,3 +87,16 @@ export function partialOutputSuffix(record: AgentRecord): string {
   const partial = record.result?.trim();
   return partial ? `\n\nPartial output before the failure:\n${partial}` : "";
 }
+
+/**
+ * Where the agent ran, when it did not run where the spawn asked it to.
+ *
+ * Empty for every ordinary run, so no surface grows a clause it never needs. When
+ * a pane could not be created the agent runs in-process — a real difference (no
+ * pane to watch, no keyboard to steer through, and `abort` behaves differently)
+ * that a warning alone does not survive: the notification scrolls away, and the
+ * run's record outlives it.
+ */
+export function getModalityNote(record: AgentRecord): string {
+  return record.paneFallback ? ` (ran in-process: ${record.paneFallback})` : "";
+}

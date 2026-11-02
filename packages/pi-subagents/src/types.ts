@@ -3,8 +3,8 @@
  */
 
 import type { ThinkingLevel } from "@earendil-works/pi-ai";
-import type { AgentSession } from "@earendil-works/pi-coding-agent";
-import type { LifetimeUsage } from "./usage.js";
+import type { AgentSession, AgentSessionEvent, ExtensionRunner } from "@earendil-works/pi-coding-agent";
+import type { LifetimeUsage, SessionStatsLike } from "./usage.js";
 
 export type { ThinkingLevel };
 
@@ -177,7 +177,12 @@ export interface AgentRecord {
   toolUses: number;
   startedAt: number;
   completedAt?: number;
-  session?: AgentSession;
+  /**
+   * What every surface downstream of the run reads: the live in-process
+   * session today, or a handle onto a child `pi` in a Rex pane. See
+   * {@link RunHandle}.
+   */
+  session?: RunHandle;
   abortController?: AbortController;
   promise?: Promise<string>;
   /**
@@ -253,6 +258,17 @@ export interface AgentRecord {
   structuredJson?: string;
   /** Whether the child needed the extra structured-output prompt. */
   structuredRetried?: boolean;
+  /**
+   * Why this agent ran in-process although a Rex pane was expected, when the
+   * runner had to fall back.
+   *
+   * Absent for every ordinary run — including every run outside Rex, where
+   * in-process is the point rather than a fallback. Present means the spawn
+   * wanted a pane and could not get one, so a reader arriving after the warning
+   * was shown (a tool result, the fleet view, a mention) can still tell where
+   * the agent actually ran.
+   */
+  paneFallback?: string;
   /** Parent agent ID for ownership-scoped nested controls. */
   parentAgentId?: string;
   /**
@@ -279,6 +295,71 @@ export interface AgentRecord {
  * `ThinkingLevel`, so this widening cannot leak into an invocation.
  */
 export type EffectiveThinkingLevel = ThinkingLevel | "off";
+
+/**
+ * What everything downstream of a run reads off `AgentRecord.session`.
+ *
+ * Two execution models produce one: today's in-process `AgentSession`, and
+ * (inside Rex) a child `pi` in a pane whose session the parent never holds.
+ * Only the operations below are common to both, so only those are here — the
+ * widget, the fleet list, the conversation viewer, `/agents`,
+ * `get_subagent_result`, steering and the `.output` stream are the consumers.
+ * A live `AgentSession` satisfies this structurally, so the in-process path
+ * hands its session over as-is.
+ *
+ * Deliberately absent: everything a run needs to *start* (tool scope, the
+ * extension loader, session naming). That belongs to the runner, not to what
+ * a finished or running run exposes.
+ */
+export interface RunHandle {
+  /** The run's conversation so far, in pi's own message shapes. */
+  readonly messages: AgentSession["messages"];
+  /** Same contract as pi's: returns the unsubscribe function. */
+  subscribe(listener: (event: AgentSessionEvent) => void): () => void;
+  /**
+   * Current session-window stats, or `undefined` when the run has not spent
+   * anything yet — a live session always has stats, but a file-backed run
+   * learns its totals from the child's session file and has nothing to report
+   * before the first usage entry. The narrow shape is `usage.ts`'s own —
+   * `getSessionStats()` on a live session returns pi's fuller `SessionStats`,
+   * which is assignable to it.
+   */
+  getSessionStats(): SessionStatsLike | undefined;
+  /** The pi session file, when the run persisted one. */
+  sessionFile?: string;
+  /**
+   * Send a new user message to an existing run. Only `resumeAgent()` calls
+   * it: resuming IS prompting the same run again.
+   */
+  prompt(message: string): Promise<unknown>;
+  /**
+   * Steer the run after its current tool call. The resolution value is
+   * `unknown` because pi resolves its own disposition and nothing reads it —
+   * only the rejection matters.
+   */
+  steer(message: string): Promise<unknown>;
+  abort(): void | Promise<void>;
+  /** Release whatever the handle holds. Called once, after the record leaves the map. */
+  dispose(): void | Promise<void>;
+  /**
+   * The model and thinking level in effect, when the run can report them.
+   *
+   * Optional because a handle is not obliged to: `record.invocation` already
+   * carries a spawn-time snapshot, and these two only refine it once the run
+   * has actually resolved (pi clamps a level to what the model supports).
+   */
+  model?: { provider: string; id: string; name?: string };
+  thinkingLevel?: EffectiveThinkingLevel;
+  /**
+   * Extension lifecycle, present only when a live pi session backs the handle.
+   *
+   * A file-backed run has no extension runner to shut down, so this stays
+   * optional: `shutdownChildSession()` emits `session_shutdown` when it is
+   * there (what keeps a child's extensions from leaking a timer, #242) and
+   * degrades to a plain dispose when it is not.
+   */
+  extensionRunner?: ExtensionRunner;
+}
 
 export interface AgentInvocation {
   /** Short display name for tight rows, e.g. "haiku 4.5". Always set once known. */

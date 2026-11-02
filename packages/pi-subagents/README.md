@@ -14,6 +14,7 @@ https://github.com/user-attachments/assets/8685261b-9338-4fea-8dfe-1c590d5df543
 
 - **Claude Code look & feel** — same tool names, calling conventions, and UI patterns (`Agent`, `get_subagent_result`, `steer_subagent`) — feels native
 - **Parallel background agents** — spawn multiple agents that run concurrently with automatic queuing (configurable concurrency limit, default 10) and smart group join (consolidated notifications)
+- **Rex panes** — inside [Rex](#rex-panes) every subagent is a real `pi` process in its own minimized floating pane: the capsules at the bottom of the window are the inventory of what is running, opening one shows what that agent is doing, and typing into it steers the run mid-flight. The pane closes itself when the agent finishes, and `/agents` stays the record. Outside Rex, in print mode, and with `runInRexPanes: "off"` nothing changes
 - **Live widget UI** — persistent above-editor widget with animated spinners, live tool activity, token counts, and colored status icons. Configurable via `/agents → Settings → Widget`: `all` (every agent), `background` (default — hides foreground runs, which already render inline as the `Agent` tool result), or `off`
 - **FleetView** — Claude Code-style navigable list of `main` + every running subagent rendered below the editor (earliest-launched first). Press `↓` (or `←`) at an empty prompt to jump in, `↑`/`↓` to move the selection, `Enter` to open the selected agent's live, auto-updating conversation, `Esc` to return. Finished agents linger briefly before dropping out, and a viewer stays open through completion so you can read the final output. Toggle via `/agents → Settings → Fleet view`
 - **Conversation viewer** — select any agent in `/agents` to open a live-scrolling overlay of its full conversation (auto-follows new content, scroll up to pause). Steer a running agent inline by pressing `Enter` to open a composer, typing, then `Enter` to send (`Esc` or an empty submit returns) — the message appears as a user message and redirects the agent after its current tool. Stop a still-running agent by pressing `x` (then `x` again to confirm) — both work for background agents too. Assistant text renders as Markdown; `m` cycles that between off, assistant-only and everything (see [Viewer markdown](#persistent-settings))
@@ -237,6 +238,31 @@ By default, foreground and background agents each stream their full conversation
 
 Group completions render each agent as a separate block. The LLM receives structured `<task-notification>` XML for parsing, while the user sees the themed visual.
 
+## Rex panes
+
+Inside Rex, a subagent is a **real `pi` process in a minimized floating pane** instead of an in-process session. Every spawn gets one — top-level `Agent` calls, nested children, and workflow fan-outs, including a twenty-agent one — so the capsules at the bottom of the window are an inventory of what is running. Creating a pane and minimizing it are two server calls, so one can be on screen for the ~25 ms between them before it drops to a capsule. `/agents`, the widget, FleetView and `@handle` behave as they do in-process, because they read the child's own pi session file.
+
+Opening a capsule shows that agent's plain `pi` session: the task it was given, its tools, its output. Typing into it steers the run exactly as `steer_subagent` does from the parent. When the agent settles it writes its result and exits, and the pane closes with it. **[Full guide](docs/rex-panes.md)** — the pane contract, what an agent file can still confine in a child, where child transcripts live, and troubleshooting.
+
+**Choosing the path** — `runInRexPanes`, default `"auto"` (`/agents → Settings → Rex panes`):
+
+| Situation | What happens |
+|---|---|
+| Default (`"auto"`), and pi is itself inside Rex | A pane per agent |
+| Not inside Rex — no `REX_SESSION`/`REX_BLOCK`, or no terminal (`pi -p`, an RPC-driven parent) | In-process, exactly as before |
+| `rex whoami --json` fails, hangs past 1.5 s, or prints something that is not whoami JSON | In-process |
+| `runInRexPanes: "off"` | In-process, always |
+| Creating the pane fails | That agent runs in-process; a warning says so, and the record carries `(ran in-process: could not get a pane (creating it failed))` |
+| The minimize call is refused (`bad_request`, e.g. the window would lose its last visible pane) | The child runs unaffected and the pane stays on screen; a warning names Rex's reason |
+| The child exits without writing its result file | The agent ends as an error carrying the exit status and whatever it had produced |
+| Rex stops answering mid-run | The run continues and is settled from the child's result file; a warning says the pane could not be watched |
+| The parent session shuts down | Its panes are closed with it, best effort; one that will not close is reported |
+| You close a pane by hand | The child dies, and the run ends as an error with no result file — a hand-closed pane and a crashed child are indistinguishable |
+
+The modality is decided **once per pi process**, at its first agent spawn, and that answer — including a failure — is cached. A change made before that first spawn applies at once; after one, it takes a restart.
+
+Three consequences of the child being a separate process: a grandchild is a pane in the child's own `/agents` and not in the parent's; concurrency pools bound one process each, while the depth cap crosses the boundary; and every agent pays a real `pi` start, so a fan-out reaches its first token later than it did in-process.
+
 ## Default Agent Types
 
 | Type | Tools | Model | Prompt Mode | Description |
@@ -346,7 +372,7 @@ The hard cap is depth 2 by default: main session (0) → subagent (1) → nested
 
 Nested children occupy no concurrency slot, in either pool — their parent already holds one, and queueing them behind it would deadlock a parent waiting on its own child. The depth cap bounds how *deep* nesting goes, not how *wide*: a parent's only limit on concurrent children is that each spawn costs it a turn. Pair `allowed_subagents` with a `max_turns` on that agent if you want a hard ceiling on its fan-out.
 
-Because a subagent session never activates this extension (that is what keeps a child from building a second agent manager, and it is why nested tools are injected directly instead), a subagent also gets none of the extension's other surfaces: no `/agents` command, no cross-extension RPC handlers, no `subagents:ready` event.
+Because an in-process subagent session never activates this extension (that is what keeps a child from building a second agent manager, and it is why nested tools are injected directly instead), such a subagent also gets none of the extension's other surfaces: no `/agents` command, no cross-extension RPC handlers, no `subagents:ready` event. A [Rex pane](#rex-panes) child is the exception in mechanism only: it is a separate `pi` that activates the extension in child mode — which exists precisely to keep those surfaces off, plus the widget, the scheduler and completion nudges.
 
 ### Tool & extension scoping
 
@@ -614,12 +640,12 @@ When on, each subagent spawn's effective model is validated against pi's own `en
 
 ## Persistent Settings
 
-Runtime tuning values set via `/agents` → Settings (max concurrency, max foreground concurrency, default max turns, grace turns, nested depth, fallback agent, default join mode, scheduling on/off, scope models on/off, disable defaults on/off, strict agent files on/off, agent mentions on/off, output transcript on/off, tool description full/compact/custom, widget all/background/off, usage reporting on/off, cost display on/off, model display on/off, viewer markdown off/assistant/all, workflow stall timeout seconds) persist across pi restarts. Two files, merged on load:
+Runtime tuning values set via `/agents` → Settings (max concurrency, max foreground concurrency, default max turns, grace turns, nested depth, fallback agent, default join mode, scheduling on/off, scope models on/off, disable defaults on/off, strict agent files on/off, agent mentions on/off, output transcript on/off, Rex panes auto/off, tool description full/compact/custom, widget all/background/off, usage reporting on/off, cost display on/off, model display on/off, viewer markdown off/assistant/all, workflow stall timeout seconds) persist across pi restarts. Two files, merged on load:
 
 - **Global:** `~/.pi/agent/subagents.json` — your machine-wide defaults. Edit by hand; the `/agents` menu never writes here.
 - **Project:** `<cwd>/.pi/subagents.json` — per-project overrides. Written by `/agents` → Settings.
 
-**Precedence:** project overrides global on any field present in both. Missing fields fall back to the hardcoded defaults (max concurrency `10`, max foreground concurrency `0` = unlimited, default max turns unlimited, grace turns `5`, nested depth `2`, join mode `smart`, workflow stall timeout `600` seconds, defaults enabled).
+**Precedence:** project overrides global on any field present in both. Missing fields fall back to the hardcoded defaults (max concurrency `10`, max foreground concurrency `0` = unlimited, default max turns unlimited, grace turns `5`, nested depth `2`, join mode `smart`, workflow stall timeout `600` seconds, Rex panes `auto`, defaults enabled).
 
 **Nested depth** (`maxSubagentDepth`, default `2`): the hard ceiling on [nested delegation](#nested-subagents), counted from the main session (main = 0, its subagents = 1). `0` or `1` disables nesting project-wide regardless of any agent's `allowed_subagents`. Read when a subagent session is built, so a change applies to agents started after it.
 
@@ -636,6 +662,8 @@ Runtime tuning values set via `/agents` → Settings (max concurrency, max foreg
 **Remember agents** (`rememberAgents`, default `true`): whether subagents persist their pi session, which is what lets [`@handle`](#agent-mentions) reopen an agent's conversation after its in-memory record has been evicted. Two visible consequences of the default: top-level subagents write a session file, and they nest under the session that spawned them in pi's `/resume`. Agents spawned by another agent are excluded — they get no handle, so nothing could reopen their transcript. A custom agent's `persist_session` frontmatter overrides this per agent, in both directions. Toggle via `/agents → Settings → Remember agents`; with it off, handles expire with their record (roughly ten minutes past completion) and `@explore` then starts a fresh agent rather than resuming — the behaviour before this setting existed.
 
 **Output transcript** (`outputTranscript`, default `true`): the project/global default for writing each subagent's `.output` transcript. Toggle via `/agents → Settings → Output transcript`, or set `false` in `subagents.json` to make transcripts opt-in project-wide — useful when run transcripts shouldn't sit on disk for backup or DLP tooling to pick up. A custom agent's `output_transcript` frontmatter overrides this per agent. Applied live at spawn time. Governs only the transcript, not `persist_session`, worktree commits, or memory files.
+
+**Rex panes** (`runInRexPanes`, default `"auto"`): how a subagent runs when pi is itself inside Rex. `"auto"` gives it a real `pi` process in a minimized floating pane wherever the environment proves it can — Rex markers set, a terminal, a `rex` CLI that answers, and not already a subagent's child — and is invisible everywhere else; `"off"` always uses the in-process runner. There is deliberately no `"on"`: claiming panes outside Rex would create a run nobody can watch, so the probe is what makes leaving the choice to the environment safe. An unrecognised spelling is dropped rather than read as permission, because `auto` is the pane-spawning answer. It is read on the spawn path through a probe memoized per process, so it is worth setting before the session's first agent spawn rather than after. Toggle via `/agents → Settings → Rex panes`. See [Rex panes](#rex-panes).
 
 **Worktree isolation** (`worktreeIsolation`, default `true`): whether `isolation: "worktree"` may create a worktree at all. Toggle via `/agents → Settings → Worktree isolation`, or set `false` in `subagents.json` on a repo where a copy costs too much time or disk. Off, the `Agent` tool's `isolation` parameter is dropped from the schema entirely and the bullet describing it leaves the tool description with it — nothing to pass, and no context spent describing it — and worktrees are refused on every other path too (agent files, scheduled jobs, cross-extension RPC). The `/agents` agent-file generator stops offering the `isolation:` frontmatter field too, so a generated agent can't bake in a request that would be refused. A requested worktree is downgraded to a normal run rather than failing the call, since declining one is the point; there is deliberately no note on the result, which is exactly why the prose has to go when the parameter does. The refusal applies immediately; the parameter and its prose appear or disappear on the next pi session. See [Turning worktrees off](#turning-worktrees-off).
 
@@ -984,6 +1012,15 @@ src/
   context.ts          # Parent conversation context for inherit_context
   settings.ts         # Persistent settings (~/.pi/agent/subagents.json + .pi/subagents.json)
   env.ts              # Environment detection (git, platform)
+
+  # Rex panes (`runInRexPanes: "auto"`; see docs/rex-panes.md)
+  rex/detect.ts       # Is this process a pane candidate? Env markers, a terminal, a memoized `rex whoami`
+  rex/launcher.ts     # Child spec/files/argv and the `session.new_layer` request; the serialized create/minimize/close calls
+  rex/rex-cli.ts      # Every `rex` invocation: exec seam, exit status, program status, captured tail, window lookup
+  rex/pane-run.ts     # One run in a pane: compose, launch, minimize, watch the result file against the exit, settle, close
+  rex/session-tail.ts # The child's session JSONL as messages, turns and usage; the only place that knows pi's on-disk format
+  rex/pane-session.ts # `RunHandle` over that file, so the widget, FleetView, viewer and the result tools read a pane run unchanged
+  rex/child-mode.ts   # The other side: the pane's own `pi` applies the spec's tool scope and turn cap, then reports and exits
 
   workflow/
     meta.ts           # Extract and validate a script's pure-literal `meta` block

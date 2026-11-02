@@ -18,7 +18,7 @@ import { Type } from "@sinclair/typebox";
 import { abortable } from "./abortable.js";
 import { hasAgentBadge, renderAgentName } from "./agent-color.js";
 import { buildNewAgentFile, disableInContent, enableInContent, isEmptyStub, locateAgentFile, personalAgentsDir, projectAgentsDir, serializeAgentFile } from "./agent-file-toggle.js";
-import { AgentManager, isTopLevelAgent } from "./agent-manager.js";
+import { AgentManager, isTopLevelAgent, type ManagerRunner } from "./agent-manager.js";
 import { getAgentConversation, getDefaultMaxTurns, getGraceTurns, getRememberAgents, normalizeMaxTurns, resolveEffectiveMaxTurns, SUBAGENT_TOOL_NAMES, setDefaultMaxTurns, setGraceTurns, setRememberAgents, steerAgent } from "./agent-runner.js";
 import { BUILTIN_TOOL_NAMES, getAgentConfig, getAllTypes, getAvailableTypes, getConfig, getFallbackSubagent, isDefaultsDisabled, NO_FALLBACK, registerAgents, resolveSpawnType, resolveType, setDefaultsDisabled, setFallbackSubagent } from "./agent-types.js";
 import { inChildSessionContext } from "./child-context.js";
@@ -33,11 +33,15 @@ import { describeModel, type ModelRegistry, resolveModel } from "./model-resolve
 import { checkModelScope, isScopeModelsEnabled, setScopeModelsEnabled } from "./model-scope.js";
 import { getMaxSubagentDepth, setMaxSubagentDepth } from "./nested-tools.js";
 import { createOutputFilePath, ensureOutputFile, getOutputTranscriptDefault, sessionTaskDir, setOutputTranscriptDefault, streamToOutputFile, writeInitialEntry } from "./output-file.js";
+import { installChildMode, readChildSpec } from "./rex/child-mode.js";
+import { type RexPanesSetting, rexPanesEnabled, rexTerminalMarkers } from "./rex/detect.js";
+import { createPaneRunner } from "./rex/pane-run.js";
+import { execRex, resolveWindowId } from "./rex/rex-cli.js";
 import { SubagentScheduler } from "./schedule.js";
 import { resolveStorePath, ScheduleStore } from "./schedule-store.js";
 import { applyAndEmitLoaded, getWorkflowStallTimeoutSecs, loadSettings, parseStallTimeoutSecs, STALL_TIMEOUT_SECS_CEILING, type SubagentsSettings, saveAndEmitChanged, setWorkflowStallTimeout, type ToolDescriptionMode } from "./settings.js";
-import { getForegroundOutcomeNote, getStatusNote, partialOutputSuffix } from "./status-note.js";
-import { type AgentConfig, type AgentInvocation, type AgentMentionMode, type AgentRecord, type AgentTombstone, type JoinMode, type NotificationDetails, type SubagentType, type ViewerMarkdownMode, type WidgetMode } from "./types.js";
+import { getForegroundOutcomeNote, getModalityNote, getStatusNote, partialOutputSuffix } from "./status-note.js";
+import { type AgentConfig, type AgentInvocation, type AgentMentionMode, type AgentRecord, type AgentTombstone, type JoinMode, type NotificationDetails, type RunHandle, type SubagentType, type ViewerMarkdownMode, type WidgetMode } from "./types.js";
 import { createMentionProvider, mentionRoster, type TypeInfo } from "./ui/agent-mention.js";
 import {
   type AgentActivity,
@@ -154,7 +158,7 @@ function createActivityTracker(maxTurns?: number, onStreamUpdate?: () => void) {
       state.turnCount = turnCount;
       onStreamUpdate?.();
     },
-    onSessionCreated: (session: any) => {
+    onSessionCreated: (session: RunHandle) => {
       state.session = session;
     },
     // Spend is accumulated on the AgentRecord (agent-manager), which is what
@@ -212,7 +216,7 @@ function formatTaskNotification(record: AgentRecord, resultMaxLen: number, showC
     record.toolCallId ? `<tool-use-id>${escapeXml(record.toolCallId)}</tool-use-id>` : null,
     record.outputFile ? `<output-file>${escapeXml(record.outputFile)}</output-file>` : null,
     `<status>${escapeXml(status)}</status>`,
-    `<summary>Agent "${escapeXml(record.description)}" ${record.status}${getStatusNote(record.status)}</summary>`,
+    `<summary>Agent "${escapeXml(record.description)}" ${record.status}${getStatusNote(record.status)}${escapeXml(getModalityNote(record))}</summary>`,
     `<result>${escapeXml(resultPreview)}</result>`,
     `<usage><total_tokens>${totalTokens}</total_tokens><tool_uses>${record.toolUses}</tool_uses>${ctxXml}${compactXml}${costXml}<duration_ms>${durationMs}</duration_ms></usage>`,
     `</task-notification>`,
@@ -323,6 +327,17 @@ export default function (pi: ExtensionAPI) {
   // would create another manager and leak handlers. Nested orchestration is
   // injected as scoped custom tools by the existing manager instead.
   if (inChildSessionContext()) return;
+
+  // A subagent running as a real `pi` in a Rex pane loads this extension too. It
+  // is not a second root manager: it reads the spec its parent wrote, installs
+  // child mode (tool scope, turn cap, one result file, self-shutdown) and stops
+  // before any of the registration below runs. `readChildSpec()` deletes the
+  // marker it reads, so nothing this child starts inherits its spec.
+  const childSpec = readChildSpec();
+  if (childSpec) {
+    installChildMode(pi, childSpec);
+    return;
+  }
 
   // ---- Register custom notification renderer ----
   pi.registerMessageRenderer<NotificationDetails>(
@@ -452,6 +467,16 @@ export default function (pi: ExtensionAPI) {
   let viewerMarkdown: ViewerMarkdownMode = "assistant";
   function getViewerMarkdown(): ViewerMarkdownMode { return viewerMarkdown; }
   function setViewerMarkdown(mode: ViewerMarkdownMode): void { viewerMarkdown = mode; }
+  /**
+   * Whether a subagent runs as a real `pi` in a Rex pane. Module state only so
+   * the settings snapshot writes back what the user set instead of a default it
+   * invented: detection re-reads the file (`rexPanesEnabled`), because that is
+   * where the answer lives and it is memoized for the process either way.
+   * `undefined` is "the user never set it", which is `"auto"`.
+   */
+  let runInRexPanes: RexPanesSetting | undefined;
+  function getRunInRexPanes(): RexPanesSetting | undefined { return runInRexPanes; }
+  function setRunInRexPanes(mode: RexPanesSetting): void { runInRexPanes = mode; }
   /**
    * The viewer's `m` key, from either entry point: set the mode and persist it,
    * so the key and `/agents → Settings` stay one setting rather than one per
@@ -584,6 +609,83 @@ export default function (pi: ExtensionAPI) {
     };
   }
 
+  /**
+   * What a pane needs from Rex, discovered once: the parent's session and the
+   * window its block sits in. Both are per-process facts, and the second costs a
+   * Rex call to learn.
+   *
+   * Lazy on purpose. Detection probes the Rex server, and doing that at extension
+   * load would put a subprocess on the startup path of every pi session running
+   * in Rex; on the spawn path it is a cost a user is already waiting out.
+   */
+  let paneTarget: Promise<{ sessionId: string; windowId: string } | undefined> | undefined;
+  /**
+   * One pane runner per root session.
+   *
+   * Per session because the runner carries two things that belong to one: the
+   * cascade its live panes stack in, and the child transcript store keyed by the
+   * root session. `/new` therefore starts with an empty cascade rather than
+   * inheriting the last session's, and a settled agent's transcript is filed
+   * under the session that spawned it.
+   */
+  const paneRunners = new Map<string, ManagerRunner>();
+
+  function getPaneRunner(): ManagerRunner | undefined | Promise<ManagerRunner | undefined> {
+    // The cheap half of detection first, synchronously: outside Rex there is
+    // nothing to ask, and this spawn starts in-process in this tick exactly as
+    // it always has. Inside Rex the probe is a subprocess, so it is awaited.
+    if (!rexTerminalMarkers()) return undefined;
+    const rootSessionId = currentCtx?.sessionManager.getSessionId() ?? process.env.REX_SESSION;
+    if (rootSessionId === undefined) return undefined;
+    const known = paneRunners.get(rootSessionId);
+    if (known !== undefined) return known;
+    paneTarget ??= discoverPaneTarget();
+    return paneTarget.then((target) => {
+      if (target === undefined) return undefined;
+      let runner = paneRunners.get(rootSessionId);
+      if (runner === undefined) {
+        runner = buildPaneRunner(target, rootSessionId);
+        paneRunners.set(rootSessionId, runner);
+      }
+      return runner;
+    });
+  }
+
+  /** Ask Rex whether there are panes to be had, and where this pane would go. */
+  async function discoverPaneTarget(): Promise<{ sessionId: string; windowId: string } | undefined> {
+    if (!(await rexPanesEnabled())) return undefined;
+    const sessionId = process.env.REX_SESSION;
+    const blockId = process.env.REX_BLOCK;
+    // Without both ids there is no session to put a pane in, whatever Rex says.
+    if (sessionId === undefined || blockId === undefined) return undefined;
+    const windowId = await resolveWindowId({ exec: execRex, sessionId }, blockId);
+    return windowId === undefined ? undefined : { sessionId, windowId };
+  }
+
+  function buildPaneRunner(
+    target: { sessionId: string; windowId: string },
+    rootSessionId: string,
+  ): ManagerRunner {
+    return createPaneRunner({
+      exec: execRex,
+      sessionId: target.sessionId,
+      windowId: target.windowId,
+      rootSessionId,
+      // The root session owns the child transcript store, so a fan-out does not
+      // fill the user's `/resume` picker.
+      agentSessionDir: join(getAgentDir(), "subagent-sessions", rootSessionId),
+      // The parent's own build, so the child is the same pi in every respect
+      // that matters.
+      piBinary: process.execPath,
+      onWarning: (message: string) => {
+        // A pane left on screen, or a Rex that stopped answering, is something
+        // the user has to hear about: `ui.notify` is this extension's existing
+        // warning channel, and the run itself is unaffected either way.
+        if (currentCtx?.hasUI) currentCtx.ui.notify(message, "warning");
+      },
+    });
+  }
+
   // Background completion: route through group join or send individual nudge
   const manager = new AgentManager((record) => {
     // Owned children — nested, or a workflow's — report only through their
@@ -664,6 +766,17 @@ export default function (pi: ExtensionAPI) {
     // see `PendingUsagePool`. Skipped entirely when the feature is off, so no
     // pool grows in a session that will never drain it.
     if (reportUsage) pendingUsage.add(usage);
+  }, {
+    // Per spawn, not at construction: inside Rex a subagent is a real `pi` in a
+    // pane, everywhere else the in-process session it has always been.
+    runnerFor: getPaneRunner,
+    // A refusal that arrives after the caller was told "yes" — a queued steering
+    // message the child would not take, a pane that could not be confirmed
+    // closed on shutdown — has no tool result to ride on, so it surfaces here
+    // through the same channel as every other warning this extension raises.
+    onWarning: (_record, message) => {
+      if (currentCtx?.hasUI) currentCtx.ui.notify(message, "warning");
+    },
   });
 
   // Expose manager via Symbol.for() global registry for cross-package access.
@@ -1507,6 +1620,7 @@ export default function (pi: ExtensionAPI) {
       setShowModel,
       setViewerMarkdown,
       setWorkflowStallTimeout,
+      setRunInRexPanes,
     },
     (event, payload) => pi.events.emit(event, payload),
   );
@@ -2186,7 +2300,7 @@ Terse command-style prompts produce shallow, generic work.
         // rather than closing over a value that doesn't exist yet.
         let id: string;
         const origBgOnSession = bgCallbacks.onSessionCreated;
-        bgCallbacks.onSessionCreated = (session: any) => {
+        bgCallbacks.onSessionCreated = (session: RunHandle) => {
           origBgOnSession(session);
           const rec = manager.getRecord(id);
           if (rec?.outputFile) {
@@ -2313,7 +2427,7 @@ Terse command-style prompts produce shallow, generic work.
       // The output file path is set synchronously after spawn (below),
       // before onSessionCreated fires — same pattern as background agents.
       const origOnSession = fgCallbacks.onSessionCreated;
-      fgCallbacks.onSessionCreated = (session: any) => {
+      fgCallbacks.onSessionCreated = (session: RunHandle) => {
         origOnSession(session);
         // It really started — stop reporting it as queued, and repaint now
         // rather than leaving the stale line up for the next spinner tick.
@@ -3208,7 +3322,7 @@ Terse command-style prompts produce shallow, generic work.
 
       let output =
         `Agent: ${record.id}\n` +
-        `Type: ${displayName} | Status: ${record.status}${getStatusNote(record.status)} | ${statsParts.join(" | ")}\n` +
+        `Type: ${displayName} | Status: ${record.status}${getStatusNote(record.status)}${getModalityNote(record)} | ${statsParts.join(" | ")}\n` +
         `Description: ${record.description}\n\n`;
 
       if (record.status === "running") {
@@ -3280,7 +3394,13 @@ Terse command-style prompts produce shallow, generic work.
         if (!record.pendingSteers) record.pendingSteers = [];
         record.pendingSteers.push(params.message);
         pi.events.emit("subagents:steered", { id: record.id, message: params.message });
-        return textResult(`Steering message queued for agent ${record.id}. It will be delivered once the session initializes.`);
+        // "Queued", not "delivered": the handle this session starts may still
+        // refuse the message (a pane child that is not taking input yet), and
+        // the manager reports that refusal when it happens rather than
+        // pretending here that it cannot.
+        return textResult(
+          `Steering message queued for agent ${record.id}. It will be sent once the session is ready; if the agent refuses it, you will be notified.`,
+        );
       }
 
       try {
@@ -3909,6 +4029,11 @@ Write the file using the write tool. Only write the file, nothing else.`;
       showCost: isShowCostEnabled(),
       showModel: isShowModelEnabled(),
       viewerMarkdown: getViewerMarkdown(),
+      // The user's answer, not the effective one: unset is `"auto"`, and writing
+      // that through would turn the default into explicit configuration.
+      // undefined is dropped by JSON.stringify, same reasoning as
+      // `fallbackSubagent`.
+      runInRexPanes: getRunInRexPanes(),
       // Seconds, 0 = off — read per run, so unlike `workflowsEnabled` above this
       // is the effective value rather than a session-frozen one.
       workflowStallTimeoutSecs: getWorkflowStallTimeoutSecs(),
@@ -4094,6 +4219,14 @@ Write the file using the write tool. Only write the file, nothing else.`;
             "How much of the conversation viewer renders as Markdown. assistant = assistant text only (default); all = tool results too, for tools that emit Markdown — accepting that a Markdown pass over a diff or a log eats `#` comments, swallows a `---` line and re-fences indented output; off = everything verbatim. `m` in the viewer cycles the same setting (footer: raw / md / md+).",
           currentValue: getViewerMarkdown(),
           values: ["off", "assistant", "all"],
+        },
+        {
+          id: "runInRexPanes",
+          label: "Rex panes",
+          description:
+            "Run each subagent as a real `pi` in a minimized floating Rex pane instead of an in-process session. auto = panes whenever pi is itself inside Rex and the server answers (outside Rex, in print mode, and inside a subagent's own child there is no pane either way); off = always in-process, for capsules you would rather not see. The answer is decided once, at this session's first agent spawn — so with nothing spawned yet, a change applies to the next agent.",
+          currentValue: getRunInRexPanes() ?? "auto",
+          values: ["auto", "off"],
         },
         {
           id: "fleetView",
@@ -4292,6 +4425,19 @@ Write the file using the write tool. Only write the file, nothing else.`;
       } else if (id === "viewerMarkdown") {
         setViewerMarkdown(value as ViewerMarkdownMode);
         notifyApplied(ctx, `Viewer markdown set to ${value}`);
+      } else if (id === "runInRexPanes") {
+        const mode = value as RexPanesSetting;
+        setRunInRexPanes(mode);
+        // The modality is memoized, so an agent that has already spawned this
+        // session keeps the old answer and the next session picks this up — the
+        // Settings row says so, rather than promising more than the memo can
+        // deliver.
+        notifyApplied(
+          ctx,
+          mode === "off"
+            ? "Rex panes off — subagents run in-process"
+            : "Rex panes on — subagents run in a minimized Rex pane when pi is inside Rex",
+        );
       } else if (id === "fleetView") {
         const enabled = value === "on";
         setFleetViewEnabled(enabled);

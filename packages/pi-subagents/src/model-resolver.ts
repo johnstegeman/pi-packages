@@ -2,6 +2,9 @@
  * Model resolution: exact match ("provider/modelId") with fuzzy fallback.
  */
 
+import type { Model } from "@earendil-works/pi-ai";
+import type { ThinkingLevel } from "./types.js";
+
 export interface ModelEntry {
   id: string;
   name: string;
@@ -19,9 +22,10 @@ export interface ModelRegistry {
  * the Agent tool result), the canonical one where there is room to disambiguate
  * two providers serving a similarly-named model (the conversation viewer).
  *
- * One function, because `index.ts` labels the model it resolved before the run
- * and `agent-manager.ts` relabels it from the live session afterwards — the two
- * must agree or the label would visibly change the moment the session starts.
+ * One function, because `index.ts` labels the model it resolved before the run,
+ * `agent-manager.ts` snapshots the same labels at spawn and refines them from
+ * whatever the run reports afterwards — all three must agree, or the label
+ * would visibly change the moment the run starts.
  */
 export function describeModel(
   model: { provider: string; id: string; name?: string },
@@ -115,4 +119,94 @@ export function resolveModel(
     .sort()
     .join("\n");
   return `Model not found: "${input}".\n\nAvailable models:\n${modelList}`;
+}
+
+/**
+ * The two registry members model resolution needs — nothing else is read, so
+ * a caller can hand over whatever shape its context happens to have.
+ */
+export type ModelLookup = {
+  find(provider: string, modelId: string): Model<any> | undefined;
+  getAvailable?(): Model<any>[];
+};
+
+/**
+ * Try to find the right model for an agent type.
+ * Priority: explicit option > config.model > parent model.
+ *
+ * Lives here rather than in `agent-runner.ts` because the manager resolves it
+ * too: `record.invocation` is snapshotted at spawn, for every modality,
+ * instead of read back off a live session.
+ */
+export function resolveDefaultModel(
+  parentModel: Model<any> | undefined,
+  registry: ModelLookup,
+  configModel?: string,
+): Model<any> | undefined {
+  if (configModel) {
+    const slashIdx = configModel.indexOf("/");
+    if (slashIdx !== -1) {
+      const provider = configModel.slice(0, slashIdx);
+      const modelId = configModel.slice(slashIdx + 1);
+
+      // Build a set of available model keys for fast lookup
+      const available = registry.getAvailable?.();
+      const availableKeys = available
+        ? new Set(available.map((m: any) => `${m.provider}/${m.id}`))
+        : undefined;
+      const isAvailable = (p: string, id: string) =>
+        !availableKeys || availableKeys.has(`${p}/${id}`);
+
+      const found = registry.find(provider, modelId);
+      if (found && isAvailable(provider, modelId)) return found;
+    }
+  }
+
+  return parentModel;
+}
+
+/**
+ * The model and thinking level one run will actually use.
+ *
+ * One precedence rule, one implementation: the caller's explicit option, else
+ * the agent type's config, else the parent's own model (and, for thinking,
+ * nothing at all — inherit).
+ *
+ * It lives here because two entry points resolve it for different reasons and
+ * must never disagree: `runAgent()` needs it to open its session, and the
+ * manager needs it at spawn to write `record.invocation`, which for a
+ * pane-backed run is the ONLY source of the labels — the parent never holds the
+ * child's session to read them off afterwards. Two copies of this precedence
+ * held together by a comment drift silently.
+ */
+export function resolveRunInvocation(input: {
+  /** What the caller asked for explicitly; each wins over the agent file. */
+  options: { model?: Model<any>; thinkingLevel?: ThinkingLevel };
+  /** The agent type's own config, when the type has one. */
+  config: { model?: string; thinking?: ThinkingLevel } | undefined;
+  /**
+   * The parent session: its model is the last resort, and its registry is what
+   * turns a `provider/model` name from the agent file into a model.
+   *
+   * The registry is optional because a context is not obliged to have one — a
+   * stub in a test, or a partial SDK context. Without it the config's model
+   * cannot be resolved, so the run gets the caller's model or the parent's:
+   * the same fallback, one source short. What it must never do is throw, since
+   * these are display labels and the manager resolves them in the middle of a
+   * spawn, where a throw fails the tool call rather than the record.
+   */
+  ctx: { model?: Model<any>; modelRegistry?: ModelLookup };
+}): { model: Model<any> | undefined; thinkingLevel: ThinkingLevel | undefined } {
+  const registry = input.ctx.modelRegistry;
+  const model = input.options.model
+    ?? (registry === undefined
+      // No registry to resolve a name against; the parent's own model is the
+      // most specific answer left, and exactly what the last resort below
+      // would have returned for a config that names nothing.
+      ? input.ctx.model
+      : resolveDefaultModel(input.ctx.model, registry, input.config?.model));
+  return {
+    model,
+    thinkingLevel: input.options.thinkingLevel ?? input.config?.thinking,
+  };
 }

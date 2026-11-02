@@ -232,6 +232,38 @@ describe("status note reaches the parent through the real handlers", () => {
     // two functions back together is exactly the regression this guards.
     expect(out).not.toContain("everything the agent produced is above");
   });
+
+  it("background fallback → get_subagent_result says where the agent actually ran", async () => {
+    // A pane was expected and could not be created, so the runner fell back: the
+    // warning that said so has scrolled away by the time a caller reads the
+    // result, and the record is the only place left that knows.
+    vi.mocked(runAgent).mockResolvedValue({
+      responseText: "the answer",
+      session: { dispose: vi.fn() } as any,
+      aborted: false,
+      steered: false,
+      paneFallback: "could not get a pane (creating it failed)",
+    });
+    const { pi, tools, lifecycle } = makePi();
+    subagentsExtension(pi);
+    await bind(lifecycle);
+
+    const spawn = await tools.get("Agent").execute(
+      "tc-fallback",
+      { prompt: "go", description: "d", subagent_type: "general-purpose", run_in_background: true },
+      undefined, undefined, ctx(),
+    );
+    const id = textOf(spawn).match(/Agent ID: (\S+)/)?.[1];
+    await new Promise(resolve => setTimeout(resolve, 0));
+
+    const out = textOf(await tools.get("get_subagent_result").execute(
+      "tc-fallback-2", { agent_id: id }, undefined, undefined, ctx(),
+    ));
+
+    expect(out).toContain("ran in-process: could not get a pane");
+    // And the result itself is untouched: the note is about where it ran.
+    expect(out).toContain("the answer");
+  });
 });
 
 // `subagents:compacted` is a documented cross-extension contract (README:495)

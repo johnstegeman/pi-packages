@@ -2375,7 +2375,7 @@ describe("AgentManager — names as additive aliases", () => {
     vi.mocked(runAgent).mockImplementation(async (_ctx: any, _type: any, _prompt: any, options: any) => {
       options.onSessionCreated?.({
         dispose: vi.fn(),
-        sessionManager: { getSessionFile: () => "/sessions/explore.jsonl" },
+        sessionFile: "/sessions/explore.jsonl",
       });
       return { responseText: "done", session: mockSession(), aborted: false, steered: false } as any;
     });
@@ -2388,7 +2388,7 @@ describe("AgentManager — names as additive aliases", () => {
 
   it("records no session file for an in-memory session", async () => {
     vi.mocked(runAgent).mockImplementation(async (_ctx: any, _type: any, _prompt: any, options: any) => {
-      options.onSessionCreated?.({ dispose: vi.fn(), sessionManager: { getSessionFile: () => undefined } });
+      options.onSessionCreated?.({ dispose: vi.fn(), sessionFile: undefined });
       return { responseText: "done", session: mockSession(), aborted: false, steered: false } as any;
     });
     manager = new AgentManager();

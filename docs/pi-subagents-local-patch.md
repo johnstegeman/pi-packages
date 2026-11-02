@@ -376,6 +376,72 @@ Covered by `test/nested-tools.test.ts` (the inline shapes, the fetched position,
 Unchanged by design: the `@handle` mention namespace, `takenHandles()`, nested records' absence of
 handles and tombstones, and the ten-minute eviction cutoff.
 
+## Divergence 10 — subagents run as real `pi` processes in Rex panes (`pi-packages-mol-hx8zk`)
+
+Upstream has no Rex integration of any kind: every subagent is an in-process SDK session created by
+`runAgent()`, and the package never spawns a child process. This fork adds a **second execution
+path** — inside Rex, each subagent is a real `pi` in its own minimized floating pane — while
+leaving the first one exactly as it was everywhere else. Three parts, and the third is the one that
+touches upstream code:
+
+1. **`src/rex/`** — a self-contained subtree, entirely ours, so nothing in it can be mistaken for
+   upstream: `detect.ts` (is this process a pane candidate, and the `runInRexPanes` setting),
+   `launcher.ts` (the child's spec, files and argv; the `session.new_layer` request; the serialized
+   create/minimize/close calls), `rex-cli.ts` (every `rex` invocation, and the reads a run needs),
+   `pane-run.ts` (one run: compose, launch, minimize, watch, settle, close; resume; steer; abort; the
+   in-process fallback), `session-tail.ts` (the child's session JSONL as messages, turns and usage),
+   `pane-session.ts` (`RunHandle` over that file) and `child-mode.ts` (what the child `pi` does with
+   the spec: tool scope, turn cap, structured output, the result file, self-shutdown).
+2. **Child mode in `index.ts`** — the pane's `pi` reads `PI_SUBAGENTS_CHILD_SPEC` at startup, deletes
+   the variable, and returns from `installChildMode()` before any root-manager registration runs.
+   That is what keeps a child from being a second session: no `/agents`, no scheduler, no widget, no
+   completion nudges, no `subagents:ready`, no pane for itself. It keeps the pieces a run needs — the
+   nested delegation tools under the same `allowed_subagents` gate, the depth cap carried across the
+   process boundary in the spec, the type's tool scope re-expressed through `pi.setActiveTools()` and
+   a `tool_call` veto, the turn cap, and the `StructuredOutput` contract.
+3. **The `RunHandle` seam** — the manager stops owning the run loop and owns the record instead.
+   `runAgent()`/`resumeAgent()` no longer build a session the rest of the package reaches into; they
+   produce a `RunHandle` (messages, subscribe, stats, session file, steer, abort, dispose, plus
+   optional model/thinking/extension runner), and a `ManagerRunner` (`start`, `resume`, optional
+   `close`/`closeAll`) is chosen per spawn. `AgentRecord.session` is a `RunHandle` rather than an
+   `AgentSession`, and every consumer — widget activity, fleet list, conversation viewer,
+   `get_subagent_result`, `streamToOutputFile`, usage, nested tools — reads that narrower contract.
+   The manager gains a `runnerFor` provider (`resolveRunner`, `startWith`, `runnerForRecord` so a
+   resume returns to the runner that served the run), a spawn-time `record.invocation` snapshot (a
+   pane run has no session the parent can read labels off), `record.paneFallback` with
+   `getModalityNote()` in `status-note.ts` (a fallback to in-process is a fact about where the agent
+   ran, and it has to outlive the warning), and a propagate-not-swallow `steerSession()` (a steer can
+   be refused after it was accepted, which a dropped message makes indistinguishable from delivery).
+
+Smaller consequences in upstream files, all forced by the above: `settings.ts` gains
+`runInRexPanes` and its applier; `model-resolver.ts` gains `resolveDefaultModel` (moved out of
+`agent-runner.ts`, because the manager resolves the model too); `RunOptions` gains `handle`,
+`description` and `rootSessionId`; `skill-loader.ts` gains `findSkillPath` (a pane child is told its
+skills by path, where the in-process path preloads their text); `output-file.ts`, `nested-tools.ts`,
+`usage.ts` and `ui/conversation-viewer.ts` take the handle type; `agent-runner.ts` keeps the
+in-process semantics and reports `paneFallback` through its result.
+
+**Why the seam rather than a second manager.** The alternative — a parallel pane-specific manager —
+would have needed its own copies of handles, statuses, pools, queue, tombstones, settle,
+notifications, `/agents`, RPC and schedules, and every one of those would drift. One injectable
+runner is the smallest change that admits a second execution model, and it is why a pane agent is
+steerable from `steer_subagent`, appears in FleetView, and resumes like any other.
+
+**What is deliberately absent.** No `pi --mode rpc` child (the pane must show a session a human can
+type into), no in-pane UI of our own, no pane reuse or pooling, no aggregation of a grandchild into
+the parent's `/agents`, and no persistence of a pane's block id across sessions.
+
+**No `LOCAL PATCH` markers.** Every changed line of this divergence lives either in `src/rex/` (new
+files with nowhere to point) or inside the seam: a type rename and a call-site sweep through the
+manager, the runner and every UI reader. Bracketing those would put a marker on a third of the
+package and tell a reader nothing they cannot learn from `RunHandle`'s definition and its usages,
+which is the same judgement Divergence 7 records for its additive blocks. The behaviour is pinned
+instead: `test/rex-*.test.ts` (detection, launcher argv and confinement fixtures, the CLI seam, the
+session tail, the proxy session, child mode, the `RunHandle` seam and the end-to-end pane run) plus the
+existing in-process suite, which had to keep passing untouched — that suite is the evidence the seam
+did not change the path that was already there. Documented in `packages/pi-subagents/docs/rex-panes.md`,
+with the setting in README's settings section and a `### Added` entry in the CHANGELOG.
+
 ## In-code marker convention
 
 Divergences 3 — the code-mode exposure/namespace/outputSchema changes from Task 6 — 4 — Task 7's
@@ -391,7 +457,10 @@ the `identityLines` **call sites** carry no marker of their own (the helper's ma
 each is an insertion into an existing upstream result string), and the Agent-tool guideline line
 lives inside a template literal, which cannot carry a `//` marker at all. The rest of Divergence 7
 is not: its watchdog hunks and durability helpers are additive
-blocks that are plainly this copy's own state (see its section above). The marker is:
+blocks that are plainly this copy's own state (see its section above). Divergence 10 is not marked
+either, for the same reason — a new `src/rex/` subtree plus a type rename swept through every call
+site (see its section for why bracketing it would be noise) — so the marker list above stays what it
+was. The marker is:
 
 ```ts
 // LOCAL PATCH (pi-packages) — see docs/pi-subagents-local-patch.md

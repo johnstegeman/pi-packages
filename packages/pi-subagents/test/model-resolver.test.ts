@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { describeModel, type ModelRegistry, resolveModel } from "../src/model-resolver.js";
+import { describeModel, type ModelRegistry, resolveModel, resolveRunInvocation } from "../src/model-resolver.js";
 
 // Mock model entries matching typical pi model registry shape
 const MODELS = [
@@ -267,5 +267,60 @@ describe("describeModel", () => {
   it("falls back to the id when the model has no display name", () => {
     expect(describeModel({ provider: "openai-codex", id: "gpt-5.6-sol" }))
       .toEqual({ modelName: "gpt-5.6-sol", modelId: "openai-codex/gpt-5.6-sol" });
+  });
+});
+
+describe("resolveRunInvocation — one precedence rule for both entry points", () => {
+  const parent = { provider: "anthropic", id: "claude-opus-4-6", name: "Claude Opus 4.6" };
+  const requested = { provider: "openai", id: "gpt-4o", name: "GPT-4o" };
+  const sonnet = MODELS[1];
+
+  it("prefers the caller's explicit model and thinking level over the agent file", () => {
+    const resolved = resolveRunInvocation({
+      options: { model: requested, thinkingLevel: "high" },
+      config: { model: "anthropic/claude-sonnet-4-6", thinking: "low" },
+      ctx: { model: parent, modelRegistry: makeRegistry() },
+    });
+
+    expect(resolved).toEqual({ model: requested, thinkingLevel: "high" });
+  });
+
+  it("resolves the agent file's model through the registry, and its thinking level as-is", () => {
+    // The manager writes these to `record.invocation` before a pane run starts,
+    // so they have to be the same answer `runAgent()` opens its session with.
+    const resolved = resolveRunInvocation({
+      options: {},
+      config: { model: "anthropic/claude-sonnet-4-6", thinking: "medium" },
+      ctx: { model: parent, modelRegistry: makeRegistry() },
+    });
+
+    expect(resolved).toEqual({ model: sonnet, thinkingLevel: "medium" });
+  });
+
+  it("falls back to the parent's model, and inherits thinking, when nothing else names them", () => {
+    expect(resolveRunInvocation({ options: {}, config: undefined, ctx: { model: parent } }))
+      .toEqual({ model: parent, thinkingLevel: undefined });
+  });
+
+  it("resolves what it can from a context with no model registry", () => {
+    // A stub context — and a partial SDK one — may have no registry. The labels
+    // are display data the manager resolves inside a spawn, so an unresolvable
+    // agent-file model degrades to the caller's or the parent's instead of
+    // throwing out of the tool call.
+    expect(
+      resolveRunInvocation({
+        options: {},
+        config: { model: "anthropic/claude-sonnet-4-6", thinking: "low" },
+        ctx: { model: parent },
+      }),
+    ).toEqual({ model: parent, thinkingLevel: "low" });
+
+    expect(
+      resolveRunInvocation({
+        options: { model: requested },
+        config: { model: "anthropic/claude-sonnet-4-6" },
+        ctx: {},
+      }),
+    ).toEqual({ model: requested, thinkingLevel: undefined });
   });
 });
