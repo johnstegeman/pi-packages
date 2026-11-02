@@ -133,7 +133,12 @@ export type SessionStatsLike = {
   tokens: { input: number; output: number; cacheWrite: number };
   contextUsage?: { percent: number | null };
 };
-export type SessionLike = { getSessionStats(): SessionStatsLike };
+
+/**
+ * What we read off a session's stats — a live `AgentSession` here, or a
+ * file-backed run that has nothing to report until it has spent anything.
+ */
+export type SessionLike = { getSessionStats(): SessionStatsLike | undefined };
 
 /**
  * Session-scoped token count: input + output + cacheWrite as reported by
@@ -151,7 +156,10 @@ export type SessionLike = { getSessionStats(): SessionStatsLike };
 export function getSessionTokens(session: SessionLike | undefined): number {
   if (!session) return 0;
   try {
-    const t = session.getSessionStats().tokens;
+    const stats = session.getSessionStats();
+    // A run with no usage entry yet: nothing spent, not an error.
+    if (!stats) return 0;
+    const t = stats.tokens;
     return t.input + t.output + t.cacheWrite;
   } catch { return 0; }
 }
@@ -162,6 +170,6 @@ export function getSessionTokens(session: SessionLike | undefined): number {
  */
 export function getSessionContextPercent(session: SessionLike | undefined): number | null {
   if (!session) return null;
-  try { return session.getSessionStats().contextUsage?.percent ?? null; }
+  try { return session.getSessionStats()?.contextUsage?.percent ?? null; }
   catch { return null; }
 }

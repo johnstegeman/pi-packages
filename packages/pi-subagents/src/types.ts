@@ -306,11 +306,14 @@ export interface RunHandle {
   /** Same contract as pi's: returns the unsubscribe function. */
   subscribe(listener: (event: AgentSessionEvent) => void): () => void;
   /**
-   * Current session-window stats. The narrow shape is `usage.ts`'s own —
+   * Current session-window stats, or `undefined` when the run has not spent
+   * anything yet — a live session always has stats, but a file-backed run
+   * learns its totals from the child's session file and has nothing to report
+   * before the first usage entry. The narrow shape is `usage.ts`'s own —
    * `getSessionStats()` on a live session returns pi's fuller `SessionStats`,
    * which is assignable to it.
    */
-  getSessionStats(): SessionStatsLike;
+  getSessionStats(): SessionStatsLike | undefined;
   /** The pi session file, when the run persisted one. */
   sessionFile?: string;
   /**
