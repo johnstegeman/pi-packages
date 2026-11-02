@@ -21,11 +21,18 @@
 // root-manager registration below it runs in a child. That is the rule this file
 // exists to keep: a child is a run, not a session a human drives.
 
-import { mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
+import { mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { dirname } from "node:path";
 import type { ExtensionAPI, ExtensionContext, ToolCallEventResult } from "@earendil-works/pi-coding-agent";
 import { AgentManager } from "../agent-manager.js";
-import { extensionCanonicalNames, getGraceTurns, normalizeMaxTurns, parseExtSelectors } from "../agent-runner.js";
+import {
+  extensionCanonicalNames,
+  getGraceTurns,
+  normalizeMaxTurns,
+  outOfScopeToolReason,
+  parseExtSelectors,
+  WRAP_UP_STEER,
+} from "../agent-runner.js";
 import { BUILTIN_TOOL_NAMES } from "../agent-types.js";
 import { extractText } from "../context.js";
 import { describeModel } from "../model-resolver.js";
@@ -43,14 +50,6 @@ import type { ChildSpec } from "./launcher.js";
 
 /** The variable the parent sets to the child's `spec.json` path. */
 export const CHILD_SPEC_ENV = "PI_SUBAGENTS_CHILD_SPEC";
-
-/**
- * The steer the in-process runner sends at the soft turn limit. Identical text
- * on purpose: an agent that already reacts to it in-process gets the same
- * instruction in a pane, and a run that hits the cap behaves the same either way.
- */
-const WRAP_UP_STEER =
-  "You have reached your turn limit. Wrap up immediately — provide your final answer now.";
 
 /**
  * What the child reports back, and the parent's whole view of the run.
@@ -94,6 +93,11 @@ let childMode = false;
 
 export function isChildMode(): boolean {
   return childMode;
+}
+
+/** Test seam: forget that child mode was installed, so a suite can observe it again. */
+export function resetChildModeForTests(): void {
+  childMode = false;
 }
 
 /**
@@ -187,8 +191,20 @@ export function writeChildResult(resultPath: string, result: ChildRunResult): vo
   };
   mkdirSync(dirname(resultPath), { recursive: true });
   const tmp = `${resultPath}.tmp`;
-  writeFileSync(tmp, JSON.stringify(payload, null, 2), "utf-8");
-  renameSync(tmp, resultPath);
+  try {
+    writeFileSync(tmp, JSON.stringify(payload, null, 2), "utf-8");
+    renameSync(tmp, resultPath);
+  } catch (error) {
+    // A half-written temp file is still a file: it outlives the failed run and
+    // reads like a result to anyone listing the task directory. Best effort,
+    // because the original failure is the one worth reporting.
+    try {
+      rmSync(tmp, { force: true });
+    } catch {
+      // Nothing left to clean up with; the caller's error stands.
+    }
+    throw error;
+  }
 }
 
 /**
@@ -382,16 +398,29 @@ function installToolScope(pi: ExtensionAPI, spec: ChildSpec, injected: string[])
   const refresh = (): void => {
     inScope = compute();
     scoped = true;
-    pi.setActiveTools([...inScope]);
+    const next = [...inScope];
+    const current = pi.getActiveTools();
+    // `setActiveTools` rebuilds the system prompt, so re-setting an unchanged
+    // list would charge every turn for nothing. The in-process scope skips the
+    // same no-op (`installExtensionToolScope()`'s `renarrow`).
+    if (next.length !== current.length || next.some((name, i) => name !== current[i])) {
+      pi.setActiveTools(next);
+    }
   };
 
   pi.on("session_start", refresh);
   pi.on("turn_end", refresh);
   pi.on("tool_call", (event): ToolCallEventResult | undefined => {
-    // Before the first refresh there is no session and no prompt, so there is
-    // nothing this handler could be guarding yet.
+    // Fail-OPEN until the first refresh, unlike the in-process
+    // `createToolScopeVeto` which fails CLOSED for nested calls. That difference
+    // is safe rather than lax: there the unset holder can be permanent
+    // (`noExtensions`/`isolated` sessions skip the install entirely), while here
+    // the refresh is bound to `session_start`, which pi emits before it accepts
+    // any prompt — so "unscoped" only ever means "no prompt has run yet", and
+    // failing closed would protect nothing while risking a session that cannot
+    // start.
     if (!scoped || inScope.has(event.toolName)) return undefined;
-    return { block: true, reason: `Tool "${event.toolName}" is not available to this subagent.` };
+    return { block: true, reason: outOfScopeToolReason(event.toolName) };
   });
 }
 
@@ -469,22 +498,40 @@ function installSettler(
       pi.sendUserMessage(structuredRetryPrompt(capture));
       return;
     }
-    state.wrote = true;
-    writeChildResult(spec.resultPath, buildResult(pi, spec, ctx, state, capture));
-    ctx.shutdown();
+    // `wrote` is set only when the write actually landed. A failed write — a
+    // full disk, a task directory removed under us — must not look like a
+    // delivered result to a later settle, and the process still has to end:
+    // otherwise the child outlives its run with nothing for the parent to read
+    // and no exit for the pane to notice. Written first, shut down regardless;
+    // a child that keeps running after a settle is worse than one that reports
+    // why it could not.
+    try {
+      writeChildResult(spec.resultPath, buildResult(spec, ctx, state, capture));
+      state.wrote = true;
+    } catch (error) {
+      const reason = error instanceof Error ? error.message : String(error);
+      console.warn(
+        `[pi-subagents] child "${spec.agentId}" could not write its result to ${spec.resultPath}: ${reason}`,
+      );
+    } finally {
+      ctx.shutdown();
+    }
   });
 }
 
 /**
  * The result file's contents, assembled from what this process's session knows.
  *
- * The model and thinking level are read at settle rather than from the spec: pi
- * clamps a level to what the model supports, so the effective pair is the honest
- * one to report, and the spec's value is only the fallback when the context
- * cannot answer.
+ * Both the model and the thinking level prefer what the session reports at
+ * settle — pi clamps a level to what the model supports, so the effective pair is
+ * the honest one — and fall back to the spec, which is the parent's resolved
+ * answer and, for `thinking`, the value the child was launched with
+ * (`buildChildCommand()`'s `--thinking` flag, which `launcher.ts` documents as
+ * mirroring `spec.thinking`). Deliberately not `pi.getThinkingLevel()`: that
+ * reports the same effective level as the context, so preferring it over the spec
+ * would leave the spec's field unreachable and the launcher's promise untested.
  */
 function buildResult(
-  pi: ExtensionAPI,
   spec: ChildSpec,
   ctx: ExtensionContext,
   state: RunState,
@@ -502,9 +549,7 @@ function buildResult(
     steered: state.steered,
     usage: { ...state.usage },
     model: ctx.model ? describeModel(ctx.model).modelId : spec.model,
-    // `ctx.thinkingLevel` is the level this session actually runs; the spec's is
-    // only what the parent asked for.
-    thinkingLevel: ctx.thinkingLevel ?? pi.getThinkingLevel(),
+    thinkingLevel: ctx.thinkingLevel ?? spec.thinking,
     turns: state.turns,
   };
   const failure = turnFailure(state, text) ?? structuredFailure;

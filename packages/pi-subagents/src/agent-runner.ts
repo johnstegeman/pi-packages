@@ -210,6 +210,19 @@ export function parseExtSelectors(entries: string[]): {
 }
 
 /**
+ * The one wording for a blocked out-of-scope tool call.
+ *
+ * Three call sites in this file (the nested `tool_call` veto and both
+ * `beforeToolCall` arms) and a fourth in the pane child's own veto
+ * (`rex/child-mode.ts`) have to say the same sentence: a model that is told a
+ * different reason by the in-process scope and by the pane scope would learn two
+ * rules for one restriction.
+ */
+export function outOfScopeToolReason(toolName: string): string {
+  return `Tool "${toolName}" is not available to this subagent.`;
+}
+
+/**
  * The extension `tool_call` handler that enforces the subagent tool scope on the
  * NESTED path — the calls a codemode script makes through `ctx.executeTool()`.
  *
@@ -250,16 +263,10 @@ function createToolScopeVeto(holder: { inScope?: () => Set<string> }): InlineExt
           // every `noExtensions` session. Unset is transient for extension sessions (no
           // prompt runs before the scope is installed) and permanent for `noExtensions`.
           if (!event.parentToolCallId) return undefined;
-          return {
-            block: true,
-            reason: `Tool "${event.toolName}" is not available to this subagent.`,
-          };
+          return { block: true, reason: outOfScopeToolReason(event.toolName) };
         }
         if (inScope().has(event.toolName)) return undefined;
-        return {
-          block: true,
-          reason: `Tool "${event.toolName}" is not available to this subagent.`,
-        };
+        return { block: true, reason: outOfScopeToolReason(event.toolName) };
       });
     },
   };
@@ -382,10 +389,7 @@ export function installExtensionToolScope(
   const priorBeforeToolCall = session.agent.beforeToolCall;
   session.agent.beforeToolCall = async (context, signal) => {
     if (!inScope().has(context.toolCall.name)) {
-      return {
-        block: true,
-        reason: `Tool "${context.toolCall.name}" is not available to this subagent.`,
-      };
+      return { block: true, reason: outOfScopeToolReason(context.toolCall.name) };
     }
     return priorBeforeToolCall?.(context, signal);
   };
@@ -431,6 +435,16 @@ let rememberAgents = true;
 export function getRememberAgents(): boolean { return rememberAgents; }
 /** Set whether subagent sessions are persisted by default. */
 export function setRememberAgents(b: boolean): void { rememberAgents = b; }
+
+/**
+ * The message a run gets when it reaches its soft turn limit.
+ *
+ * Shared so the in-process loop and a pane child steer with one sentence: a
+ * model told to wrap up in different words than its sibling is being trained on
+ * two rules for one limit.
+ */
+export const WRAP_UP_STEER =
+  "You have reached your turn limit. Wrap up immediately — provide your final answer now.";
 
 /** Additional turns allowed after the soft limit steer message. */
 let graceTurns = 5;
@@ -1160,7 +1174,7 @@ export async function runAgent(
       if (maxTurns != null) {
         if (!softLimitReached && turnCount >= maxTurns) {
           softLimitReached = true;
-          session.steer("You have reached your turn limit. Wrap up immediately — provide your final answer now.");
+          session.steer(WRAP_UP_STEER);
         } else if (softLimitReached && turnCount >= maxTurns + graceTurns) {
           aborted = true;
           session.abort();

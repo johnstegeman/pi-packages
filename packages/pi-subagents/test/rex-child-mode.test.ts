@@ -8,11 +8,17 @@
  * is written exactly once.
  */
 
-import { existsSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import subagentsExtension from "../src/index.js";
-import { installChildMode, isChildMode, readChildSpec, writeChildResult } from "../src/rex/child-mode.js";
+import {
+  installChildMode,
+  isChildMode,
+  readChildSpec,
+  resetChildModeForTests,
+  writeChildResult,
+} from "../src/rex/child-mode.js";
 import type { ChildSpec } from "../src/rex/launcher.js";
 import { ctx, hermeticDir, makePi } from "./helpers/boot-extension.js";
 
@@ -41,6 +47,9 @@ let cleanup: (() => void) | undefined;
 afterEach(() => {
   cleanup?.();
   cleanup = undefined;
+  // The flag is module state for the life of the process; without this the
+  // "was not a child before" precondition would depend on test order.
+  resetChildModeForTests();
   vi.restoreAllMocks();
 });
 
@@ -239,6 +248,8 @@ describe("installChildMode", () => {
   it("marks the process as a child", () => {
     const dir = hermetic();
     const { pi } = makeChildPi();
+    // `afterEach` resets the module flag, so this is a precondition rather than a
+    // claim about test order.
     expect(isChildMode()).toBe(false);
 
     installChildMode(pi, specFor(dir));
@@ -269,13 +280,21 @@ describe("installChildMode", () => {
     ]);
   });
 
-  it("registers no delegation tools at the depth cap", () => {
+  it("registers no delegation tools at the depth cap, and never activates them", async () => {
     const dir = hermetic();
-    const { pi, tools } = makeChildPi();
+    const { pi, tools, send } = makeChildPi();
 
     installChildMode(pi, specFor(dir, { depth: 2, maxSubagentDepth: 2 }));
+    await send("session_start");
 
     expect(tools.size).toBe(0);
+    // The criterion is about the tool surface, not only the registration: a name
+    // handed to the active set would surface an `Agent` tool whose every call is
+    // an error.
+    expect(pi.setActiveTools).toHaveBeenCalledWith(["read", "codemode"]);
+    for (const name of ["Agent", "get_subagent_result", "steer_subagent"]) {
+      expect(pi.setActiveTools.mock.calls.flat()).not.toContain(name);
+    }
   });
 
   it("registers no delegation tools when the type does not allow them", () => {
@@ -345,6 +364,20 @@ describe("installChildMode", () => {
     expect(pi.setActiveTools).toHaveBeenCalledWith(["read", "codemode"]);
   });
 
+  it("does not re-set an active list that has not changed", async () => {
+    const dir = hermetic();
+    const { pi, send } = makeChildPi();
+    installChildMode(pi, specFor(dir, { allowedSubagents: false }));
+
+    await send("session_start");
+    // The steady state: every turn re-derives the scope, and none of them pays
+    // for a system-prompt rebuild unless something actually changed.
+    await send("turn_end", {});
+    await send("turn_end", {});
+
+    expect(pi.setActiveTools).toHaveBeenCalledTimes(1);
+  });
+
   it("vetoes a tool call outside the scope", async () => {
     const dir = hermetic();
     const { pi, handlers, send } = makeChildPi();
@@ -412,6 +445,52 @@ describe("installChildMode", () => {
     await send("agent_settled", SETTLED, c);
 
     expect(JSON.parse(readFileSync(spec.resultPath, "utf-8")).failure).toBe("overloaded");
+  });
+
+  it("reports the spec's thinking level when the context carries none", async () => {
+    const dir = hermetic();
+    const spec = specFor(dir, { allowedSubagents: false, thinking: "low" });
+    const { pi, send } = makeChildPi();
+    const c = childCtx({ thinkingLevel: undefined });
+    installChildMode(pi, spec);
+
+    await send("message_end", assistantEnd("done"), c);
+    await send("agent_settled", SETTLED, c);
+
+    const written = JSON.parse(readFileSync(spec.resultPath, "utf-8"));
+    expect(written.thinkingLevel).toBe("low");
+  });
+
+  it("shuts the child down and says so when the result cannot be written", async () => {
+    const dir = hermetic();
+    // A directory where the result file should go: the temp write succeeds and the
+    // rename fails, which is the only way to exercise the temp-file cleanup.
+    const resultPath = join(dir, "agent-1.result.json");
+    mkdirSync(resultPath);
+    const spec = specFor(dir, { allowedSubagents: false, resultPath });
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const { pi, send } = makeChildPi();
+    const c = childCtx();
+    installChildMode(pi, spec);
+
+    await send("message_end", assistantEnd("the answer"), c);
+    await send("agent_settled", SETTLED, c);
+
+    expect(warn).toHaveBeenCalledTimes(1);
+    expect(warn.mock.calls[0][0]).toContain("could not write its result");
+    expect(warn.mock.calls[0][0]).toContain("agent-1");
+    // The child still ends: a pane holding a live `pi` with no result for the
+    // parent is worse than one that exits and says why it could not report.
+    expect(c.shutdown).toHaveBeenCalledTimes(1);
+    // The temp file the rename came from is gone, not left beside the result path.
+    expect(existsSync(`${resultPath}.tmp`)).toBe(false);
+
+    // A failed write was not a delivered result, so the guard is still open: a
+    // later settle writes it (and shuts down again, as it must).
+    rmSync(resultPath, { recursive: true, force: true });
+    await send("agent_settled", SETTLED, c);
+    expect(JSON.parse(readFileSync(resultPath, "utf-8")).text).toBe("the answer");
+    expect(c.shutdown).toHaveBeenCalledTimes(2);
   });
 
   it("applies the project's defaultMaxTurns when the spec carries none", async () => {
