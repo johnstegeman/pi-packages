@@ -242,3 +242,23 @@ sketch above, all verified end to end against a stand-in remote:
   fails harmlessly on remotes that don't advertise HEAD).
 - Prefix confirmed = repo directory name (`test-repo-*` ids), redirect hook
   runs (wt post-start), HEAD attached on main, `.jj` colocated in main.
+
+**Incident + hardening (2026-11-03):** the first real run was executed from
+inside an existing beads workspace (pi-rex nested under the pi-packages
+wrapper), and `bd init` **adopted the parent workspace** — it created a new
+empty per-prefix dolt database (`pi_rex`) inside the parent's
+`.beads/embeddeddolt/`, flipped the parent's `metadata.json` to it, and
+overwrote `sync.remote`. Two facts made recovery trivial: dolt databases are
+**per-prefix directories** under `.beads/embeddeddolt/` (the original `beads`
+db was untouched — `bd dolt set database beads` restores it), and dolt
+**remotes are per-database** (the bad run's remote add/remove never touched
+the original db's remotes). The `bd dolt push` in the bad run pushed only
+the empty new db — no issue data leaked. ginit now guards against the class:
+an ancestor walk refuses to run inside any *real* beads workspace (one with
+`embeddeddolt/` or `metadata.json` — `~/.beads` holds only bd global state
+and is correctly ignored; verified by probe that a correctly-placed run
+under `$HOME` still creates a fresh db at the wrapper), and a post-init
+placement check aborts before any remote/push step if the db did not land
+at the wrapper root. The function now lives at
+`~/.config/fish/functions/ginit.fish` (autoloaded). Also verified: https
+remote URIs work (bd normalizes to `git+https://`).
