@@ -297,3 +297,17 @@ consequence:** feature worktrees are created by jj, not wt — the flow is
 create/set` → `git checkout` — wt's role becomes listing/removing worktrees
 and running hooks on demand (path-based), since worktrees wt creates itself
 would have no jj workspace.
+
+**Redirect dropped (2026-11-03, ginit v4):** the seeded wt `[post-start]` config
+no longer creates a worktree `.beads/redirect` — in the wrapper layout bd's
+upward detection finds the wrapper-root `.beads` from any worktree with no
+redirect at all (the pi-packages production model, verified in fixtures and
+by this session's own bd usage). The redirect was belt-and-suspenders for a
+case that doesn't occur, and under the jj-workspace construction an untracked
+unignored file is worse than noise — **jj snapshots it into `@`**. ginit now
+seeds `.beads/` into `.gitignore` as pure insurance (ignored-but-absent =
+zero noise; protects against anyone running `bd init` inside a checkout
+later) and the only post-start hook is `copy-ignored`. pmm-iris (which used
+redirect + ignore-the-whole-.beads) is being updated by the user to match:
+drop the `beads` hook from `.config/wt.toml`, delete worktree `.beads/`
+dirs, keep the `.gitignore` `.beads/` line.
