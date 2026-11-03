@@ -343,3 +343,29 @@ dirs, keep the `.gitignore` `.beads/` line.
   default must never be the context), `git checkout -b <name>` (branch +
   attach), `wt hook post-start` (hooks). Full lifecycle tested: `gws feature5`
   → work → `wt remove feature5` → workspace forgotten + worktree gone.
+
+**gclone brought to parity (2026-11-03):** `~/.config/fish/functions/gclone.fish` now
+performs the same jj construction after its bd-bootstrap steps (init at the
+wrapper → `workspace add --colocate main` → sparse-clear + `jj new "root()"`
+→ `git checkout main` (attach — the branch exists from the clone) → manual
+`wt hook post-start` → upstream wiring → `jj bookmark track main@origin` →
+rex window rename). Three clone-specific findings, all handled:
+
+- **`jj git init` MATERIALIZES the seed tree at the wrapper** — including the
+  repo's own `.gitignore`. Since `.beads` already exists at clone time (bd
+  bootstrap ran first), the next snapshot could absorb the beads db. Fix:
+  overwrite the wrapper `.gitignore` with `*` right after init (robust even
+  for repos whose own .gitignore lacks a `.beads/` line); `sparse set
+  --clear` later dematerializes everything, leaving the wrapper clean
+  (verified: default@ contains nothing).
+- The original gclone relied on `wt switch main` cd-ing the shell into main
+  (shell integration) before `git branch --set-upstream-to` — the rewrite is
+  explicit (`cd main`), otherwise the upstream wiring silently runs in the
+  bare context and fails.
+- `jj --ignore-working-copy sparse set` is refused ("This command must be
+  able to update the working copy") — the gitignore-overwrite approach
+  replaces it.
+
+Also verified on a fresh clone: `gws` + the seeded pre-remove hook work
+unchanged (hooks config comes from the cloned repo), and bd bootstrap
+recovers the db at the wrapper root with the right prefix.
