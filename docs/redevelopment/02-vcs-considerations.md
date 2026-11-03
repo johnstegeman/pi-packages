@@ -369,3 +369,29 @@ rex window rename). Three clone-specific findings, all handled:
 Also verified on a fresh clone: `gws` + the seeded pre-remove hook work
 unchanged (hooks config comes from the cloned repo), and bd bootstrap
 recovers the db at the wrapper root with the right prefix.
+
+**gclone bootstrap-config gap (2026-11-03, found on a real clone):** `bd
+bootstrap` recovers the dolt db under the **default name "beads"** (regardless
+of the source db's name) but writes **no `.beads/config.yaml` and no
+`metadata.json`** — bd then warns `no beads configuration found … using
+default database name "beads"` on commands (functionally consistent only
+because default == recovered name). Two wrong fixes were tested and rejected:
+
+- `bd init --init-if-missing` **mints a NEW dolt db named after the cwd**
+  (`main`/`<wrapper>`), writes metadata pointing at it, and leaves the
+  recovered db orphaned — exactly the pi-rex-incident damage class, made
+  invisible in an empty fixture db (caught by checking `embeddeddolt/`
+  contents + `bd dolt remote list`, which a fresh db answers with "No remotes
+  configured").
+- Writing the files BEFORE the jj block loses them: the default workspace's
+  snapshot absorbs wrapper files until it is sparse-cleared, and `jj sparse
+  set --clear` then **dematerializes (deletes) them** — verified step-by-step.
+
+The fix in gclone: after the jj block (default workspace inert — files
+persist, proven by the real clone), write `.beads/metadata.json`
+(`dolt_database: "beads"`) and a minimal `.beads/config.yaml` (`sync.remote`
+= the normalized remote) directly — `bd dolt set database` is server-mode-only,
+so hand-writing is the sanctioned path (the same edit was used to recover the
+pi-rex incident). Verified end-to-end: no warning, single db, remote wired,
+`bd sync` round-trips, canary issues carry the recovered prefix. Also fixed
+in place: the user's ~/tmp/pi-packages test clone.
