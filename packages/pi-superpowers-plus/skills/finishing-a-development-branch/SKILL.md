@@ -121,11 +121,41 @@ If there are any CI checks set up in Github, (eg in .github/workflows), you must
 them and re-run the checks before continuing. Do not create a PR until the checks succeed. If you
 cannot get the steps to succeed, stop and ask the user for advice.
 
+**PR shape — ask before pushing** (this applies to the detached-HEAD PR path
+too):
+
+```
+Which PR shape?
+
+1. All commits — the PR shows the branch's full history
+2. Squashed — the PR shows one clean commit for the whole change
+```
+
+For **all commits**, push the branch as-is. For **squashed**, collapse the
+branch to a single commit first — this rewrites the branch, so it must happen
+before the push and PR creation, never on an already-open PR:
+
+```bash
+BASE=$(git merge-base <base-branch> HEAD)
+git reset --soft "$BASE"
+git commit -m "<one message for the whole change>"
+```
+
+- Compose the single message from the whole change — subject from the
+  plan/spec or the branch's purpose, body for the why and the notable pieces —
+  and show it to your human partner before committing.
+- Only squash a branch no one else has based work on. The original commits
+  remain recoverable via the reflog.
+- If the branch was already pushed, the squashed push needs
+  `--force-with-lease` (never a bare `--force`).
+
+Then push:
 
 ```bash
 git push -u origin <feature-branch>
 # From a detached HEAD, name the new branch on the remote:
 # git push origin HEAD:refs/heads/<new-branch>
+# A previously-pushed branch that was just squashed needs --force-with-lease.
 ```
 
 Then create the pull/merge request against <base-branch> with the forge's
