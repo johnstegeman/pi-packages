@@ -139,7 +139,12 @@ hooks: copy-ignored + `.beads/redirect` + dev marker) and /tmp/bd-layout-test
 **Recommended workflow for the new repo (option 5):** wrapper layout (`repo/.git`
 bare + worktrees + `.beads` as siblings inside `repo/` — matches production and
 makes bd detection, the `{{ repo_path }}/../.beads` redirect template, and jj all
-agree); main worktree colocated; feature branches created via `jj bookmark` and
+agree); **one jj repo per directory** (backed by the wrapper's bare `.git` —
+   the documented bare-repo pattern; `main` is its colocated workspace, the
+   junk-collecting default workspace is forgotten); feature worktrees via
+   `jj workspace add --colocate` + manual `wt hook post-start` +
+   `jj bookmark create`/`set` + `git checkout` re-attach; work inside via jj;
+   subagent isolation via
 given worktrees via `wt switch <branch>`; work inside via jj; a `bookmark set` +
 `git checkout <branch>` re-attach step (wrap in a wt alias) keeps wt's
 branch-centric operations fully functional; subagent isolation via
@@ -262,3 +267,33 @@ placement check aborts before any remote/push step if the db did not land
 at the wrapper root. The function now lives at
 `~/.config/fish/functions/ginit.fish` (autoloaded). Also verified: https
 remote URIs work (bd normalizes to `git+https://`).
+
+**jj construction revised (2026-11-03, ginit v3):** the per-worktree
+`jj git init --colocate` step is REPLACED by the directory-level repo the
+user actually wanted (and the jj docs sanction: "Bare repositories: Yes. You
+can use `jj git init --git-repo=<path>` to create a repo backed by a bare
+Git repo"):
+
+1. `jj git init --git-repo .git .` at the wrapper — ONE jj repo per
+   directory, store at `<dir>/.jj/repo`, backed by the wrapper's bare `.git`.
+2. `jj workspace add --colocate main` — main becomes a git worktree +
+   **colocated jj workspace of the directory repo** (the nested-workspace
+   warning at this step is expected and benign — see 3).
+3. `jj workspace forget default` — MUST run AFTER the add (forgetting
+   before does not stick: with no current workspace, `jj workspace add`
+   recreates a default). The default workspace's working copy is the
+   wrapper dir itself and would snapshot every sibling worktree as junk;
+   forgetting it also makes later `jj workspace add` calls warning-free.
+4. `git -C main checkout main` — attach HEAD (wt-friendly branch view).
+5. `wt -C main -y hook post-start` — jj (not wt) created the worktree, so
+   wt's hooks must run manually (idempotent).
+
+Verified end-to-end (fixture + full ginit run): workspace list shows only
+`main`; `jj` from the wrapper root answers "No working copy." (clean, honest);
+future `jj workspace add --colocate <dir>/<name>` joins the SAME repo (one
+op-log, `jj workspace list` visibility, shared git store). **Workflow
+consequence:** feature worktrees are created by jj, not wt — the flow is
+`jj workspace add --colocate` → `wt hook post-start` → `jj bookmark
+create/set` → `git checkout` — wt's role becomes listing/removing worktrees
+and running hooks on demand (path-based), since worktrees wt creates itself
+would have no jj workspace.
