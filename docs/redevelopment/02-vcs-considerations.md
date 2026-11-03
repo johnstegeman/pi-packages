@@ -311,3 +311,35 @@ later) and the only post-start hook is `copy-ignored`. pmm-iris (which used
 redirect + ignore-the-whole-.beads) is being updated by the user to match:
 drop the `beads` hook from `.config/wt.toml`, delete worktree `.beads/`
 dirs, keep the `.gitignore` `.beads/` line.
+
+**Default workspace hardened + automation closed (2026-11-03, ginit v6/v8):**
+
+- **`jj workspace forget default` was WRONG** — a forgotten default gets
+  resurrected by any stray jj command run from a non-workspace dir (e.g. a
+  plain git worktree, or an agent cd-ing around), and the resurrection
+  junk-snapshots the wrapper (including `.beads` internals) into `@`. Fix:
+  never forget it — make it inert: `jj sparse set --clear` (snapshots see
+  nothing) + `jj new "root()" -m …` (re-parent its `@` onto the root so
+  strays show "no changes" instead of deletion noise). Ordering is critical:
+  the clear runs AFTER `workspace add main` (new workspaces inherit the
+  current workspace's sparse patterns — main must inherit the full set), and
+  `root()` must be quoted in fish (fish treats `(…)` as command substitution
+  — an unquoted `root()` silently runs as `jj new -m …` with no revision;
+  diagnosed via `jj op log`). Stray-jj attacks from non-workspace dirs are
+  now fully contained (verified).
+- **wt hooks CANNOT create jj workspaces** — two hard blockers, both tested:
+  `jj workspace add --colocate` refuses an existing worktree ("Destination
+  path exists and is not an empty directory"), so a post-start hook can't
+  adopt a wt-created worktree; and wt refuses to switch to a pre-existing
+  detached worktree ("there's a detached worktree at the expected path"), so
+  a pre-start hook that jj-creates first blocks wt.
+- **wt hooks CAN remove them** — ginit seeds `[pre-remove]` `jj = "jj
+  workspace forget {{ branch }} 2>/dev/null || true"` (template vars verified;
+  the guard keeps non-jj worktrees removable). `wt remove <name>` now cleans
+  up both sides.
+- **Creation automation is the `gws` fish function**
+  (`~/.config/fish/functions/gws.fish`): finds the wrapper, runs `jj workspace
+  add --colocate` FROM MAIN (full sparse inheritance; the sparse-cleared
+  default must never be the context), `git checkout -b <name>` (branch +
+  attach), `wt hook post-start` (hooks). Full lifecycle tested: `gws feature5`
+  → work → `wt remove feature5` → workspace forgotten + worktree gone.
