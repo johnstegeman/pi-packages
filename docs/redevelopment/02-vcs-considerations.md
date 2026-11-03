@@ -333,10 +333,20 @@ dirs, keep the `.gitignore` `.beads/` line.
   adopt a wt-created worktree; and wt refuses to switch to a pre-existing
   detached worktree ("there's a detached worktree at the expected path"), so
   a pre-start hook that jj-creates first blocks wt.
-- **wt hooks CAN remove them** — ginit seeds `[pre-remove]` `jj = "jj
-  workspace forget {{ branch }} 2>/dev/null || true"` (template vars verified;
-  the guard keeps non-jj worktrees removable). `wt remove <name>` now cleans
-  up both sides.
+- **wt hooks CAN remove them — but only as a POST-remove hook.** The first
+  attempt used `[pre-remove]`, which SABOTAGES wt's own cleanup: `jj
+  workspace forget` unregisters the git worktree first, so wt then hits its
+  safety check ("Directory … does not hold the worktree registered there"),
+  refuses to delete the directory, and skips the branch cleanup — the
+  registration was gone but the directory and branch were left behind (missed
+  by earlier checks that only verified the registration). The correct seed is
+  `[post-remove]` `jj = "jj workspace forget {{ branch }} 2>/dev/null || true"`
+  — wt completes its own removal (directory + branch-if-merged +
+  registration), then the hook cleans the jj registry. Verified with full
+  checks: merged/no-commit worktrees remove everything (dir/branch/reg/jj all
+  clean); unmerged worktrees retain the branch (work preserved) with dir,
+  registration, and jj workspace all cleaned. The `|| true` guard keeps
+  non-jj worktrees removable.
 - **Creation automation is the `gws` fish function**
   (`~/.config/fish/functions/gws.fish`): finds the wrapper, runs `jj workspace
   add --colocate` FROM MAIN (full sparse inheritance; the sparse-cleared
